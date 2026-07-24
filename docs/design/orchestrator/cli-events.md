@@ -69,8 +69,9 @@ the actual per-event callback that prints the projection — pass its result
 directly to Tier-1/2 `run_agent(on_event=...)`, or wrap it in a lambda for Tier-3
 `build_flow(on_event_factory=...)`), and `print_results_table(results)` (the
 end-of-run stage → outcome table). The examples use Typer commands with
-`--show-events/-v`. `rich`/`typer` are an optional extra, imported lazily — the
-core is render-agnostic without them.
+`--show-events/-v`. `rich`/`typer` are core dependencies, but the engine core
+stays render-agnostic: it emits `Event`s and returns status dicts, and only the
+`cli` module turns those into terminal output.
 
 ## Where it lives
 

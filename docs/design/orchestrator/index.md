@@ -63,9 +63,11 @@ signal). Everything else the agent emits is opaque. See
    — never rules an LLM must remember. ("Graph, not a loop.")
 2. **Agents are unchanged.** Existing opencode `.md` agents keep their identity
    and are invoked as-is (`opencode run --agent <name>`).
-3. **Dependency-light core.** The engine core has no heavy runtime deps; Prefect
-   is imported lazily, and `rich`/`typer`/`pydantic` are optional extras never
-   imported by the core.
+3. **One core dependency set.** All runtime deps (Prefect, pydantic,
+   pydantic-settings, typer, rich, pyyaml, jsonschema) ship by default — there
+   are no optional runtime extras. Prefect already dominates the footprint, so
+   splitting the rest into extras only bought optional-import branching. Prefect
+   is still imported lazily inside `build_flow` (import speed, not optionality).
 4. **Swappable seams, shared everything else.** Three things may change behind
    thin adapters — the **execution backend** (Prefect vs …), the **agent
    runtime** (opencode vs Claude Code, via `AgentRunner`), and the **pipeline**

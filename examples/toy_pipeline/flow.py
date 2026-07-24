@@ -369,14 +369,47 @@ def run(
     show_events: bool = typer.Option(False, "--show-events", "-v", help="stream live agent events (tool calls, messages)"),
 ) -> None:
     """Run the pipeline. Prefect INFO logs are the diagnostics; --show-events adds
-    a human-facing live view of what each agent is doing."""
-    from agent_flow.cli import get_console, print_results_table
+    a human-facing live view of what each agent is doing.
 
-    result = pipeline(topic=topic, run_dir=run_dir, runtime=runtime, force=force, llm_concurrency=llm_concurrency, show_events=show_events)
+    Tier-2 note: this flow owns its own shape, so it keeps its own typer command
+    (for the Tier-2-specific --topic/--force). But it REUSES the library's shared
+    building blocks rather than re-implementing them: `build_run_config` resolves
+    the generic knobs (runtime/run_dir/… via env AGENT_FLOW_*/.env too), and
+    `preflight` gates the run before any agent spawns — exactly what run_cli does
+    for Tier-3 flows.
+    """
+    import sys
+
+    from agent_flow import preflight
+    from agent_flow.cli import get_console, print_preflight_results, print_results_table
+    from agent_flow.run_config import build_run_config
+
+    console = get_console()
+    # Generic run settings via the shared settings machinery (CLI > env > .env > default).
+    cfg = build_run_config(
+        runtime=runtime,
+        run_dir=run_dir or None,
+        llm_concurrency=llm_concurrency,
+        show_events=True if show_events else None,
+    )
+    # Same pre-flight gate as run_cli: fail fast before spawning any agent.
+    results = preflight.check(cfg.runtime, str(_PACKAGE_DIR))
+    if preflight.fatal_failures(results):
+        print_preflight_results(results, title="Pre-flight checks (run aborted)", console=console)
+        sys.exit(2)
+
+    result = pipeline(
+        topic=topic,
+        run_dir=cfg.run_dir,
+        runtime=cfg.runtime,
+        force=force,
+        llm_concurrency=cfg.llm_concurrency or 3,
+        show_events=cfg.show_events,
+    )
     # The toy pipeline returns the final extractor control record; show it as a
     # small status line rather than a raw JSON dump.
     print_results_table(
-        {"final agent": result.get("agent", "?"), "status": result.get("status", "?")}, title=f"toy pipeline — {topic}", console=get_console()
+        {"final agent": result.get("agent", "?"), "status": result.get("status", "?")}, title=f"toy pipeline — {topic}", console=console
     )
 
 

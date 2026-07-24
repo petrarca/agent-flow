@@ -1,56 +1,127 @@
-"""Run configuration — a unified way to supply run settings + params.
+"""Run configuration — the CLI's own settings, as a pydantic-settings model.
 
 A pipeline run needs two kinds of input:
 
   - GENERIC run settings the library understands: runtime, run_dir, agent_dir,
-    instructions, llm_concurrency, show_events.
-  - DOMAIN params (arbitrary, consumer-defined): e.g. product_key, repos_root —
-    the library attaches NO meaning to these; they are threaded to
-    pipeline(**params) and used for {name} templating in inputs/context/paths.
+    instructions, llm_concurrency, show_events. THIS module owns them, as the
+    `RunConfig` settings model below.
+  - DOMAIN params (arbitrary, consumer-defined): e.g. product_key, repos_root.
+    Those live in a SEPARATE, flow-supplied settings model (see run_cli's
+    `params_model`); the library attaches no meaning to them. They are threaded
+    to pipeline(**params) and used for {name} templating in inputs/context/paths.
 
-Both can come from a YAML config file (generic keys at top level, a `params:`
-section for the domain values) OR from CLI flags. This module is the pure core:
-loading/merging config. The reusable Typer command lives in cli.run_cli.
+`RunConfig` is a `pydantic_settings.BaseSettings`. It resolves values from,
+in decreasing precedence:
 
-Example config (run.yml):
+  1. CLI overrides      — init kwargs from the CLI flags (build_run_config drops
+                          None so an unset flag does not clobber lower sources)
+  2. environment        — AGENT_FLOW_* variables (e.g. AGENT_FLOW_RUNTIME)
+  3. .env file          — same AGENT_FLOW_* names
+  4. YAML --config file  — generic keys at the top level (a `params:` section is
+                          ignored here; the domain model reads it)
+  5. field defaults
 
-    runtime: opencode
-    run_dir: "{repos_root}/{product_key}/output"
-    agent_dir: /work/pipelines/tech-assessment
-    llm_concurrency: 2
-    instructions: |
-      Experimental code-graph support is available; use it alongside RAG.
-    params:
-      product_key: my-product
-      repos_root: /tmp/repos
+This precedence is expressed via `settings_customise_sources`. The generic
+settings use the `AGENT_FLOW_` env prefix so they never collide with a flow's
+bare-named domain params (product_key, product_repos_root, …).
 
-There is deliberately no "product" (or any domain) concept here — `params` is an
-open bag.
+Access follows the house pattern (as in coco-rag / sonnet-server): an lru_cache
+singleton via `get_settings()`, installed by `init_settings(...)`, reset in tests
+by `clear_settings()`. `build_run_config(...)` is the pure constructor.
+
+There is deliberately no "product" (or any domain) concept here.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-# The generic run settings the library knows (everything else in a config file's
-# top level that isn't one of these, and isn't `params`, is rejected as a typo).
+from pydantic import Field
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    YamlConfigSettingsSource,
+)
+
+# The generic run settings the library knows. Anything else at a YAML config's
+# top level (that is not one of these and not `params`) is a typo -> rejected.
 _GENERIC_KEYS = ("runtime", "run_dir", "agent_dir", "instructions", "instructions_file", "llm_concurrency", "show_events")
 
 
-@dataclass
-class RunConfig:
-    """Resolved run configuration: generic settings + an open `params` bag."""
+def _validate_yaml_top_level(path: Path) -> None:
+    """Reject unknown top-level keys in a --config YAML (fail loudly on typos)."""
+    import yaml
 
-    runtime: str = "opencode"
-    run_dir: str = ""  # empty -> a fresh temp dir is created at run time
-    agent_dir: str = ""
-    instructions: str = ""
-    instructions_file: str = ""
-    llm_concurrency: int | None = None
-    show_events: bool = False
-    params: dict[str, Any] = field(default_factory=dict)
+    data = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"run config {path} must be a mapping at the top level")
+    unknown = set(data) - set(_GENERIC_KEYS) - {"params"}
+    if unknown:
+        raise ValueError(f"{path}: unknown config keys {sorted(unknown)} (allowed: {list(_GENERIC_KEYS)} + params)")
+
+
+class RunConfig(BaseSettings):
+    """Resolved generic run configuration (the library's own CLI settings).
+
+    Domain params are NOT here — they belong to a flow-supplied settings model.
+    Env vars use the AGENT_FLOW_ prefix (e.g. AGENT_FLOW_RUN_DIR).
+
+    Pass a YAML config path via the `_config_file` init kwarg (the CLI does this
+    for `--config`); it is read as the lowest-priority source below defaults-from
+    -code but above field defaults.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="AGENT_FLOW_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    runtime: str = Field(default="opencode", description="Agent runtime: 'opencode' (real) or 'mock' (no-token stub).")
+    run_dir: str = Field(default="", description="Control-sidecar + relative-artifact root. Empty -> a fresh temp dir per run.")
+    agent_dir: str = Field(default="", description="Where agent definitions live (opencode --dir); becomes the subprocess cwd.")
+    instructions: str = Field(default="", description="Run-wide brief injected into every agent prompt (inline text).")
+    instructions_file: str = Field(default="", description="Path to a file whose content is the run-wide brief (wins over `instructions`).")
+    llm_concurrency: int | None = Field(default=None, description="Max concurrent LLM agents; None -> engine default.")
+    show_events: bool = Field(default=False, description="Stream live agent events to the console.")
+
+    # The YAML --config path for the current construction. Stashed on the class
+    # by __init__ so the settings_customise_sources CLASSMETHOD (which sees only
+    # settings_cls, not the instance) can build a source for it. Not thread-safe
+    # by construction, which is fine: the CLI builds a RunConfig once per process.
+    _af_config_file: str | Path | None = None
+
+    def __init__(self, _config_file: str | Path | None = None, **kwargs: Any) -> None:
+        # Validate the YAML's top-level keys up front (loud failure on typos),
+        # then stash the path for settings_customise_sources and build.
+        if _config_file:
+            _validate_yaml_top_level(Path(_config_file))
+        type(self)._af_config_file = _config_file
+        try:
+            super().__init__(**kwargs)
+        finally:
+            type(self)._af_config_file = None
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        config_file = getattr(settings_cls, "_af_config_file", None)
+        # Precedence (first wins): CLI/init > env > .env > YAML config > defaults.
+        sources: tuple[PydanticBaseSettingsSource, ...] = (init_settings, env_settings, dotenv_settings)
+        if config_file:
+            sources = (*sources, YamlConfigSettingsSource(settings_cls, yaml_file=config_file))
+        return sources
 
     def resolved_instructions(self) -> str:
         """The run-wide brief: instructions_file content if given, else instructions."""
@@ -59,36 +130,57 @@ class RunConfig:
         return self.instructions
 
 
-def load_run_config(path: str | Path) -> RunConfig:
-    """Load a RunConfig from a YAML file (generic keys + a `params:` section).
+def build_run_config(config_file: str | Path | None = None, **cli_overrides: Any) -> RunConfig:
+    """Construct a RunConfig from the source stack, honoring the precedence chain.
 
-    Unknown top-level keys (not a generic key and not `params`) raise ValueError —
-    a mis-typed setting should fail loudly, not be silently ignored.
+    Args:
+        config_file: optional YAML `--config` path (lowest explicit source).
+        **cli_overrides: generic settings set on the CLI. A None value means "not
+            set on the CLI" and is dropped so a lower-priority source (env / .env
+            / YAML / default) wins — otherwise a None init kwarg would clobber it.
+
+    Precedence (first wins): CLI overrides > env (AGENT_FLOW_*) > .env > YAML > default.
     """
-    import yaml
-
-    data = yaml.safe_load(Path(path).read_text()) or {}
-    if not isinstance(data, dict):
-        raise ValueError(f"run config {path} must be a mapping at the top level")
-    return _from_dict(data, source=str(path))
+    init_kwargs = {k: v for k, v in cli_overrides.items() if v is not None}
+    return RunConfig(_config_file=config_file, **init_kwargs)
 
 
-def _from_dict(data: dict[str, Any], *, source: str) -> RunConfig:
-    params = data.get("params", {}) or {}
-    if not isinstance(params, dict):
-        raise ValueError(f"{source}: `params` must be a mapping")
-    unknown = set(data) - set(_GENERIC_KEYS) - {"params"}
-    if unknown:
-        raise ValueError(f"{source}: unknown config keys {sorted(unknown)} (allowed: {list(_GENERIC_KEYS)} + params)")
-    known = {k: data[k] for k in _GENERIC_KEYS if k in data}
-    return RunConfig(params=dict(params), **known)
+# --- Global settings lifecycle (house pattern: lru_cache singleton) ---------
+
+_settings_override: RunConfig | None = None
+
+
+def init_settings(config_file: str | Path | None = None, **cli_overrides: Any) -> RunConfig:
+    """Build the RunConfig and install it as the process-wide singleton."""
+    global _settings_override
+    _settings_override = build_run_config(config_file, **cli_overrides)
+    _get_settings_cached.cache_clear()
+    return get_settings()
+
+
+def get_settings() -> RunConfig:
+    """Return the process-wide RunConfig (cached; built from env/.env if not init'd)."""
+    return _get_settings_cached()
+
+
+@lru_cache(maxsize=1)
+def _get_settings_cached() -> RunConfig:
+    return _settings_override if _settings_override is not None else RunConfig()
+
+
+def clear_settings() -> None:
+    """Reset the settings singleton — for testing only."""
+    global _settings_override
+    _settings_override = None
+    _get_settings_cached.cache_clear()
 
 
 def parse_params(items: list[str] | None) -> dict[str, str]:
     """Parse repeatable `KEY=VALUE` CLI strings into a params dict.
 
-    Values stay strings (they feed {name} templating). `KEY=` yields "". A
-    missing `=` raises ValueError (so `--param foo` fails loudly).
+    Values stay strings (they feed a domain settings model and {name} templating).
+    `KEY=` yields "". A missing `=` raises ValueError (so `--param foo` fails
+    loudly).
     """
     out: dict[str, str] = {}
     for item in items or []:
@@ -100,18 +192,3 @@ def parse_params(items: list[str] | None) -> dict[str, str]:
             raise ValueError(f"--param has empty key: {item!r}")
         out[key] = value
     return out
-
-
-def merge(base: RunConfig, *, cli_overrides: dict[str, Any], cli_params: dict[str, str]) -> RunConfig:
-    """Merge CLI over a file-loaded config. Precedence: CLI > file > default.
-
-    cli_overrides: generic settings explicitly set on the CLI (None = not set, so
-        the file/default wins). cli_params: --param KEY=VALUE (override file params
-        per key).
-    """
-    merged = RunConfig(**{f.name: getattr(base, f.name) for f in fields(base)})
-    merged.params = {**base.params, **cli_params}
-    for key, val in cli_overrides.items():
-        if val is not None:
-            setattr(merged, key, val)
-    return merged

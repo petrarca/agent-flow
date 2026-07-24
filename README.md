@@ -70,8 +70,9 @@ configured with model access.
 task install            # editable install with dev tools
 ```
 
-Optional extras: `agent-flow[pydantic]` (typed result output),
-`agent-flow[cli]` (live-event view + rich tables via typer/rich).
+All runtime dependencies (Prefect, pydantic, pydantic-settings, typer, rich,
+pyyaml, jsonschema) are installed by default — there are no optional runtime
+extras. Only `agent-flow[dev]` adds the development toolchain (ruff, pytest, …).
 
 ## Run the examples
 
@@ -87,9 +88,11 @@ task example:tech      PRODUCT=my-product RUNTIME=opencode \
 ```
 
 The tech example uses the library's reusable CLI (`agent_flow.run_cli`): generic
-flags + arbitrary domain params via `-p/--param KEY=VALUE`, or a `--config`
-YAML file. There is no built-in `--product` option — `--param` is the generic
-protocol for all domain values:
+flags + domain params via `-p/--param KEY=VALUE`, or a `--config` YAML file. It
+passes a `params_model` (a pydantic-settings class) so domain params are typed
+and required-checked — a missing `-p product_key=…` fails fast (exit 2) before
+any agent runs. There is no built-in `--product` option — `--param` is the
+generic protocol for all domain values:
 
 ```bash
 uv run --with prefect python -m examples.tech_assessment.tech_flow \
@@ -137,8 +140,10 @@ src/agent_flow/          the library
   batteries.py           agent_node — the one-call node
   gates.py               Directive / GateContext + ready gates
   control_protocol.py    the injected completion protocol (control-file contract)
-  schema.py              result-schema seam (typed output; Pydantic optional)
-  cli.py                 event projection + rich tables (cli extra)
+  schema.py              result-schema seam (typed agent output)
+  run_config.py          RunConfig settings (pydantic-settings) + build_run_config
+  preflight.py           runtime pre-flight checks (opencode/agent_dir/prefect)
+  cli.py                 run_cli + event projection + rich tables
   env.py / _prefect_env.py  .env loading; Prefect bootstrap (embedded/file/server)
 examples/
   toy_pipeline/          Tier 2 demo (hand-written flow)

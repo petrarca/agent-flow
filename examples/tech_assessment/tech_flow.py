@@ -42,6 +42,9 @@ bootstrap()
 
 from pathlib import Path  # noqa: E402
 
+from pydantic import Field  # noqa: E402
+from pydantic_settings import BaseSettings, SettingsConfigDict  # noqa: E402
+
 from agent_flow import agent_node  # noqa: E402
 from agent_flow.engine import Node  # noqa: E402
 from agent_flow.gates import require_file, rerun_on_signal  # noqa: E402
@@ -56,17 +59,11 @@ LLM_TAG = "llm"
 def _tech_stack_schema():
     """Demo of TYPED agent output on the tech-stack node (optional, consumer-owned).
 
-    Prefer a Pydantic model when the extra is present; else a plain JSON-schema
-    dict — both drive the same seam. Only attached to the tech-stack analyst.
+    Pydantic is a core dependency, so a `PydanticSchema` is used directly (a plain
+    JSON-schema dict would drive the same seam if preferred). Only attached to the
+    tech-stack analyst.
     """
-    try:
-        from pydantic import BaseModel
-    except ImportError:
-        return {
-            "type": "object",
-            "properties": {"summary": {"type": "string"}, "languages": {"type": "array", "items": {"type": "string"}}},
-            "required": ["summary", "languages"],
-        }
+    from pydantic import BaseModel
 
     from agent_flow.schema_pydantic import PydanticSchema
 
@@ -136,16 +133,43 @@ def build_tech_nodes() -> list[Node]:
     return [node for stage in STAGES for node in _nodes_for(stage)]
 
 
+class TechParams(BaseSettings):
+    """Typed, REQUIRED domain params for this pipeline (a flow-supplied model).
+
+    This is the recommended way a flow declares its parameters: required = no
+    default (a missing `-p product_key=…` fails fast, exit 2), and types/paths are
+    validated. The field names match the `{name}` templates used in the node
+    inputs (`{product_key}`, `{repos_root}`), so the validated values flow through
+    unchanged. Bare env names (PRODUCT_KEY, REPOS_ROOT) and .env are honored too.
+
+    Passed to run_cli(params_model=TechParams). Omit params_model to accept raw
+    untyped -p values instead (as the toy example does).
+    """
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore")
+
+    product_key: str = Field(description="Product identifier under repos_root (required).")
+    # A real pipeline could use pydantic's DirectoryPath to require an existing
+    # dir; kept as str here so the mock/demo runs without a real repos tree.
+    repos_root: str = Field(default="/tmp/repos", description="Root holding the product repos.")
+
+
 def main() -> None:
     # The whole CLI is the library's reusable runner: generic flags + --config +
-    # -p/--param for domain values. This example adds NO bespoke CLI — a run is:
+    # -p/--param for domain values, validated against TechParams. A run is:
     #   ... tech_flow -p product_key=my-product -p repos_root=/tmp/repos --runtime mock
-    # or a config file:  ... tech_flow --config run.yml
-    # Domain params (product_key, repos_root) are referenced in the node inputs;
-    # the library attaches no meaning to them.
+    # A missing required param (e.g. no product_key) fails fast (exit 2) before any
+    # agent is spawned. The validated values are referenced in the node inputs via
+    # {product_key}/{repos_root} templating.
     from agent_flow.cli import run_cli
 
-    run_cli(build_tech_nodes, name="tech-assessment-simplified", llm_tag=LLM_TAG, default_agent_dir=_PACKAGE_DIR)
+    run_cli(
+        build_tech_nodes,
+        name="tech-assessment-simplified",
+        llm_tag=LLM_TAG,
+        default_agent_dir=_PACKAGE_DIR,
+        params_model=TechParams,
+    )
 
 
 if __name__ == "__main__":

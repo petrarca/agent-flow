@@ -25,35 +25,57 @@ def main() -> None:
 `run_cli` provides a unified CLI:
 
 ```bash
-# generic settings as flags + arbitrary DOMAIN params via -p/--param KEY=VALUE:
+# generic settings as flags + DOMAIN params via -p/--param KEY=VALUE:
 python -m my_pkg.flow -p product_key=my-product -p repos_root=/tmp/repos \
     --runtime opencode --run-dir "{repos_root}/{product_key}/output" -i "use code-graph"
 
-# or put it all in a YAML config file:
-python -m my_pkg.flow --config run.yml
+# or put the generic settings in a YAML config file:
+python -m my_pkg.flow --config run.yml -p product_key=my-product
 ```
 
 ```yaml
-# run.yml — generic settings at top level, a params: section for domain values
+# run.yml — generic run settings (the lowest explicit source)
 runtime: opencode
 run_dir: "{repos_root}/{product_key}/output"
 agent_dir: /work/pipelines/tech-assessment
 llm_concurrency: 2
 instructions: |
   Experimental code-graph support is available; use it alongside RAG.
-params:              # arbitrary — the library has no domain concepts
-  product_key: my-product
-  repos_root: /tmp/repos
 ```
 
-Precedence: **CLI flag > config file > default**. `params` are passed to
-`pipeline(**params)` and are usable as `{name}` templates in `inputs`, `context`,
-and paths — so `-p product_key=my-product` makes `{product_key}` resolve
-everywhere. There is no `--product` option (or any domain option) built in;
-`--param` is the generic protocol for all of them.
+**Generic settings** resolve via `RunConfig` (a pydantic-settings model) with
+precedence **CLI flag > env `AGENT_FLOW_*` > `.env` > `--config` YAML > default**.
+
+**Domain params** are passed to `pipeline(**params)` and are usable as `{name}`
+templates in `inputs`, `context`, and paths — so `-p product_key=my-product`
+makes `{product_key}` resolve everywhere. There is no `--product` option built
+in; `--param` is the generic protocol for all of them.
+
+### Typed, required domain params (`params_model`)
+
+Pass a pydantic-settings class to declare which params are required and validate
+their types before any agent runs:
+
+```python
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class MyParams(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    product_key: str                        # required — no default
+    repos_root: str = Field(default="/tmp/repos")
+
+run_cli(build_nodes, name="my-pipeline", params_model=MyParams)
+```
+
+Domain params resolve **`-p` > bare env / `.env` > model default** and are
+validated: a missing required param (or a bad value) fails fast with exit code 2
+**before** any agent is spawned. Omit `params_model` to accept raw untyped `-p`
+values (the historical behavior).
 
 Prefer your own CLI? `run_cli` is optional — build any CLI you like and call
-`build_flow(...)` / `pipeline(**params)` directly.
+`build_flow(...)` / `pipeline(**params)` directly (see the toy example, which
+reuses `build_run_config` and `preflight` in its own Tier-2 CLI).
 
 ## Check that a step actually produced its file
 
@@ -211,8 +233,6 @@ In short: **the dict is always in `result`; `_result_obj` is the model if you
 gave one, else `None`.**
 
 ## See what an agent is doing live
-
-Requires the `cli` extra (`pip install agent-flow[cli]`):
 
 ```python
 from agent_flow.cli import event_printer, get_console

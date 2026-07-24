@@ -18,22 +18,29 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 dynamic = ["version"]
+# One dependency set. The core already hard-depends on Prefect (which dominates
+# the install footprint by an order of magnitude), so keeping pydantic / typer /
+# rich / pyyaml / jsonschema as separate extras earned nothing but optional-import
+# branching. They are all first-class now:
+#   - pydantic + pydantic-settings: typed agent `result` payloads AND the CLI's
+#     typed run-parameters model (declared, required-checked, path-validated).
+#   - typer + rich + pyyaml: the reusable run_cli (flags, --config, --param) and
+#     human-facing output (live events, status tables).
+#   - jsonschema: validation of plain-dict result schemas.
 dependencies = [
     "prefect>=3.0.0",
     "python-dotenv>=1.0.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "typer>=0.12",
+    "rich>=13.0",
+    "pyyaml>=6.0",
+    "jsonschema>=4.0",
 ]
 
 [project.optional-dependencies]
-# Typed agent `result` payloads via a Pydantic model (PydanticSchema adapter).
-# Optional: the core result-schema seam works with plain JSON-schema dicts and
-# stays runtime-agnostic without this.
-pydantic = ["pydantic>=2.0"]
-# Nice human-facing CLI output (live events, status tables) + the reusable
-# run_cli (config file + --param). Optional: the core is render/CLI-agnostic.
-cli = ["typer>=0.12", "rich>=13.0", "pyyaml>=6.0"]
-# `jsonschema` powers validation of plain-dict schemas (JsonSchema); optional at
-# runtime (advisory if absent), but installed for dev so tests can validate.
-dev = ["ruff", "pytest", "pytest-cov", "pre-commit", "setuptools-scm", "pydantic>=2.0", "jsonschema>=4.0", "typer>=0.12", "rich>=13.0", "pyyaml>=6.0"]
+# Only development tooling is optional now.
+dev = ["ruff", "pytest", "pytest-cov", "pre-commit", "setuptools-scm"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

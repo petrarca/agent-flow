@@ -46,7 +46,7 @@ from agent_flow.agent_runtime import (
     run_agent,
 )
 from agent_flow.batteries import agent_node, control_path
-from agent_flow.cli import event_printer, get_console, print_results_table, run_cli
+from agent_flow.cli import event_printer, get_console, print_preflight_results, print_results_table, run_cli
 from agent_flow.context import read_context_blocks
 from agent_flow.control_protocol import build_control_preamble
 from agent_flow.engine import (
@@ -70,8 +70,16 @@ from agent_flow.gates import (
     require_file,
     rerun_on_signal,
 )
+from agent_flow.preflight import Check, check, fatal_failures
 from agent_flow.report_signals import produced, rerun_from_sidecar
-from agent_flow.run_config import RunConfig, load_run_config, parse_params
+from agent_flow.run_config import (
+    RunConfig,
+    build_run_config,
+    clear_settings,
+    get_settings,
+    init_settings,
+    parse_params,
+)
 from agent_flow.runners import (
     AgentInvocation,
     AgentRunner,
@@ -103,9 +111,13 @@ __all__ = [
     "event_printer",
     "get_console",
     "print_results_table",
+    "print_preflight_results",
     "run_cli",
     "RunConfig",
-    "load_run_config",
+    "build_run_config",
+    "get_settings",
+    "init_settings",
+    "clear_settings",
     "parse_params",
     "resolve_run_dir",
     "default_temp_base",
@@ -141,6 +153,10 @@ __all__ = [
     # signals
     "produced",
     "rerun_from_sidecar",
+    # pre-flight checks
+    "Check",
+    "check",
+    "fatal_failures",
     # env
     "load_env",
 ]

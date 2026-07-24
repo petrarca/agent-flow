@@ -18,11 +18,13 @@ Requires Python 3.14+ and [`uv`](https://docs.astral.sh/uv/). For real (not
 mock) runs, `opencode` must be on `PATH` and configured with model access.
 
 ```bash
-uv add "agent-flow @ git+https://github.com/…/agent-flow"   # or your internal index
-# optional extras:
-uv add "agent-flow[cli]"       # live-event view + rich tables
-uv add "agent-flow[pydantic]"  # typed agent result output
+uv add "agent-flow @ git+https://github.com/petrarca/agent-flow"   # or your internal index
 ```
+
+All runtime dependencies (Prefect, pydantic, pydantic-settings, typer, rich,
+pyyaml, jsonschema) install by default — there are no optional runtime extras.
+The reusable CLI, typed result output, and typed run-parameter models all work
+out of the box.
 
 (If you're working inside this repo instead of consuming it as a dependency,
 see the root [`README.md`](../../README.md) for `task install`.)
