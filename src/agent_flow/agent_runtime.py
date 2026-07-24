@@ -260,7 +260,7 @@ def run_agent(
     instructions: str = "",
     env_extra: dict[str, str] | None = None,
     control_file: Path | None = None,
-    result_schema: ResultSchema | dict | None = None,
+    result_schema: ResultSchema | dict | type | None = None,
     on_event: Callable[[Event], None] | None = None,
     shared_instructions: str = "",
     shared_context: str = "",
@@ -299,9 +299,9 @@ def run_agent(
             agents; opencode ignores this — identity is in its .md).
         env_extra: extra env vars.
         control_file: path to the agent's status sidecar JSON — the verdict.
-        result_schema: optional ResultSchema | JSON-schema dict for the agent's
-            `result` payload; injected into the prompt and validated (attached,
-            never raised).
+        result_schema: optional ResultSchema | JSON-schema dict | pydantic
+            BaseModel subclass for the agent's `result` payload; injected into the
+            prompt and validated (attached, never raised).
         on_event: optional callback invoked with each live runner Event, for
             display. The engine ignores it for supervision; display errors are
             swallowed so they can never disrupt the run.

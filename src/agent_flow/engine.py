@@ -99,9 +99,10 @@ class Node:
     criticality    'blocking' -> failure/Stop raises NodeBlocked (halts run);
                    'degrade'  -> failure is recorded as 'degraded', run continues.
     max_cycles     per-node bound on Restart / self-GoTo re-runs.
-    result_schema  optional ResultSchema | JSON-schema dict for the agent's
-                   `result` payload. The run callable passes it to run_agent,
-                   which injects it into the prompt and validates the output.
+    result_schema  optional ResultSchema | JSON-schema dict | pydantic BaseModel
+                   subclass for the agent's `result` payload. The run callable
+                   passes it to run_agent, which injects it into the prompt and
+                   validates the output.
     agent          optional INFORMAL display label: the agent this node runs.
                    Purely cosmetic — the engine never uses it for logic (a node's
                    work is its `run` callable). Set automatically by agent_node;

@@ -112,8 +112,9 @@ def agent_node(
         depends_on / parallel_group / criticality / max_cycles: DAG wiring +
             flow-control knobs (see engine.Node).
         gate: optional consumer gate (see gates). Absent means always Continue.
-        result_schema: optional ResultSchema | JSON-schema dict for the agent's
-            `result` payload (injected + validated, never fails the run).
+        result_schema: optional ResultSchema | JSON-schema dict | pydantic
+            BaseModel subclass for the agent's `result` payload (injected +
+            validated, never fails the run).
         model / idle_timeout_s: per-node runtime overrides.
         agent_dir: optional per-node override of where agent DEFINITIONS live
             (opencode `--dir`). Defaults to the flow's build_flow(agent_dir=...).

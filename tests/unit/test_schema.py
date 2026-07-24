@@ -26,6 +26,20 @@ def test_coerce_rejects_bad_type():
         coerce_schema(42)
 
 
+def test_coerce_pydantic_model_class_wraps_pydanticschema():
+    from pydantic import BaseModel
+
+    from agent_flow.schema_pydantic import PydanticSchema
+
+    class R(BaseModel):
+        x: int
+
+    s = coerce_schema(R)
+    assert isinstance(s, PydanticSchema)
+    # produces the model's JSON schema for prompt injection
+    assert "properties" in s.to_json_schema()
+
+
 def test_jsonschema_valid():
     out = JsonSchema(_JSON_SCHEMA).validate({"summary": "x", "n": 3})
     assert out.valid is True

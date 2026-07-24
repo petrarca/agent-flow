@@ -32,6 +32,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+from pydantic import BaseModel
+
 
 @runtime_checkable
 class ResultSchema(Protocol):
@@ -87,11 +89,15 @@ class JsonSchema:
         return ValidationOutcome(valid=True)
 
 
-def coerce_schema(schema: ResultSchema | dict | None) -> ResultSchema | None:
+def coerce_schema(schema: ResultSchema | dict | type | None) -> ResultSchema | None:
     """Normalize the caller-supplied schema to a ResultSchema (or None).
 
-    Accepts a ResultSchema implementation, a raw JSON-schema dict (wrapped in
-    JsonSchema), or None (no schema).
+    Accepts:
+      - None -> no schema,
+      - a raw JSON-schema dict -> wrapped in JsonSchema,
+      - a pydantic BaseModel SUBCLASS -> wrapped in PydanticSchema (the common,
+        obvious case — pydantic is a core dependency),
+      - a ResultSchema implementation -> used as-is.
     """
     if schema is None:
         return None
@@ -99,4 +105,8 @@ def coerce_schema(schema: ResultSchema | dict | None) -> ResultSchema | None:
         return JsonSchema(schema)
     if isinstance(schema, ResultSchema):
         return schema
-    raise TypeError(f"result_schema must be a ResultSchema, a dict, or None — got {type(schema).__name__}")
+    if isinstance(schema, type) and issubclass(schema, BaseModel):
+        from agent_flow.schema_pydantic import PydanticSchema
+
+        return PydanticSchema(schema)
+    raise TypeError(f"result_schema must be a ResultSchema, a dict, a pydantic BaseModel subclass, or None — got {type(schema).__name__}")
