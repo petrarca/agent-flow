@@ -21,20 +21,19 @@ services:
     image: postgres:18
     container_name: prefect-postgres
     environment:
-      # LOCAL DEV ONLY — throwaway credentials for this self-contained compose
-      # stack (Postgres + Prefect server share one network, not exposed). NOT a
-      # real secret. For any shared/production deployment, override these with
-      # real values (e.g. via a .env file / secrets manager).
-      POSTGRES_USER: prefect
-      POSTGRES_PASSWORD: prefect
-      POSTGRES_DB: prefect
+      # LOCAL DEV defaults (throwaway; Postgres + server share one network, not
+      # exposed). Override for any shared/production deployment via a .env file
+      # or the environment — e.g. POSTGRES_PASSWORD=… docker compose up.
+      POSTGRES_USER: ${POSTGRES_USER:-prefect}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-prefect}
+      POSTGRES_DB: ${POSTGRES_DB:-prefect}
     volumes:
       # PG18 moved PGDATA to /var/lib/postgresql/18/docker (was .../data in PG<=17).
       - prefect-pgdata:/var/lib/postgresql
     ports:
       - "6543:5432"   # host 6543 -> container 5432 (avoid clashing with a local pg on 5432)
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U prefect -d prefect"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-prefect} -d ${POSTGRES_DB:-prefect}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -48,7 +47,7 @@ services:
     command: prefect server start --host 0.0.0.0 --port 4200
     environment:
       # Point the server at Postgres (the async driver URL Prefect expects).
-      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://prefect:prefect@postgres:5432/prefect
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://${POSTGRES_USER:-prefect}:${POSTGRES_PASSWORD:-prefect}@postgres:5432/${POSTGRES_DB:-prefect}
       # The API URL the UI advertises to browsers.
       PREFECT_UI_API_URL: http://localhost:4200/api
       PREFECT_SERVER_API_HOST: 0.0.0.0
