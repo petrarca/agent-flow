@@ -152,8 +152,14 @@ inputs/context/paths. To hand a value TO the agent, put it in `inputs`.
 
 - Commit prefixes: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`.
 - Short messages, max ~two sentences per point.
-- Never commit or push automatically — wait for explicit instruction. Read-only
-  git (`status`, `log`, `diff`) is fine.
+- **Run `task fct` (format + check + test) before every commit** and make sure it
+  passes. The pre-commit hook enforces this, but run it yourself first — never
+  commit code that has not passed `task fct`.
+- **Never commit or push implicitly.** Do not run any git write operation
+  (`commit`, `push`, `merge`, `rebase`, `tag`, `reset --hard`, etc.) unless the
+  user has explicitly instructed it for that specific action. Do not chain a
+  commit/push onto another task on your own initiative. When in doubt, stop and
+  ask. Read-only git (`status`, `log`, `diff`) is fine without asking.
 - `main` is the default branch. Do not commit `work*`, `.venv`, `.env`, caches,
   or `node_modules` (all gitignored).
 
