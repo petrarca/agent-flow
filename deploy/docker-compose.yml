@@ -21,6 +21,10 @@ services:
     image: postgres:18
     container_name: prefect-postgres
     environment:
+      # LOCAL DEV ONLY — throwaway credentials for this self-contained compose
+      # stack (Postgres + Prefect server share one network, not exposed). NOT a
+      # real secret. For any shared/production deployment, override these with
+      # real values (e.g. via a .env file / secrets manager).
       POSTGRES_USER: prefect
       POSTGRES_PASSWORD: prefect
       POSTGRES_DB: prefect
