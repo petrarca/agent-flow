@@ -209,4 +209,5 @@ def agent_node(
         criticality=criticality,
         max_cycles=max_cycles,
         result_schema=result_schema,
+        agent=agent,
     )

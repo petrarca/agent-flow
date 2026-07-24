@@ -9,3 +9,10 @@ dist/
 build/
 
 .DS_Store
+
+# Example RUN ARTIFACTS — reports/sidecars agents write during a demo run when
+# run_dir/REPORT resolves into the example dir (normal runs go to /tmp). Agent
+# DEFINITIONS under examples/**/.opencode/agent/ are tracked and NOT ignored.
+examples/*/*.md
+examples/*/*.json
+examples/*/*.control.json

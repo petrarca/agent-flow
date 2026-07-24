@@ -46,7 +46,7 @@ from agent_flow.agent_runtime import (
     run_agent,
 )
 from agent_flow.batteries import agent_node, control_path
-from agent_flow.cli import event_printer, get_console, print_preflight_results, print_results_table, run_cli
+from agent_flow.cli import NodeProgressPrinter, event_printer, get_console, print_preflight_results, print_results_table, run_cli
 from agent_flow.context import read_context_blocks
 from agent_flow.control_protocol import build_control_preamble
 from agent_flow.engine import (
@@ -113,6 +113,7 @@ __all__ = [
     "get_console",
     "print_results_table",
     "print_preflight_results",
+    "NodeProgressPrinter",
     "run_cli",
     "RunConfig",
     "build_run_config",

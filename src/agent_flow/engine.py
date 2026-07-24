@@ -24,8 +24,9 @@ logic is unit-testable without a Prefect server.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -101,6 +102,11 @@ class Node:
     result_schema  optional ResultSchema | JSON-schema dict for the agent's
                    `result` payload. The run callable passes it to run_agent,
                    which injects it into the prompt and validates the output.
+    agent          optional INFORMAL display label: the agent this node runs.
+                   Purely cosmetic — the engine never uses it for logic (a node's
+                   work is its `run` callable). Set automatically by agent_node;
+                   surfaced via on_node_event and shown in progress/result output.
+                   Blank for hand-written nodes.
     """
 
     name: str
@@ -111,6 +117,7 @@ class Node:
     criticality: Criticality = "blocking"
     max_cycles: int = DEFAULT_MAX_CYCLES
     result_schema: object = None
+    agent: str = ""
 
 
 def _group_membership(nodes: list[Node]) -> tuple[dict[str, list[Node]], list[str]]:
@@ -178,14 +185,29 @@ def plan_groups(nodes: Iterable[Node]) -> list[tuple[str, list[Node]]]:
 class NodeOutcome:
     """Result of running one node to completion.
 
-    status  'ok' | 'degraded'.
-    goto    a node name to resume the flow at, when the gate returned a
-            cross-node GoTo (jump-back). None for the common case. The walker
-            (build_flow) honors it; interpret handles only the self-loop.
+    status       'ok' | 'degraded'.
+    goto         a node name to resume the flow at, when the gate returned a
+                 cross-node GoTo (jump-back). None for the common case. The walker
+                 (build_flow) honors it; interpret handles only the self-loop.
+    duration_s   wall-clock seconds the node took (set by build_flow's task; 0.0
+                 when produced by interpret directly, e.g. in unit tests).
     """
 
     status: str
     goto: str | None = None
+    duration_s: float = 0.0
+
+
+def _make_node_emitter(on_node_event: Callable[[str, str, str | None, str], None] | None) -> Callable[[str, str, str | None, str], None]:
+    """Return a node-lifecycle emitter: the user callback, or a no-op if None.
+
+    Keeps the None-guard out of build_flow's body (one bound callable there),
+    so build_flow stays under the complexity limit and the emit sites read as
+    unconditional calls.
+    """
+    if on_node_event is None:
+        return lambda _name, _phase, _status, _agent: None
+    return on_node_event
 
 
 def interpret(
@@ -262,6 +284,7 @@ def build_flow(
     llm_tag: str = "llm",
     llm_concurrency: int | None = None,
     on_event_factory: Callable[[str], Any] | None = None,
+    on_node_event: Callable[[str, str, str | None, str], None] | None = None,
     shared_instructions: str = "",
     shared_context: Iterable[str] | None = None,
     agent_dir: str = "",
@@ -286,6 +309,15 @@ def build_flow(
             RunContext.on_event_factory. Kept here (build time) rather than in
             `params` because it is a callable (not serializable) and is engine
             plumbing, not a domain input.
+        on_node_event: optional DAG-node lifecycle callback
+            `(node_name, phase, status, agent) -> None`. Called with phase="start"
+            (status=None) when a node begins and phase="finish" (status is the
+            NodeOutcome status: "ok"/"degraded", or "failed" on a blocking error)
+            when it ends — including on re-runs (a jumped-back node fires "start"
+            again). `agent` is Node.agent (an informal display label; "" for
+            hand-written nodes). Pure data (no rendering); a CLI turns it into a
+            live view. Bound here at build time like on_event_factory (a
+            non-serializable closure, engine plumbing not a domain input).
         shared_instructions: optional run-wide brief injected into EVERY agent's
             prompt (e.g. a global directive from the CLI/start). Reaches each node
             via RunContext.shared_instructions; a batteries node forwards it to
@@ -307,21 +339,26 @@ def build_flow(
     by_name = {n.name: n for n in nodes}
     group_index = {key: i for i, (key, _) in enumerate(planned)}  # group key -> plan position
     node_group = {n.name: (n.parallel_group or n.name) for n in nodes}
+    _emit = _make_node_emitter(on_node_event)
 
     @task(tags=[llm_tag])
     def _node_task(node_name: str, run_dir: str, params: dict) -> NodeOutcome:
         node = by_name[node_name]
         logger = get_run_logger()
 
+        started = time.monotonic()
+
         def _on_error(n: Node, exc: Exception) -> str:
             if n.criticality == "blocking":
                 logger.error("BLOCKING node %s failed: %s", n.name, exc)
+                _emit(n.name, "finish", "failed", n.agent)
                 raise NodeBlocked(f"{n.name}: {exc}") from exc
             logger.warning("DEGRADE node %s failed: %s — continuing", n.name, exc)
             return "degraded"
 
         # Name the node in the log (Prefect's own task-run id is opaque).
         logger.info("node %s: start (criticality=%s)", node.name, node.criticality)
+        _emit(node.name, "start", None, node.agent)
         # on_event_factory is a build-time closure (not serializable), so it is
         # bound here — never passed through the task's `params` arg.
         # shared_instructions / shared_context / agent_dir are likewise build-time
@@ -337,7 +374,10 @@ def build_flow(
             shared_context=shared_context_t,
             agent_dir=agent_dir,
         )
-        logger.info("node %s: %s", node.name, outcome.status)
+        # Stamp the node's wall-clock duration (timed here, where the node runs).
+        outcome = replace(outcome, duration_s=time.monotonic() - started)
+        logger.info("node %s: %s (%.1fs)", node.name, outcome.status, outcome.duration_s)
+        _emit(node.name, "finish", outcome.status, node.agent)
         return outcome
 
     def _run_group(group: list[Node], wd: Path, params: dict, logger) -> dict[str, NodeOutcome]:
@@ -372,22 +412,27 @@ def build_flow(
             by_name=by_name,
             logger=logger,
         )
-        logger.info("%s done: %s", name, results)
+        # Log a compact {node: status} summary — not the verbose NodeOutcome reprs.
+        logger.info("%s done: %s", name, {n: oc.status for n, oc in results.items()})
         return results
 
     return _pipeline
 
 
-def _walk(planned, *, run_group, group_index, node_group, by_name, logger) -> dict[str, str]:
-    """Walk the planned groups, honoring bounded cross-node jump-backs (GoTo)."""
-    results: dict[str, str] = {}
+def _walk(planned, *, run_group, group_index, node_group, by_name, logger) -> dict[str, NodeOutcome]:
+    """Walk the planned groups, honoring bounded cross-node jump-backs (GoTo).
+
+    Returns per-node NodeOutcome (status + duration_s), so callers can render
+    both. On a re-run (jump-back), a node's later outcome replaces the earlier.
+    """
+    results: dict[str, NodeOutcome] = {}
     jumps: dict[str, int] = {}
     i = 0
     while i < len(planned):
         _key, group = planned[i]
         outcomes = run_group(group)
         for n_name, oc in outcomes.items():
-            results[n_name] = oc.status
+            results[n_name] = oc
         target = _pick_jump_back(outcomes, node_group, group_index, i, jumps, by_name, logger)
         if target is not None:
             jumps[target] = jumps.get(target, 0) + 1

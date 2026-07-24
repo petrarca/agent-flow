@@ -171,8 +171,26 @@ def _supervise(
 
     Runner-agnostic: the only runner-specific step is `runner.parse_event`.
     """
-    buf = _start_line_reader(proc)
+    try:
+        return _supervise_loop(proc, runner=runner, idle_timeout_s=idle_timeout_s, control_file=control_file, on_event=on_event)
+    except KeyboardInterrupt:
+        # Ctrl-C: kill the agent's whole process group before propagating, so we
+        # never leave an orphaned opencode (and its MCP children) running.
+        _kill_group(proc)
+        raise
 
+
+def _supervise_loop(
+    proc: subprocess.Popen,
+    *,
+    runner: AgentRunner,
+    idle_timeout_s: float,
+    control_file: Path | None,
+    on_event: Callable[[Event], None] | None,
+) -> _Supervision:
+    """The liveness loop (see _supervise). Extracted so _supervise stays a thin
+    interrupt-handling wrapper (and both stay under the complexity limit)."""
+    buf = _start_line_reader(proc)
     st = {"tokens": 0, "cost": 0.0, "events": 0, "saw_terminal": False}
     idle_deadline = time.monotonic() + idle_timeout_s
 
