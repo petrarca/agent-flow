@@ -8,13 +8,47 @@ timestamp: 2026-07-23T07:51:35Z
 
 # CLI and live events
 
-Two complementary observability channels, layered:
+Three complementary observability channels, layered:
 
-- **Logs (Prefect INFO)** — the always-on diagnostics: stage start/finish,
+- **Logs (Prefect INFO)** — the always-on diagnostics: node start/finish,
   jump-backs, concurrency setup, errors. Default level; for debugging and the
   essential record.
-- **Events (`--show-events`)** — an *optional*, human-facing live view of what
-  each agent is doing, rendered nicely. On top of the logs, not instead.
+- **Node progress (default)** — a line per node transition (running →
+  ok/degraded/failed, with the agent label and elapsed time) plus an end-of-run
+  results table. Driven by the node-lifecycle hook (below), rendered by the CLI.
+- **Events (`--show-events`)** — the raw per-event firehose: a one-line
+  projection of every agent event, for debugging. Replaces the progress lines
+  when enabled (mutually exclusive views).
+
+## Node-lifecycle hook (the coarse channel)
+
+`build_flow(on_node_event=<cb>)` takes an optional
+`(node_name, phase, status, agent) -> None` callback the engine calls at each
+node's **start** (`phase="start"`, `status=None`) and **finish**
+(`phase="finish"`, `status` = `"ok"`/`"degraded"`, or `"failed"` on a blocking
+error) — including on re-runs (a jumped-back node fires `start` again). It is
+**pure data**: the engine never renders. `agent` is `Node.agent`, an informal
+label (set by `agent_node`; `""` for hand-written nodes) so a view can show which
+agent a node runs.
+
+Per-node **duration** is timed where the node runs (`NodeOutcome.duration_s`) and
+carried through the flow result (`dict[str, NodeOutcome]`), so the results table
+shows Node | Agent | Outcome | Duration without the CLI reconstructing timing.
+
+The default CLI view (`NodeProgressPrinter`) is deliberately **line-based**, not a
+repainting `rich.Live`/TUI: a Live table fights Prefect's threaded task execution
+and interleaved logging (duplicated frames, corrupted output). A plain
+`console.print` per transition interleaves cleanly with logs and is robust in
+non-TTY/CI. A consumer who wants a richer TUI can build one on the **same** hooks
+(`on_node_event` + `on_event_factory`) — the library ships only the simple
+default.
+
+## Interrupt (Ctrl-C)
+
+`_supervise` catches `KeyboardInterrupt` and kills the agent's process group
+(SIGTERM→SIGKILL) before re-raising, so Ctrl-C never orphans an opencode process
+(or its MCP children). `run_cli` catches it at the top, prints a short
+`Interrupted` line, and exits 130 (standard SIGINT code) — not a raw traceback.
 
 ## The event hook (render-agnostic core)
 
@@ -64,17 +98,19 @@ and a callable is not serializable — so it is a **build-time** value, not a
 
 ## The CLI (optional `cli` extra: typer + rich)
 
-`agent_flow.cli` provides a shared rich `Console`, `event_printer(agent)` (builds
-the actual per-event callback that prints the projection — pass its result
-directly to Tier-1/2 `run_agent(on_event=...)`, or wrap it in a lambda for Tier-3
-`build_flow(on_event_factory=...)`), and `print_results_table(results)` (the
-end-of-run stage → outcome table). The examples use Typer commands with
-`--show-events/-v`. `rich`/`typer` are an optional extra, imported lazily — the
-core is render-agnostic without them.
+`agent_flow.cli` provides a shared rich `Console`, `event_printer(agent)` (the
+per-event projection callback), `NodeProgressPrinter` (the default line-based
+node progress, consuming `on_node_event`), `print_results_table(results, agents=)`
+(the end-of-run Node|Agent|Outcome|Duration table), and `print_preflight_results`.
+`run_cli` wires them: default = progress lines + results table; `--show-events` =
+the raw firehose + results table. `rich`/`typer` are core dependencies, but the
+engine core stays render-agnostic: it emits `Event`s and `on_node_event` data and
+returns `NodeOutcome`s, and only the `cli` module turns those into terminal output.
 
 ## Where it lives
 
 `src/agent_flow/runners.py` (`Event`, `parse_event`), `agent_runtime` (the
-`on_event` callback), `engine.py` (`RunContext.on_event_factory`,
-`build_flow(on_event_factory=...)`), `src/agent_flow/cli.py` (`event_printer`,
-`_project_event`, `print_results_table`, `get_console`).
+`on_event` callback, Ctrl-C process-group kill), `engine.py`
+(`RunContext.on_event_factory`, `build_flow(on_event_factory=, on_node_event=)`,
+`NodeOutcome.duration_s`), `src/agent_flow/cli.py` (`event_printer`,
+`_project_event`, `NodeProgressPrinter`, `print_results_table`, `get_console`).

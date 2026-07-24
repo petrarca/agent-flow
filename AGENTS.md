@@ -37,10 +37,11 @@ src/agent_flow/
   gates.py               # Directive (Continue/Restart/GoTo/Stop) + GateContext + ready gates
   control_protocol.py    # build_control_preamble — the injected control-file contract
   schema.py              # ResultSchema protocol / JsonSchema / ValidationOutcome / coerce_schema
-  schema_pydantic.py     # PydanticSchema adapter (optional `pydantic` extra)
+  schema_pydantic.py     # PydanticSchema adapter (pydantic is a core dependency)
   context.py             # read_context_blocks — inject rules/standards file CONTENT into prompts
-  run_config.py          # RunConfig / load_run_config / parse_params (the CLI config protocol)
-  cli.py                 # run_cli + event_printer + print_results_table (optional `cli` extra)
+  run_config.py          # RunConfig (pydantic-settings) / build_run_config / get_settings lifecycle
+  preflight.py           # runtime pre-flight checks (opencode/agent_dir/prefect) -> Check results
+  cli.py                 # run_cli (+ params_model) + event_printer + print_results_table/print_preflight_results
   utils.py               # resolve_run_dir / default_temp_base
   env.py                 # load_env (.env -> os.environ)
   _prefect_env.py        # bootstrap (embedded / file / server Prefect modes)
@@ -53,6 +54,20 @@ docs/
   design/orchestrator/   # design OKF bundle (one concept per file; start at index.md)
 deploy/                  # docker-compose (Prefect server + Postgres) for persistent mode
 ```
+
+## Running commands (full output)
+
+When running a command whose output matters, capture and read the FULL output —
+do not truncate with `tail`, `head`, `grep`, or similar. Truncation hides errors,
+stack traces, and warnings that appear outside the visible window. Prefer piping
+through `tee` to a file and reading the whole file:
+
+```bash
+some-command 2>&1 | tee /tmp/out.log   # then read /tmp/out.log in full
+```
+
+This is especially important for `task fct`, the examples, and any run that can
+fail partway — the interesting line is rarely the last one.
 
 ## Build & Test
 
@@ -142,9 +157,12 @@ inputs/context/paths. To hand a value TO the agent, put it in `inputs`.
 - Ruff `E, F, B, I, C90`, line length **150**, McCabe max-complexity **10**.
 - No bare `except Exception`; catch concrete types. `except A, B:` (no `as`) is
   valid Python 3.14 (PEP 758) — do not flag it.
-- Keep the core dependency-light: Prefect lazy-imported inside `build_flow`;
-  `pydantic`/`rich`/`typer`/`jsonschema`/`pyyaml` are optional extras, never
-  imported at core import time.
+- Dependencies are a single core set (no optional runtime extras). Prefect,
+  pydantic, pydantic-settings, typer, rich, pyyaml, and jsonschema are all core.
+  Prefect dominates the install footprint, so keeping the others as extras earned
+  nothing but optional-import branching; they are first-class. Prefect is still
+  lazy-imported inside `build_flow` (import speed, not optionality). Only the
+  `dev` extra is optional.
 - When adding a public symbol, export it in `src/agent_flow/__init__.py` and keep
   the module-docstring "Public API" example current.
 
