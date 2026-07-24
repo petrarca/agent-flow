@@ -24,13 +24,13 @@ repos:
         pass_filenames: false
         files: \.py$
 
-      # Pre-push (deeper): read-only lint/format gate + unit + mock integration.
-      # NOTE: the real-opencode e2e (task test:opencode) is deliberately NOT run
-      # here — it is opt-in, needs opencode + credentials, and must run OUTSIDE
-      # an opencode session.
-      - id: verify-and-test-all
-        name: "pre-push: verify + unit/integration tests"
-        entry: bash -c 'task verify && task test:all'
+      # Pre-push (deeper): read-only lint/format gate + unit tests. Integration
+      # (mock subprocess) and the real-opencode e2e are deliberately NOT run here
+      # — they are slower / opt-in; run them explicitly with `task test:all` /
+      # `task test:opencode` when needed.
+      - id: verify-and-test
+        name: "pre-push: verify + unit tests"
+        entry: bash -c 'task verify && task test'
         language: system
         pass_filenames: false
         files: \.py$
