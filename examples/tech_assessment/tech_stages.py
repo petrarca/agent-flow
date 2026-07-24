@@ -19,6 +19,26 @@ expressed in its instruction (.md); the flow only passes run-specific INPUTS
 what an agent wrote — "no report, re-run" or a verifier's re-run request — is a
 GATE the flow invokes after the agent runs (see tech_flow.py). The engine stays
 artifact-agnostic; artifact knowledge lives in the gates and the agent .md.
+
+WHY a `Stage` dataclass at all — is it required? NO.
+--------------------------------------------------------------------
+The LIBRARY only knows `Node` (agent_flow.engine). `Stage` is NOT a library
+type and agent_flow never sees it. It is OPTIONAL, example-specific sugar that
+exists purely because THIS pipeline has a repeating shape:
+
+    every unit of work = an analyst + its verifier, sharing the same input
+    convention, the same re-run gate, and a `<name>.md` report.
+
+Declaring that shape once as data (below) and expanding it into the library's
+real vocabulary (`Node` + gates) in ONE place (`_nodes_for` in tech_flow.py) is
+just DRY: 5 stages that would otherwise be ~10 near-identical `agent_node`
+calls become 5 short rows. It adds ZERO capability — the engine can do all of
+this without `Stage`.
+
+If your pipeline is small or irregular (no verifier pattern), SKIP this file
+entirely and call `agent_node(...)` directly — see examples/toy_pipeline, which
+uses no `Stage` layer at all. Reach for a table like this only when the
+repetition actually hurts.
 """
 
 from __future__ import annotations
@@ -31,24 +51,30 @@ Criticality = Literal["blocking", "degrade"]
 
 @dataclass(frozen=True)
 class Stage:
-    """One node of the DAG.
+    """One row of THIS example's pipeline table (a domain concept, not a library
+    type). `_nodes_for` in tech_flow.py compiles each Stage into one or two
+    library `Node`s. Fields are either sugar (S) unique to this table, or a
+    straight pass-through (P) that maps 1:1 to a library `Node` field.
 
-    name          stage id.
-    analyst       agent that does the work.
-    verifier      optional paired verifier; presence enables the re-run loop.
-    depends_on    upstream stage names that must finish first (the DAG edges).
-    parallel_group  stages sharing a group name fan out concurrently.
-    criticality   'blocking' -> failure STOPS the pipeline;
-                  'degrade'  -> failure is logged, pipeline continues.
-    inputs        run-specific KEY: value pairs injected into the agent prompt.
-                  This is the ONLY thing the flow knows about artifacts — it
-                  passes 'REPORT' as an input; what the agent does with it is in
-                  the .md. An agent that produces nothing simply gets different
-                  (or no) inputs.
-    model         optional per-stage model override.
-    idle_timeout_s  liveness budget: kill the agent only after this many
-                    seconds with NO event and NO sidecar (no absolute cap).
-                    Real opencode agents can pause 60-90s between tool calls.
+    name          (P) stage id -> the analyst node's name.
+    analyst       (S) agent that does the work. Sugar: becomes node `agent=`.
+    verifier      (S) optional paired verifier. Sugar: its PRESENCE is what makes
+                      one Stage expand into TWO nodes (analyst + verifier) with a
+                      re-run gate wired between them. The library has no
+                      "verifier" concept — a verifier is just another node.
+    depends_on    (P) upstream stage names that must finish first (DAG edges).
+    parallel_group (P) stages sharing a group name fan out concurrently.
+    criticality   (P) 'blocking' -> failure STOPS the pipeline;
+                      'degrade'  -> failure is logged, pipeline continues.
+    inputs        (S) run-specific KEY: value pairs injected into the agent
+                      prompt. This is the ONLY thing the flow knows about
+                      artifacts — it passes 'REPORT' as an input; what the agent
+                      does with it is in the .md. An agent that produces nothing
+                      simply gets different (or no) inputs.
+    model         (S) optional per-stage model override.
+    idle_timeout_s (S) liveness budget: kill the agent only after this many
+                      seconds with NO event and NO sidecar (no absolute cap).
+                      Real opencode agents can pause 60-90s between tool calls.
     """
 
     name: str

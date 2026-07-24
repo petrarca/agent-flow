@@ -8,6 +8,15 @@ is simply ANOTHER `agent_node` that depends on the node it checks and carries a
 to that node (bounded). "analyst"/"verifier" are this example's DOMAIN words —
 the library only sees nodes, edges, and gates.
 
+WHERE THE COMPLEXITY LIVES (and why it is optional):
+The ONLY library calls needed to build a pipeline are `agent_node(...)` and
+`build_flow(...)` (the latter is invoked for us by `run_cli`). The `Stage`
+table and its `_nodes_for` compiler below are NOT required by the library —
+they are this example's own convenience for a repeating analyst+verifier shape.
+A minimal pipeline is just a handful of direct `agent_node(...)` calls (see
+examples/toy_pipeline). Read this file as "one WAY to organize nodes", not as
+"the API you must use".
+
 Everything structural — DAG ordering, the parallel group, bounded re-runs and
 cross-node jump-back, per-node criticality, LLM concurrency, prompt/sidecar
 plumbing — is the LIBRARY's job. This file only declares the graph.
@@ -72,8 +81,26 @@ _SCHEMAS = {"tech-stack": _tech_stack_schema()}
 
 
 def _nodes_for(stage: Stage) -> list[Node]:
-    """Map one domain Stage to library nodes: an analyst node, and (if the stage
-    has a verifier) a separate verifier node that can jump the flow back."""
+    """Compile one domain `Stage` into library `Node`s.
+
+    THIS is the whole reason `Stage` exists — it is the "compiler" that turns
+    the compact domain table into the library's real vocabulary. It does three
+    things a raw `agent_node(...)` call would make you repeat by hand for every
+    stage, which is exactly the boilerplate the table lets us DRY up:
+
+      1. Fan-out: a stage WITH a verifier becomes TWO nodes (analyst + verifier),
+         not one. That analyst+verifier pairing is a domain pattern, not a
+         library feature — here is where we express it.
+      2. Uniform policy: verifiers are ALWAYS `degrade` (a failed check must not
+         kill the run) and ALWAYS carry a `rerun_on_signal` gate back to their
+         analyst; analysts ALWAYS carry a `require_file` gate ("reported ok but
+         wrote nothing -> one retry"). Decided once, applied to every stage.
+      3. Convention: the standard `inputs` shape and the `<name>.md` report path
+         are filled in from the stage, so the table stays terse.
+
+    If you did NOT want this pairing/policy sugar, you would skip `Stage` and
+    call `agent_node(...)` directly for each node instead of this function.
+    """
     # Per-node instruction (a): additive guidance for THIS node only. Shown on
     # the tech-stack analyst as a demo; run-wide brief (b) comes via the CLI.
     per_node = "List concrete versions where known; prefer a compact table." if stage.name == "tech-stack" else ""
