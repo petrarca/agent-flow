@@ -1,0 +1,78 @@
+---
+type: Concept
+title: Execution backend — Prefect now, swappable by design
+description: Why Prefect 3 for this workload, the candidates considered, swappability, and deployment modes.
+tags: [agent-flow, backend, prefect, swappable, deployment]
+timestamp: 2026-07-23T07:51:35Z
+---
+
+# Execution backend
+
+The backend runs the DAG the [engine](engine.md) builds: order, parallel fan-out,
+retries, concurrency limits, crash resume, and an observability UI.
+
+Requirements for *this* workload: Python-native, DAG + parallel fan-out, custom
+retry conditions, concurrency limits, bounded conditional loops, crash resume, an
+observability UI, **finite batch runs**, **no human-in-the-loop mid-run**, small
+team.
+
+## Candidates (researched Jul 2026)
+
+| Option | License | Self-host infra | Durability | UI |
+|---|---|---|---|---|
+| **Prefect 3** | Apache-2.0 | server + Postgres (or embedded SQLite for dev) | robust scheduler | yes (server) |
+| Hatchet | MIT | Postgres only (+ Go engine + worker) | durable task queue | built-in |
+| DBOS | MIT | Postgres only, no server (a library) | durable execution (checkpoint + fork) | weak |
+| Temporal | MIT | cluster + DB + workers | event-sourced replay (strongest) | yes |
+| Dagster | Apache-2.0 | server + Postgres | robust scheduler | yes |
+
+## Decision: Prefect 3, backend kept swappable
+
+**Why Prefect.** Best-balanced fit for finite batch, Python-native, no human
+gates — and the most mature Python-native option (largest community, lowest risk
+for a small team). It covers every requirement: `.submit()`/`wait()` fan-out,
+`retry_condition_fn`, tag-based concurrency limits, Python conditional loops, a
+persistent-server UI, and a zero-infra **embedded** mode for dev. Its only real
+weakness — durability is "robust scheduler," not event-sourced replay — **does
+not bite finite <1h runs**: you re-run a failed stage, you never replay a
+multi-day workflow.
+
+**Why not the "better on paper" options — the axis is wrong.** Temporal / DBOS
+beat Prefect on *durability*, a problem this workload does not have; Temporal's
+cost (cluster, determinism model, versioning) is unjustified for batch analysis.
+AI-native tools (LangGraph/CrewAI) are agent *behaviour* frameworks, not durable
+DAG orchestrators — they run *inside* a task, not as the engine.
+
+**Hatchet is the strongest challenger** (MIT, Postgres-only, durable tasks,
+first-class per-key rate limits, built-in UI + OTel/Prometheus), but younger and
+its Python SDK is a thin client over a Go engine. For a 1–2 person team, Prefect's
+maturity outweighs Hatchet's edge today — but not enough to accept lock-in.
+
+**Swappability is first-class.** All domain logic (supervision, gates, re-run
+loops, injection, telemetry, the declared graph) is backend-agnostic. Only
+`build_flow` and its task/retry/concurrency wrappers touch Prefect; Prefect is
+imported lazily inside it. Switching to Hatchet later = write one
+`build_flow_hatchet()`; the graphs and all primitives do not move.
+
+**Exit criteria:** to **Hatchet** if Postgres-only ops / built-in rate limiting /
+its UI become compelling or throughput exceeds Prefect's comfort zone; to **DBOS**
+if a lighter durable model (library, no server) is wanted and its weak UI is
+acceptable (its fork-from-step suits re-run loops); to **Temporal** only if the
+workload becomes long-lived / human-gated (not this pipeline).
+
+## Deployment modes
+
+- **Embedded (dev):** `build_flow` spins an in-process temporary server + local
+  SQLite, torn down per run. Zero standing infra; no UI/history. Controlled via
+  `_prefect_env.bootstrap()`.
+- **File-backed (dev+):** `PREFECT_PERSIST=1` — a file-backed SQLite so runs
+  survive process restart without a standing server.
+- **Persistent (production):** a standing Prefect **server + Postgres**; the flow
+  runs as a plain script pointed at it via `PREFECT_API_URL`, recording runs so
+  the dashboard + history exist. A validated `deploy/docker-compose.yml`
+  (Prefect server + Postgres 18) exists in the repo for this mode.
+
+## Where it lives
+
+`src/agent_flow/engine.py` (`build_flow`, the only Prefect-touching code) and
+`src/agent_flow/_prefect_env.py` (`bootstrap`, the three modes).

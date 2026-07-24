@@ -1,0 +1,70 @@
+---
+type: Usage Overview
+title: Using agent-flow — for consumers of the library
+description: Task-oriented documentation for building your own pipeline on agent-flow. Start here.
+tags: [agent-flow, usage, guide, getting-started, consumer-documentation]
+timestamp: 2026-07-23T08:54:40Z
+---
+
+# Using agent-flow
+
+This is the **consumer-facing** documentation: how to build your own pipeline on
+top of `agent-flow`. It is task-oriented — install it, write your first
+pipeline, write agents that work with it, and look up a recipe when you need
+something specific.
+
+For **why** the library is built the way it is (the three-tier architecture,
+the control-file contract, gates, the engine internals), see the design bundle:
+[`docs/design/orchestrator/index.md`](../design/orchestrator/index.md). This
+bundle assumes you just want to *use* it and links out to the design docs only
+where the "why" genuinely helps.
+
+## Guides
+
+| Guide | Read this when… |
+|---|---|
+| [getting-started.md](getting-started.md) | You're starting from zero: install, write your first pipeline, run it. |
+| [writing-agents.md](writing-agents.md) | You're writing the opencode agent `.md` files agent-flow will supervise. |
+| [recipes.md](recipes.md) | You need a specific thing: a re-run loop, parallel steps, typed output, live events, dropping to a lower tier. |
+
+## The 30-second orientation
+
+`agent-flow` supervises coding-agent subprocesses (opencode) and runs them as a
+declared graph. You write:
+
+1. **Agent `.md` files** — the actual work (analyze, write a report, verify
+   something). See [writing-agents.md](writing-agents.md).
+2. **A pipeline declaration** — `agent_node(...)` per agent, wired with
+   `depends_on` and optional `gate`s. See [getting-started.md](getting-started.md).
+3. **Nothing else** — prompts, sidecar files, supervision, retries, and
+   parallelism are the library's job.
+
+## Layering (high level → low level)
+
+Three tiers; each is usable on its own. Most consumers use Tier 3.
+
+```
+TIER 3  DECLARATIVE      declare Nodes -> build_flow() -> a runnable Prefect flow
+  (most declarative)     agent_node() = one call per agent
+        │ composes
+TIER 2  PRIMITIVES       call run_agent() as the leaf of YOUR OWN Prefect flow
+        │ uses
+TIER 1  ENGINE CORE      run_agent(): spawn + liveness-supervise + kill + sidecar verdict
+  (closest to the metal) runner-agnostic; no Prefect
+        │ invokes
+        AGENT RUNTIME    opencode agents (.md) — external, unchanged
+```
+
+**The orchestration engine is [Prefect](https://www.prefect.io/).** At Tier 3,
+`build_flow` compiles your graph into a Prefect flow (parallel fan-out, retries,
+concurrency limits, a run UI). It is a swappable seam — imported only inside
+`build_flow`; Tiers 1–2 don't require it. Details and the "why Prefect" rationale:
+[`design/orchestrator/backend.md`](../design/orchestrator/backend.md).
+
+```python
+from agent_flow import agent_node, build_flow
+from agent_flow.gates import require_file
+
+nodes = [agent_node("hello", "hello-agent", inputs={"REPORT": "{run_dir}/hello.md"}, gate=require_file("hello.md"))]
+build_flow(nodes, name="hello")(runtime="mock")  # no run_dir -> a temp dir (logged)
+```

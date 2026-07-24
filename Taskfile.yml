@@ -1,0 +1,140 @@
+version: "3"
+
+# Prototype: deterministic Prefect flow orchestrating opencode agents as
+# supervised subprocesses. `uv` handles the venv + Prefect install.
+
+vars:
+  PRODUCT: '{{.PRODUCT | default "my-product"}}'
+  RUNTIME: '{{.RUNTIME | default "opencode"}}'
+  TOPIC: '{{.TOPIC | default "Hexagonal architecture in Java"}}'
+  # Empty by default -> the pipeline creates a temp run dir under <temp>/agent-flow/.
+  # Override to keep output somewhere specific: task example:tech RUNDIR=/path/out
+  RUNDIR: '{{.RUNDIR | default ""}}'
+
+env:
+  PYTHONPATH: src
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  setup:
+    desc: Create the virtualenv
+    cmds:
+      - test -d .venv || uv venv
+
+  install:
+    desc: Install the project (+ dev tools) in editable mode
+    deps: [setup]
+    cmds:
+      - uv pip install -e ".[dev]"
+
+  example:tech:
+    desc: 'Run the tech-assessment example DAG. Override: task example:tech PRODUCT=my-product RUNTIME=mock RUNDIR=/path SHOW_EVENTS=--show-events'
+    cmds:
+      - uv run --with prefect python -m examples.tech_assessment.tech_flow -p product_key="{{.PRODUCT}}" -p repos_root=/tmp/repos --run-dir "{{.RUNDIR}}" --runtime "{{.RUNTIME}}" {{.SHOW_EVENTS}}
+
+  example:tech:mock:
+    desc: Run the tech-assessment example with the MOCK runtime (no tokens)
+    cmds:
+      - uv run --with prefect python -m examples.tech_assessment.tech_flow -p product_key="{{.PRODUCT}}" -p repos_root=/tmp/repos --run-dir "{{.RUNDIR}}" --runtime mock {{.SHOW_EVENTS}}
+
+  example:toy:
+    desc: Run the toy 3-stage pipeline (analyst -> verifier -> extractor). SHOW_EVENTS=--show-events for a live view
+    cmds:
+      - uv run --with prefect python -m examples.toy_pipeline.flow --topic "{{.TOPIC}}" --runtime "{{.RUNTIME}}" --run-dir "{{.RUNDIR}}" {{.SHOW_EVENTS}}
+
+  example:toy:mock:
+    desc: Run the toy pipeline with the MOCK runtime (no tokens)
+    cmds:
+      - uv run --with prefect python -m examples.toy_pipeline.flow --topic "{{.TOPIC}}" --runtime mock --run-dir "{{.RUNDIR}}" {{.SHOW_EVENTS}}
+
+  format:
+    desc: Format with ruff (owns all layout)
+    cmds:
+      - .venv/bin/ruff format src tests
+
+  check:
+    desc: Lint with ruff, auto-fixing what it can
+    cmds:
+      - .venv/bin/ruff check --fix src tests
+
+  verify:
+    desc: CI gate — lint + format check, no fixes (fails on any deviation)
+    cmds:
+      - .venv/bin/ruff check src tests
+      - .venv/bin/ruff format --check src tests
+
+  test:
+    desc: Run unit tests (default; fast, no subprocess)
+    cmds:
+      - .venv/bin/pytest tests
+
+  test:unit:
+    desc: Run unit tests only
+    cmds:
+      - .venv/bin/pytest tests -m unit
+
+  test:integration:
+    desc: Run integration tests (mock-subprocess supervision; opencode e2e skipped)
+    cmds:
+      - .venv/bin/pytest tests -m integration
+
+  test:opencode:
+    desc: "Run the REAL opencode e2e (needs opencode + creds; run OUTSIDE an opencode session)"
+    env:
+      AGENT_FLOW_OPENCODE_E2E: "1"
+    cmds:
+      - .venv/bin/pytest tests/integration/test_run_agent_opencode.py -m integration -v
+
+  test:all:
+    desc: Run unit + integration tests
+    cmds:
+      - .venv/bin/pytest tests -m "unit or integration"
+
+  fct:
+    desc: format, check, test (the standard local loop)
+    cmds:
+      - task: format
+      - task: check
+      - task: test
+
+  build:
+    desc: Build the sdist + wheel
+    cmds:
+      - uv build
+
+  rebuild:all:
+    desc: Clean, install, format/check/test:all, build (from scratch)
+    cmds:
+      - task: clean
+      - task: install
+      - task: format
+      - task: check
+      - task: test:all
+      - task: build
+
+  pre-commit:install:
+    desc: Install the git pre-commit + pre-push hooks
+    cmds:
+      - .venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
+
+  pre-commit:update:
+    desc: Update pinned pre-commit hook versions
+    cmds:
+      - .venv/bin/pre-commit autoupdate
+
+  pre-commit:run:
+    desc: Run all pre-commit hooks against the whole tree
+    cmds:
+      - .venv/bin/pre-commit run --all-files
+
+  clean:
+    desc: Remove artifacts and caches
+    cmds:
+      - rm -rf dist .ruff_cache **/__pycache__ **/*.egg-info
+      - find . -type d -name __pycache__ -exec rm -rf {} +
+      - find . -type f -name "*.pyc" -delete

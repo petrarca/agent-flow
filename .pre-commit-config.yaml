@@ -1,0 +1,37 @@
+###############################
+# pre-commit configuration
+#
+# Strategy:
+# - Use only "local" hooks so we orchestrate via Taskfile tasks (single source
+#   of truth for how we lint/format/test).
+# - Split fast feedback (pre-commit) from deeper validation (pre-push).
+# - pass_filenames: false because the tasks already know what to operate on.
+#
+# Tips:
+# - Skip all hooks:     git commit -m "msg" --no-verify
+# - Run manually:       task fct
+# - Install the hooks:  task pre-commit:install
+# - Update the hooks:   task pre-commit:update
+###############################
+repos:
+  - repo: local
+    hooks:
+      # Pre-commit (fast): format + lint(+fix) + unit tests.
+      - id: fct
+        name: "format + check + unit tests (quick)"
+        entry: bash -c 'task fct'
+        language: system
+        pass_filenames: false
+        files: \.py$
+
+      # Pre-push (deeper): read-only lint/format gate + unit + mock integration.
+      # NOTE: the real-opencode e2e (task test:opencode) is deliberately NOT run
+      # here — it is opt-in, needs opencode + credentials, and must run OUTSIDE
+      # an opencode session.
+      - id: verify-and-test-all
+        name: "pre-push: verify + unit/integration tests"
+        entry: bash -c 'task verify && task test:all'
+        language: system
+        pass_filenames: false
+        files: \.py$
+        stages: [pre-push]

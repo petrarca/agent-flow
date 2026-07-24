@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-flow"
+authors = [
+    { name = "Wolfgang Miller", email = "wolfgang.miller@petrarca-labs.com" },
+]
+description = "Deterministic orchestration of coding-agent pipelines (supervised subprocesses, DAG, bounded re-runs)."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.14,<4.0"
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+]
+dynamic = ["version"]
+dependencies = [
+    "prefect>=3.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+# Typed agent `result` payloads via a Pydantic model (PydanticSchema adapter).
+# Optional: the core result-schema seam works with plain JSON-schema dicts and
+# stays runtime-agnostic without this.
+pydantic = ["pydantic>=2.0"]
+# Nice human-facing CLI output (live events, status tables) + the reusable
+# run_cli (config file + --param). Optional: the core is render/CLI-agnostic.
+cli = ["typer>=0.12", "rich>=13.0", "pyyaml>=6.0"]
+# `jsonschema` powers validation of plain-dict schemas (JsonSchema); optional at
+# runtime (advisory if absent), but installed for dev so tests can validate.
+dev = ["ruff", "pytest", "pytest-cov", "pre-commit", "setuptools-scm", "pydantic>=2.0", "jsonschema>=4.0", "typer>=0.12", "rich>=13.0", "pyyaml>=6.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools_scm]
+tag_regex = "^v(?P<version>\\d+(?:\\.\\d+)*)"
+version_scheme = "guess-next-dev"
+local_scheme = "node-and-date"
+
+[tool.ruff]
+line-length = 150
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I", "C90"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+markers = [
+    "unit: marks tests as unit tests (default)",
+    "integration: marks tests as integration tests",
+]
+testpaths = ["tests"]
+addopts = ["-m unit", "--strict-markers"]

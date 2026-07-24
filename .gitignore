@@ -1,0 +1,11 @@
+.venv/
+.prefect/
+.env
+__pycache__/
+*.pyc
+*.egg-info/
+.ruff_cache/
+dist/
+build/
+
+.DS_Store
