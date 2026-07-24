@@ -1,4 +1,4 @@
-"""Result-schema seam — typed agent output without a hard Pydantic dependency.
+"""Result-schema seam — typed agent output.
 
 An agent's control file carries a free-form `result` object. Typed output is an
 OPT-IN CONSUMER CONVENIENCE — the library imposes no schema. When (and only when)
@@ -14,14 +14,13 @@ decision, so it is surfaced to the gate, which decides Restart/Continue/Stop.
 purist consumer may pass no schema and validate inside their own gate instead.
 Either way, deciding what to DO about a bad result stays the consumer's.)
 
-Runtime-agnostic by design: the core depends only on the tiny `ResultSchema`
-protocol below, NOT on Pydantic. Two ways to supply a schema:
+The engine depends only on the tiny `ResultSchema` protocol below, not on any
+one schema library. Two ways to supply a schema:
 
-  - a plain JSON-schema `dict` (no third-party dependency) — injected into the
-    prompt; validated with `jsonschema` if that package is available, otherwise
-    treated as advisory (valid=True, no object).
-  - a `ResultSchema` implementation. The optional `pydantic` extra ships
-    `PydanticSchema`, which wraps a `BaseModel` and yields validated instances.
+  - a plain JSON-schema `dict` — injected into the prompt and validated with
+    `jsonschema`.
+  - a `ResultSchema` implementation. `schema_pydantic.PydanticSchema` wraps a
+    `BaseModel` and yields validated instances.
 
 This is deliberately unlike frameworks that weld an output schema to one
 in-process LLM call: here the schema rides over ANY runner (opencode subprocess,
@@ -67,10 +66,9 @@ class ValidationOutcome:
 class JsonSchema:
     """A ResultSchema backed by a plain JSON-schema dict — no Pydantic.
 
-    Validation uses the `jsonschema` package if importable; otherwise it is
-    advisory (valid=True) since the schema was still injected into the prompt.
-    `obj` is always None — a dict schema produces no NEW object (the validated
-    data is the `result` dict itself). Only PydanticSchema yields a typed obj.
+    Validation uses the `jsonschema` package (a core dependency). `obj` is always
+    None — a dict schema produces no NEW object (the validated data is the
+    `result` dict itself). Only PydanticSchema yields a typed obj.
     """
 
     def __init__(self, schema: dict) -> None:
@@ -80,12 +78,8 @@ class JsonSchema:
         return self._schema
 
     def validate(self, data: Any) -> ValidationOutcome:
-        try:
-            import jsonschema
-        except ImportError:
-            # Schema was injected into the prompt; without a validator we cannot
-            # check conformance, so treat as advisory rather than failing.
-            return ValidationOutcome(valid=True)
+        import jsonschema
+
         try:
             jsonschema.validate(instance=data, schema=self._schema)
         except jsonschema.ValidationError as exc:

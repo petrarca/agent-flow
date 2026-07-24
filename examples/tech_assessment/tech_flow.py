@@ -65,7 +65,7 @@ def _tech_stack_schema():
     """
     from pydantic import BaseModel
 
-    from agent_flow.schema_pydantic import PydanticSchema
+    from agent_flow import PydanticSchema
 
     class TechStackResult(BaseModel):
         summary: str

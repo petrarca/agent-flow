@@ -89,6 +89,7 @@ from agent_flow.runners import (
     get_runner,
 )
 from agent_flow.schema import JsonSchema, ResultSchema, ValidationOutcome, coerce_schema
+from agent_flow.schema_pydantic import PydanticSchema
 from agent_flow.utils import default_temp_base, resolve_run_dir
 
 __all__ = [
@@ -124,6 +125,7 @@ __all__ = [
     # result-schema seam (typed agent output; Pydantic optional)
     "ResultSchema",
     "JsonSchema",
+    "PydanticSchema",
     "ValidationOutcome",
     "coerce_schema",
     # declaration-driven engine (Layer 3)

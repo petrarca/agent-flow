@@ -51,8 +51,7 @@ def test_validation_outcome_defaults():
     assert o.errors == ()
 
 
-# Pydantic adapter (optional extra). Skip cleanly if pydantic is absent.
-pydantic = pytest.importorskip("pydantic")
+# Pydantic adapter (pydantic is a core dependency).
 
 
 def test_pydantic_schema_valid_returns_instance():

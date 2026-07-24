@@ -1,11 +1,11 @@
-"""Pydantic adapter for the result-schema seam (optional `pydantic` extra).
+"""Pydantic adapter for the result-schema seam.
 
-Import this module only if Pydantic is installed (`agent-flow[pydantic]`). It
-wraps a `BaseModel` subclass as a `ResultSchema`, so the engine can inject the
+Wraps a `BaseModel` subclass as a `ResultSchema`, so the engine can inject the
 model's JSON schema into the prompt and return validated model INSTANCES.
 
-The core (`schema.py`, `agent_runtime.py`) never imports this — Pydantic stays
-optional and the library stays runtime-agnostic.
+The core (`schema.py`, `agent_runtime.py`) does not import this — it depends only
+on the `ResultSchema` protocol, so the schema library stays a detail of the
+consumer's chosen adapter (this one, or a plain JSON-schema dict).
 """
 
 from __future__ import annotations
