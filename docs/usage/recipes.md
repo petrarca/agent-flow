@@ -232,18 +232,44 @@ def gate(ctx):
 In short: **the dict is always in `result`; `_result_obj` is the model if you
 gave one, else `None`.**
 
-## See what an agent is doing live
+## Watch progress live
+
+Via `run_cli`, the **default** view prints one line per node transition, with the
+agent label and elapsed time, then an end-of-run table:
+
+```
+    > tech-stack running (tech-stack-analyst)
+check tech-stack ok (tech-stack-analyst) 15.2s
+    > domain running (domain-analyst)
+...
+┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┓
+┃ Node        ┃ Agent              ┃ Outcome ┃ Duration ┃
+┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━┩
+│ tech-stack  │ tech-stack-analyst │ ok      │    15.2s │
+```
+
+Pass `--show-events/-v` instead for the raw per-event firehose (one projected
+line per agent event — `tool write …`, text, `step done (N tokens)`) — useful
+for debugging. **Ctrl-C** stops cleanly: the running agent's process group is
+killed and the CLI exits 130 (no orphaned opencode, no raw traceback).
+
+It is line-based on purpose (no repainting TUI), so it interleaves cleanly with
+logs and works in non-TTY/CI. To build your own view (a Live table, a TUI),
+subscribe to the same hooks directly:
 
 ```python
 from agent_flow.cli import event_printer, get_console
 
 console = get_console()
-pipeline = build_flow(nodes, name="my-pipeline",
-                       on_event_factory=lambda agent: event_printer(agent, console=console))
+pipeline = build_flow(
+    nodes,
+    name="my-pipeline",
+    on_node_event=my_progress.on_node_event,  # (node, phase, status, agent)
+    on_event_factory=lambda agent: event_printer(agent, console=console),
+)
 ```
 
-Prints one readable line per event (`tool write /work/report.md`, the agent's
-text, `step done (N tokens)`) alongside the normal Prefect logs. See
+The flow returns `dict[str, NodeOutcome]` (status + `duration_s` per node). See
 [cli-events.md](../design/orchestrator/cli-events.md).
 
 ## Drop to a lower tier for full control
