@@ -399,6 +399,15 @@ def build_flow(
         from agent_flow.utils import resolve_run_dir
 
         logger = get_run_logger()
+        # run_dir supports the same `{param}` templating as node inputs, but
+        # STRICT: a path is never valid half-substituted, so a missing placeholder
+        # is a hard error (not a dir literally named "{product_key}").
+        from agent_flow.utils import resolve_template
+
+        try:
+            run_dir = resolve_template(run_dir, params, strict=True)
+        except KeyError as exc:
+            raise ValueError(f"run_dir template references unknown param {exc}; available params: {sorted(params)}") from exc
         # Empty run_dir -> a fresh dir under <temp>/agent-flow/ (never litter cwd).
         wd = resolve_run_dir(run_dir, name=name)
         wd.mkdir(parents=True, exist_ok=True)

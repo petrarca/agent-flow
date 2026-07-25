@@ -83,7 +83,10 @@ class RunConfig(BaseSettings):
     )
 
     runtime: str = Field(default="opencode", description="Agent runtime: 'opencode' (real) or 'mock' (no-token stub).")
-    run_dir: str = Field(default="", description="Control-sidecar + relative-artifact root. Empty -> a fresh temp dir per run.")
+    run_dir: str = Field(
+        default="",
+        description="Control-sidecar + relative-artifact root. Supports {param} templating; empty -> a fresh temp dir per run.",
+    )
     agent_dir: str = Field(default="", description="Where agent definitions live (opencode --dir); becomes the subprocess cwd.")
     instructions: str = Field(default="", description="Run-wide brief injected into every agent prompt (inline text).")
     instructions_file: str = Field(default="", description="Path to a file whose content is the run-wide brief (wins over `instructions`).")

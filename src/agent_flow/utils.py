@@ -1,12 +1,39 @@
 """Small general-purpose utilities (no library-domain concepts).
 
-Currently: resolving the run directory, including a per-platform temp default
-when the consumer specifies none.
+Currently: `{param}` template expansion, and resolving the run directory
+(including a per-platform temp default when the consumer specifies none).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
+
+
+def resolve_template(value: str, params: dict[str, Any], *, strict: bool = False) -> str:
+    """Expand `{placeholders}` in a string from `params`.
+
+    The single substitution helper used across the library so `{product_key}` etc.
+    resolve the same way everywhere.
+
+    strict=False (default): a missing placeholder is left literal (no KeyError),
+      so an unrelated `{...}` in free text (prompt prose, a regex, an optional
+      param) degrades gracefully rather than crashing the run. Used for inputs,
+      instructions, context/agent-dir, and gate paths.
+
+    strict=True: a missing placeholder raises KeyError. Use for values where a
+      half-substituted result is always a bug — notably run_dir and other PATHS,
+      which must fully resolve (a directory literally named "{product_key}" is
+      never intended).
+    """
+    if not value:
+        return value
+    if strict:
+        return value.format(**params)
+    try:
+        return value.format(**params)
+    except KeyError, IndexError:
+        return value
 
 
 def default_temp_base() -> Path:

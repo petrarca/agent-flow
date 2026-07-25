@@ -26,6 +26,7 @@ from agent_flow.agent_runtime import run_agent
 from agent_flow.engine import Criticality, Node, RunContext
 from agent_flow.gates import Gate
 from agent_flow.runners import DEFAULT_MODEL, get_runner
+from agent_flow.utils import resolve_template
 
 
 def control_path(node_name: str) -> str:
@@ -50,18 +51,6 @@ def _node_logger():
         return logging.getLogger("agent_flow").info
 
 
-def _resolve(value: str, params: dict[str, Any]) -> str:
-    """Expand `{placeholders}` in an input value from the run params.
-
-    Missing placeholders are left as-is (no KeyError) so a template that names an
-    optional param degrades gracefully rather than crashing the run.
-    """
-    try:
-        return value.format(**params)
-    except KeyError, IndexError:
-        return value
-
-
 def build_work_order(inputs: dict[str, str], params: dict[str, Any]) -> str:
     """Render the KEY: value work-order prompt from templated inputs.
 
@@ -70,7 +59,7 @@ def build_work_order(inputs: dict[str, str], params: dict[str, Any]) -> str:
     completion protocol (CONTROL_FILE + control JSON shape) is injected separately
     by run_agent, so it is NOT part of these inputs.
     """
-    return "\n".join(f"{key}: {_resolve(val, params)}" for key, val in inputs.items())
+    return "\n".join(f"{key}: {resolve_template(val, params)}" for key, val in inputs.items())
 
 
 def agent_node(
@@ -143,7 +132,7 @@ def agent_node(
         if node_ctx:
             parts.append(f"## Context for this step\n\n{node_ctx}")
         if instructions and instructions.strip():
-            parts.append(f"## Instructions for this step\n\n{_resolve(instructions, tmpl)}")
+            parts.append(f"## Instructions for this step\n\n{resolve_template(instructions, tmpl)}")
         parts.append(work_order)
         prompt = "\n\n".join(parts)
 
@@ -152,7 +141,7 @@ def agent_node(
         shared_ctx = read_context_blocks(ctx.shared_context, params=ctx.params, run_dir=ctx.run_dir, warn=warn)
 
         # Per-node agent_dir overrides the flow default; both are templated.
-        eff_agent_dir = _resolve(agent_dir, tmpl) if agent_dir else _resolve(ctx.agent_dir, tmpl)
+        eff_agent_dir = resolve_template(agent_dir, tmpl) if agent_dir else resolve_template(ctx.agent_dir, tmpl)
 
         runtime = ctx.params.get("runtime", "opencode")
         eff_model = model or ctx.params.get("model") or DEFAULT_MODEL
