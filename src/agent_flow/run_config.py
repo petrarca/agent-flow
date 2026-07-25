@@ -48,21 +48,22 @@ from pydantic_settings import (
 
 from agent_flow.agent_runtime import DEFAULT_IDLE_TIMEOUT_S
 
-# The generic run settings the library knows. Anything else at a YAML config's
-# top level (that is not one of these and not `params`) is a typo -> rejected.
-_GENERIC_KEYS = ("runtime", "run_dir", "agent_dir", "instructions", "instructions_file", "llm_concurrency", "show_events")
-
 
 def _validate_yaml_top_level(path: Path) -> None:
-    """Reject unknown top-level keys in a --config YAML (fail loudly on typos)."""
+    """Reject unknown top-level keys in a --config YAML (fail loudly on typos).
+
+    The allowed keys are the RunConfig fields themselves (derived from the model,
+    so this never drifts as fields are added) plus `params` (the domain section).
+    """
     import yaml
 
     data = yaml.safe_load(path.read_text()) or {}
     if not isinstance(data, dict):
         raise ValueError(f"run config {path} must be a mapping at the top level")
-    unknown = set(data) - set(_GENERIC_KEYS) - {"params"}
+    allowed = set(RunConfig.model_fields) | {"params"}
+    unknown = set(data) - allowed
     if unknown:
-        raise ValueError(f"{path}: unknown config keys {sorted(unknown)} (allowed: {list(_GENERIC_KEYS)} + params)")
+        raise ValueError(f"{path}: unknown config keys {sorted(unknown)} (allowed: {sorted(RunConfig.model_fields)} + params)")
 
 
 class RunConfig(BaseSettings):

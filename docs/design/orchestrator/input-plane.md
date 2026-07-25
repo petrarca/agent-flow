@@ -85,6 +85,26 @@ python -m examples.tech_assessment.tech_flow -p product_key=acme --runtime openc
   -i "Experimental code-graph support is available; use it alongside RAG."
 ```
 
+## Reserved param names
+
+`agent_node`'s `run` callable reads a few well-known keys back out of `params`
+(the same bag `{name}` templating draws from) to apply run-wide knobs per node:
+
+- `runtime` — `"opencode"` | `"mock"` (which `AgentRunner` to use).
+- `model` — provider/model string; empty/absent -> the runner omits `--model` so
+  the runtime resolves it from its own config (never a hardcoded default).
+- `idle_timeout_s` — liveness timeout in seconds (string in `params`, since
+  `params` values are templating strings; coerced back to `int`).
+
+`run_cli` injects `runtime`/`model`/`idle_timeout_s` into `params` from the
+corresponding `RunConfig` settings (CLI flags / `AGENT_FLOW_*` env), so every
+`agent_node` picks them up automatically. A per-node `agent_node(model=...,
+idle_timeout_s=...)` always overrides the run-wide value.
+
+**Consequence:** a domain `params_model` should avoid fields named `runtime`,
+`model`, or `idle_timeout_s` unless it genuinely means the same thing — they are
+effectively reserved names in the params bag.
+
 ## Mapping to the old orchestrator vocabulary
 
 - "stuff currently in the orchestrator" → **(3)** per-node `instructions` and

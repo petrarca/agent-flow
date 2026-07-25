@@ -1,22 +1,28 @@
-"""CLI rendering helpers — optional, human-facing output on top of the logs.
+"""CLI rendering helpers — human-facing output on top of the logs.
 
-The library core stays render-agnostic: it emits `Event`s via the `on_event`
-callback and returns status dicts. This module turns those into nice terminal
-output with `rich`. It is OPTIONAL — install the `cli` extra
-(`agent-flow[cli]`) to use it. The core never imports it.
+The library core stays render-agnostic: it emits `Event`s / `on_node_event`
+data and returns `NodeOutcome`s. This module turns those into terminal output
+with `rich`/`typer` (core dependencies; always available, never required at
+core import time — see the module-level lazy imports below).
 
 Responsibilities:
   - `event_printer(...)` -> an `on_event` callback that prints each live runner
-    event (tool calls, messages, steps) as it streams.
-  - `print_results_table(...)` -> a end-of-run status table (node -> outcome).
+    event (tool calls, messages, steps) as it streams, in FULL (no truncation).
+  - `NodeProgressPrinter` -> the default line-based node-lifecycle view (consumes
+    `on_node_event`); `print_results_table(...)` -> the end-of-run
+    Node/Agent/Outcome/Duration table.
+  - `print_preflight_results(...)` -> pre-flight `Check` results as status lines.
   - `run_cli(build_nodes)` -> a reusable Typer command providing the generic run
     flags (--runtime/--run-dir/--agent-dir/--instructions/--show-events/
-    --llm-concurrency), a --config YAML file, and repeatable -p/--param KEY=VALUE
-    for arbitrary DOMAIN params. Precedence: CLI flag > config file > default.
-    A pipeline author supplies only a build_nodes() callable; no bespoke CLI.
+    --llm-concurrency/--model/--idle-timeout), a --config YAML file, and
+    repeatable -p/--param KEY=VALUE for DOMAIN params (optionally validated
+    against a `params_model`). Precedence: CLI flag > env (AGENT_FLOW_*) > .env >
+    --config YAML > default. Prints a "Resolved parameters" summary and runs
+    pre-flight checks before any agent is spawned. A pipeline author supplies
+    only a build_nodes() callable; no bespoke CLI.
 
 rich/typer/yaml are imported lazily inside the functions so importing this module
-(e.g. for type hints) does not hard-require the `cli` extra.
+(e.g. for type hints) stays cheap.
 """
 
 from __future__ import annotations
