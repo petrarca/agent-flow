@@ -16,3 +16,6 @@ build/
 examples/*/*.md
 examples/*/*.json
 examples/*/*.control.json
+
+# JS deps accidentally created under an example's .opencode/
+node_modules/

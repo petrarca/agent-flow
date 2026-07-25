@@ -1,23 +1,46 @@
 # examples
 
-Demonstrations of how to build pipelines on top of the `agent-flow` library.
+Runnable demonstrations of building pipelines on the `agent-flow` library. Each
+example is a single file; they share one simulated agent set in
+`.opencode/agent/` (so every example runs with `--runtime mock` — no tokens — or
+`--runtime opencode`).
 
-## tech_assessment/
-A simplified model of a tech-assessment DAG (tech-stack → domain ∥
-coupling → architecture → summary). Shows sequencing, parallel fan-out,
-analyst→verifier re-run loop, and per-stage criticality.
+All three build the same shape where relevant:
+
+    tech-stack -> tech-stack-verify -> ( domain(+verify) | architecture(+verify) ) -> summary
+
+## imperative.py — author with `agent_node`
+
+The Tier-3 pipeline built imperatively: `agent_node(...)` per node, wired with
+`depends_on` / `parallel_group`, gates referenced by name (`require_file`,
+`rerun_on_signal`). Runs via the reusable `run_cli`.
 
 ```bash
-task example:tech:mock PRODUCT=my-product   # mock agents, no tokens
-task example:tech PRODUCT=my-product         # real opencode + model
+task example:imperative:mock PRODUCT=acme      # mock agents, no tokens
+task example:imperative PRODUCT=acme           # real opencode + model
+python -m examples.imperative nodes list       # inspect the flow
 ```
 
-## toy_pipeline/
-A minimal 3-stage pipeline (analyst → verifier → extractor). It hand-writes its
-own Prefect flow, reusing the library primitives (run_agent, build_run_config,
-preflight), and demonstrates transactions, rollback, and resume.
+## declarative.py — the same flow as a `FlowDef`
+
+The identical pipeline authored as pure DATA: a `FlowDef` of `NodeDef`s
+(serializable, no callables in the definition). Also shows **how to hook your
+own logic**: a custom deciding gate and an observing `after_node` hook, both
+registered on a `FlowRegistry` and referenced by name.
 
 ```bash
-task example:toy:mock TOPIC="Hexagonal architecture"
-task example:toy TOPIC="Hexagonal architecture"
+task example:declarative:mock PRODUCT=acme
+python -m examples.declarative nodes list
+```
+
+## custom_flow.py — Tier-2, your own flow
+
+A hand-written flow that calls the `run_agent` primitive directly (analyst →
+verifier → extractor), reusing `build_run_config` / `preflight` and demonstrating
+transactions, rollback, and resume — the low-level escape hatch when you want to
+own the flow shape yourself.
+
+```bash
+task example:custom:mock TOPIC="Hexagonal architecture"
+task example:custom TOPIC="Hexagonal architecture"
 ```
