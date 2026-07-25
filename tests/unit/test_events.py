@@ -70,3 +70,79 @@ def test_project_non_json_is_trimmed_passthrough():
     from agent_flow.cli import _project_event
 
     assert _project_event("plain log line") == "plain log line"
+
+
+# The runner normalizes each event into NEUTRAL display fields (kind/title/
+# detail/status). The CLI renders only those — it never re-parses opencode JSON.
+
+
+def test_neutral_view_step_end_carries_kind_and_tokens():
+    line = json.dumps({"type": "step_finish", "part": {"type": "step-finish", "tokens": {"total": 1200}, "reason": "stop"}})
+    ev = OpenCodeRunner().parse_event(line)
+    assert ev.kind == "step_end"
+    assert ev.tokens == 1200
+    assert ev.is_terminal
+
+
+def test_neutral_view_tool_prefers_state_title():
+    line = json.dumps({"part": {"type": "tool", "tool": "edit", "state": {"title": "Edit src/app.py", "status": "completed"}}})
+    ev = OpenCodeRunner().parse_event(line)
+    assert ev.kind == "tool"
+    assert ev.title == "Edit src/app.py"  # opencode's own summary, not just the path
+    assert ev.status == "completed"
+
+
+def test_neutral_view_tool_falls_back_to_input_target():
+    line = json.dumps({"part": {"type": "tool", "tool": "edit", "state": {"input": {"filePath": "/x/app.py"}}}})
+    ev = OpenCodeRunner().parse_event(line)
+    assert ev.title == "edit /x/app.py"  # no title -> "<tool> <target>"
+
+
+def test_neutral_view_tool_name_prefixed_when_title_is_bare_target():
+    # opencode's state.title is inconsistent: for 'read' it is often just the
+    # bare path (no verb). We must still lead with the tool name so every line
+    # reads uniformly ("read <path>"), not a bare path with no tool.
+    line = json.dumps({"part": {"type": "tool", "tool": "read", "state": {"title": "/x/cloud-readiness.md"}}})
+    ev = OpenCodeRunner().parse_event(line)
+    assert ev.title == "read /x/cloud-readiness.md"
+
+
+def test_neutral_view_tool_name_not_doubled_when_title_has_verb():
+    # When state.title already starts with the tool verb (edit -> "Edit <file>"),
+    # do NOT prefix again ("edit Edit ...").
+    line = json.dumps({"part": {"type": "tool", "tool": "edit", "state": {"title": "Edit app.py"}}})
+    ev = OpenCodeRunner().parse_event(line)
+    assert ev.title == "Edit app.py"
+
+
+def test_neutral_view_edit_shows_diff_stat():
+    # an edit carries metadata.filediff.additions/deletions -> "+A/-D" hint.
+    line = json.dumps(
+        {"part": {"type": "tool", "tool": "edit", "state": {"title": "Edit x.md", "metadata": {"filediff": {"additions": 12, "deletions": 3}}}}}
+    )
+    ev = OpenCodeRunner().parse_event(line)
+    assert ev.detail == "+12/-3"
+
+
+def test_neutral_view_tool_metadata_hint_and_error_status():
+    line = json.dumps({"part": {"type": "tool", "tool": "grep", "state": {"title": "Grep foo", "metadata": {"matches": 12}, "error": "boom"}}})
+    ev = OpenCodeRunner().parse_event(line)
+    assert ev.detail == "12 matches"
+    assert ev.status == "error"
+
+
+def test_render_event_tool_colors_by_status():
+    from agent_flow.cli import render_event
+    from agent_flow.runners import Event
+
+    assert "[green]" in render_event(Event(kind="tool", title="Edit x", status="completed"))
+    assert "[red]" in render_event(Event(kind="tool", title="Edit x", status="error"))
+    assert "[cyan]" in render_event(Event(kind="tool", title="Edit x", status="running"))
+
+
+def test_render_event_tool_shows_detail():
+    from agent_flow.cli import render_event
+    from agent_flow.runners import Event
+
+    out = render_event(Event(kind="tool", title="Grep foo", detail="12 matches", status="completed"))
+    assert "Grep foo" in out and "12 matches" in out

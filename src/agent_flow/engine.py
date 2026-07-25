@@ -121,6 +121,12 @@ class Node:
     max_cycles: int = DEFAULT_MAX_CYCLES
     result_schema: object = None
     agent: str = ""
+    # Optional result->params export hook. After the node completes (and is not
+    # re-running), the engine derives keys from the node's result and merges them
+    # into the run-context service so DOWNSTREAM nodes template against them.
+    # Either a callable `(result) -> Mapping[str, Any]`, or a declarative map
+    # `{param_name: result_field}`. See agent_node(exports=...) and run_context.
+    exports: Callable[[dict[str, Any]], Any] | dict[str, str] | None = None
 
 
 def _group_membership(nodes: list[Node]) -> tuple[dict[str, list[Node]], list[str]]:
@@ -235,15 +241,21 @@ def interpret(
     `on_error` maps a raised exception to a status per criticality (and may
     itself raise NodeBlocked).
     """
+    from agent_flow.run_context import get_run_context
+
     cycles = 0
     while True:
+        # Effective params = the passed params overlaid with the live run-context
+        # snapshot, so this node sees any values UPSTREAM nodes exported. Snapshot
+        # is taken at THIS node's start -> a stable view for its whole execution.
+        eff_params = {**params, **get_run_context().snapshot()}
         try:
             result = node.run(
                 RunContext(
                     node=node,
                     run_dir=run_dir,
                     cycles=cycles,
-                    params=params,
+                    params=eff_params,
                     on_event_factory=on_event_factory,
                     shared_instructions=shared_instructions,
                     shared_context=shared_context,
@@ -254,7 +266,7 @@ def interpret(
             return NodeOutcome(status=on_error(node, exc))
 
         directive = (
-            node.gate(GateContext(result=result, node=node, run_dir=run_dir, cycles=cycles, params=params, agent_dir=agent_dir))
+            node.gate(GateContext(result=result, node=node, run_dir=run_dir, cycles=cycles, params=eff_params, agent_dir=agent_dir))
             if node.gate
             else Continue()
         )
@@ -270,6 +282,10 @@ def interpret(
             log(f"node {node.name}: gate -> re-run cycle {cycles} ({note})")
             continue
 
+        # Node is settling (Continue / cross-node GoTo / exhausted Restart): apply
+        # its result->params exports to the run-context for DOWNSTREAM nodes.
+        _apply_exports(node, result, log)
+
         if isinstance(directive, GoTo) and directive.node != node.name:
             # Cross-node jump-back: the node itself is done; the walker decides
             # whether to rewind to the target (bounded there).
@@ -278,6 +294,31 @@ def interpret(
 
         # Continue, or an exhausted Restart.
         return NodeOutcome(status="ok")
+
+
+def _apply_exports(node: Node, result: Any, log: Callable[[str], None]) -> None:
+    """Merge a node's result-derived exports into the run-context service.
+
+    `node.exports` is either a callable `(result) -> Mapping` or a declarative
+    `{param_name: result_field}` map. Missing result fields are skipped. Never
+    raises: an exports mistake logs and is ignored rather than failing the run.
+    """
+    spec = node.exports
+    if not spec:
+        return
+    from agent_flow.run_context import get_run_context
+
+    try:
+        if callable(spec):
+            derived = dict(spec(result) or {})
+        else:
+            src = result if isinstance(result, dict) else {}
+            derived = {param: src[field] for param, field in spec.items() if field in src}
+        if derived:
+            get_run_context().update(derived)
+            log(f"node {node.name}: exported {sorted(derived)} to run-context")
+    except Exception as exc:  # noqa: BLE001 - exports are consumer code; never fail the run
+        log(f"node {node.name}: exports failed ({exc}) — ignored")
 
 
 def build_flow(
@@ -398,7 +439,13 @@ def build_flow(
 
     @flow(name=name)
     def _pipeline(run_dir: str = "", **params: Any) -> dict:
+        from agent_flow.run_context import init_run_context
         from agent_flow.utils import resolve_run_dir
+
+        # Install the run-scoped domain-param store from the initial params. Nodes
+        # read a snapshot of it (so upstream exports are visible) and export hooks
+        # write to it. Same-process, run-scoped (see run_context module SCOPE).
+        init_run_context(params)
 
         logger = get_run_logger()
         # run_dir supports the same `{param}` templating as node inputs, but

@@ -105,6 +105,36 @@ idle_timeout_s=...)` always overrides the run-wide value.
 `model`, or `idle_timeout_s` unless it genuinely means the same thing — they are
 effectively reserved names in the params bag.
 
+## Run-context: params can also flow FROM a node
+
+Params are not only set at start. They live in a run-scoped **run-context
+service** (`run_context.py`) — a thread-safe store the engine installs from the
+initial params. A node reads a *snapshot* of it when it starts (so it sees a
+stable view for its execution), and a node can **publish** values into it for
+downstream nodes via `agent_node(exports=...)`:
+
+- declarative `{param_name: result_field}` — copy fields out of the node's
+  `result` into params;
+- callable `(result) -> Mapping` — full control.
+
+The engine applies exports after the node settles (Continue or cross-node
+GoTo), so a later node's `{name}` templating picks them up automatically.
+Example: the readiness check captures provenance and `exports` it, so every
+downstream agent stamps the same `analysis_timestamp` / `pipeline_commit`
+without re-capturing it.
+
+Scope is same-process, **downstream-only** — exports target nodes that run
+*after* the publisher, never parallel-group siblings (which may be serialized).
+Scalar params are the first slice of a broader "dynamic prompt composition"
+direction (injecting context/instructions at run time); see the roadmap.
+
+A param that is *only ever* set this way (not a user input) is declared on the
+`params_model` with a placeholder default and `Field(json_schema_extra={"runtime":
+True})`. The placeholder keeps `{name}` templating resolvable from the first node;
+`run_cli` recognises the marker and **omits the field from the resolved-params
+summary** so it does not read as an input you could pass. The publishing node then
+overwrites it. Example: `analysis_timestamp` / `pipeline_commit`.
+
 ## Mapping to the old orchestrator vocabulary
 
 - "stuff currently in the orchestrator" → **(3)** per-node `instructions` and

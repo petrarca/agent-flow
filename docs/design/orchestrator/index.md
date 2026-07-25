@@ -127,7 +127,7 @@ build_flow(nodes, name="tech")(product_key="acme", runtime="opencode")  # no run
 | Engine | [engine.md](engine.md) | `Node`, `plan_groups`, `build_flow`; DAG + parallel groups; bounded re-runs; cross-node jump-back |
 | Gates | [gates.md](gates.md) | `Directive` (Continue/Restart/GoTo/Stop), `GateContext`, ready-made gates — the consumer's flow-control hook |
 | Batteries | [batteries.md](batteries.md) | `agent_node` — the one-call node; the Tier-3 developer experience |
-| Input plane | [input-plane.md](input-plane.md) | The prompt channels (ingested context + inline instructions, global & per-node) + persona; templating; the CLI brief |
+| Input plane | [input-plane.md](input-plane.md) | The prompt channels (ingested context + inline instructions, global & per-node) + persona; templating; the CLI brief; run-context + `exports` (result->params) |
 | Result schema | [result-schema.md](result-schema.md) | Typed agent output; Pydantic-optional; opt-in consumer convenience |
 | Backend | [backend.md](backend.md) | Prefect now, swappable by design; candidates; deployment modes |
 | CLI & events | [cli-events.md](cli-events.md) | `Event`/`on_event`, `--show-events` projection, the Typer/rich CLI |

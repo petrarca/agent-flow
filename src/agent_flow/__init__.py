@@ -92,6 +92,12 @@ from agent_flow.run_config import (
     init_settings,
     parse_params,
 )
+from agent_flow.run_context import (
+    RunContextService,
+    clear_run_context,
+    get_run_context,
+    init_run_context,
+)
 from agent_flow.runners import (
     AgentInvocation,
     AgentRunner,
@@ -120,6 +126,11 @@ __all__ = [
     "OpenCodeRunner",
     "MockRunner",
     "get_runner",
+    # run-context service (open domain params + exports)
+    "RunContextService",
+    "get_run_context",
+    "init_run_context",
+    "clear_run_context",
     # control-file protocol (injected into agent prompts)
     "build_control_preamble",
     # CLI: the reusable runner + rendering helpers

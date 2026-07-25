@@ -19,6 +19,7 @@ Layer-1 core (run_agent) — keeping `engine.py` itself decoupled from the runti
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +79,7 @@ def agent_node(
     model: str | None = None,
     idle_timeout_s: int | None = None,
     agent_dir: str | None = None,
+    exports: Callable[[dict], Any] | dict[str, str] | None = None,
 ) -> Node:
     """Build a `Node` that runs ONE runtime agent as a supervised subprocess.
 
@@ -108,6 +110,17 @@ def agent_node(
         agent_dir: optional per-node override of where agent DEFINITIONS live
             (opencode `--dir`). Defaults to the flow's build_flow(agent_dir=...).
             Templated; absolute after templating.
+        exports: optional result->params publish hook. After this node completes
+            (and is not re-running), the engine derives keys from the node's
+            `result` and merges them into the run-context service, so DOWNSTREAM
+            nodes template `{key}` against them. Two forms:
+              - declarative `{param_name: result_field}` — copy result fields into
+                params under (possibly renamed) keys; missing fields are skipped.
+              - callable `(result) -> Mapping[str, Any]` — full control.
+            Use it to route a value a node DISCOVERS (e.g. a readiness check's
+            captured provenance or a chosen mode) to the agents that follow.
+            Same-process, downstream-only; never targets parallel-group siblings
+            (see run_context module SCOPE).
 
     Returns a plain `Node`, so it mixes freely with hand-written `run` nodes.
     """
@@ -210,4 +223,5 @@ def agent_node(
         max_cycles=max_cycles,
         result_schema=result_schema,
         agent=agent,
+        exports=exports,
     )

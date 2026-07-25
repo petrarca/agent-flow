@@ -85,19 +85,42 @@ class AgentInvocation:
 
 @dataclass(frozen=True)
 class Event:
-    """One parsed unit of runner stdout — a liveness heartbeat + optional telemetry.
+    """One parsed unit of runner stdout: liveness + telemetry + a NEUTRAL view.
 
-    The engine only needs tokens/cost/is_terminal/is_event for supervision. We do
-    NOT parse the runner's event into a summary — that would couple us to each
-    runner's (versioned) schema. Instead `raw` carries the ORIGINAL stdout line
-    so a display callback can render it verbatim (e.g. rich's JSON pretty-print).
+    Two audiences, cleanly separated so nothing above the runner knows the
+    runtime's wire format:
+
+    - SUPERVISION (engine): tokens / cost / is_terminal / is_event. Unchanged.
+
+    - DISPLAY (CLI): a runner-AGNOSTIC, already-normalized view of the event —
+      `kind` + `title` + `detail` + `status`. The RUNNER fills these from its own
+      (versioned, runtime-specific) schema; the CLI renders them with styling and
+      never re-parses `raw`. This is the seam: "how to read the stream" lives in
+      the runner, "how to lay it out" lives in the CLI, and they meet on these
+      neutral fields. A new runtime (Claude Code, …) populates the same fields
+      from its own stream and the existing CLI renders it with zero changes.
+
+    - DIAGNOSTIC: `raw` still carries the ORIGINAL stdout line verbatim, for
+      --show-events deep debugging and for runtimes whose renderer wants it. It
+      is a passthrough, NOT something the neutral renderer interprets.
+
+    kind    neutral category the CLI styles: "step_start" | "step_end" | "tool" |
+            "text" | "other" ("" when this is not a displayable event).
+    title   primary human summary (tool title/target, the message text, …).
+    detail  secondary hint (tool metadata: "12 matches", "exit 0", a diff stat).
+    status  tool lifecycle for coloring: "running" | "completed" | "error" | "".
     """
 
     tokens: int = 0
     cost: float = 0.0
     is_terminal: bool = False
     is_event: bool = True  # False for lines that are not real events (ignored for liveness)
-    raw: str = ""  # the original stdout line, for optional live display
+    raw: str = ""  # the original stdout line, diagnostic passthrough (NOT for neutral render)
+    # Neutral display view (runner-filled, CLI-rendered) — see class docstring.
+    kind: str = ""
+    title: str = ""
+    detail: str = ""
+    status: str = ""
 
     @staticmethod
     def none() -> Event:
@@ -163,6 +186,14 @@ class OpenCodeRunner:
         return cmd
 
     def parse_event(self, line: str) -> Event:
+        """Parse one opencode NDJSON line into supervision fields + the NEUTRAL view.
+
+        This is the ONE place opencode's wire shape is interpreted. Besides the
+        telemetry the engine needs (tokens/cost/is_terminal), we normalize the
+        event into the runner-agnostic display fields (kind/title/detail/status)
+        so the CLI can render it WITHOUT ever re-parsing opencode JSON. `raw` is
+        still carried verbatim for --show-events / diagnostics.
+        """
         stripped = line.strip()
         if not stripped.startswith("{"):
             return Event.none()
@@ -170,15 +201,23 @@ class OpenCodeRunner:
             ev = json.loads(stripped)
         except json.JSONDecodeError:
             return Event.none()
-        # Telemetry lives on step-finish parts; everything else is a plain
-        # heartbeat. We do NOT interpret the event beyond that — `raw` carries
-        # the full line for optional display.
-        part = ev.get("part") or {}
-        if part.get("type") in ("step-finish", "step_finish"):
+        part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
+        ptype = part.get("type") or ev.get("type") or "event"
+
+        if ptype in ("step-start", "step_start"):
+            return Event(raw=stripped, kind="step_start")
+        if ptype in ("step-finish", "step_finish"):
             tokens = int((part.get("tokens") or {}).get("total") or 0)
             cost = float(part.get("cost") or 0.0)
-            return Event(tokens=tokens, cost=cost, is_terminal=part.get("reason") == "stop", raw=stripped)
-        return Event(raw=stripped)  # a real event (heartbeat), no telemetry
+            return Event(tokens=tokens, cost=cost, is_terminal=part.get("reason") == "stop", raw=stripped, kind="step_end")
+        if ptype == "tool":
+            title, detail, status = _opencode_tool_view(part)
+            return Event(raw=stripped, kind="tool", title=title, detail=detail, status=status)
+        if ptype == "text":
+            text = " ".join((part.get("text") or "").split())
+            return Event(raw=stripped, kind="text", title=text)
+        # A real event we don't specially render: keep it displayable via `title`.
+        return Event(raw=stripped, kind="other", title=str(ptype))
 
     def preflight_checks(self, agent_dir: str | Path | None) -> list:
         """opencode-specific pre-conditions: binary on PATH, not nested, agent layout."""
@@ -223,6 +262,75 @@ class OpenCodeRunner:
             tools=tools,
             detail=f"found at {path}; config resolved in {agent_dir}",
         )
+
+
+# Per-tool input field carrying the human "target" (the file, command, pattern,
+# url, …). opencode also sets `state.title` which we prefer; this is the fallback
+# for tools/versions that don't. Ordered by likelihood so the first present wins.
+_OPENCODE_TOOL_TARGET_KEYS = ("filePath", "command", "pattern", "url", "path", "query", "name", "description")
+
+# Compact per-tool metadata hint (opencode's state.metadata), rendered as a
+# secondary "detail". Only a few scalar keys are worth one line.
+_OPENCODE_TOOL_META_KEYS = (("matches", "matches"), ("count", "matches"), ("exit", "exit"))
+
+
+def _opencode_tool_view(part: dict) -> tuple[str, str, str]:
+    """Normalize an opencode `tool` part to neutral (title, detail, status).
+
+    title  = "<tool> <target>" — prefer opencode's own state.title; else the
+             tool name plus the first present target input field.
+    detail = a compact metadata hint ("12 matches", "exit 0") when available.
+    status = "running" | "completed" | "error" | "" (from state.status/error).
+    """
+    tool = part.get("tool", "tool")
+    state = part.get("state") if isinstance(part.get("state"), dict) else {}
+    inp = state.get("input") if isinstance(state.get("input"), dict) else {}
+    meta = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
+
+    # Build the "target" part: opencode's own state.title if present (grep->the
+    # pattern, edit->"Edit <file>", …), else the first present input field.
+    target = (state.get("title") or "").strip()
+    if not target:
+        target = next((str(inp[k]) for k in _OPENCODE_TOOL_TARGET_KEYS if inp.get(k)), "")
+
+    # Always LEAD with the tool name so every tool line reads uniformly
+    # ("read <path>", "grep <pattern>", "edit <file>"). opencode's state.title is
+    # inconsistent — for some tools it already embeds the verb (edit -> "Edit
+    # <file>"), for others it is just the bare target (read -> "<path>"). Only
+    # prefix the tool name when the target does not already start with it, so we
+    # don't produce "edit Edit <file>".
+    if target and target.lower().startswith(tool.lower()):
+        title = target
+    else:
+        title = f"{tool} {target}".rstrip()
+
+    detail = _opencode_tool_detail(meta)
+
+    status = str(state.get("status") or "")
+    if state.get("error"):
+        status = "error"
+    return title, detail, status
+
+
+def _opencode_tool_detail(meta: dict) -> str:
+    """A compact secondary hint from an opencode tool's state.metadata, or "".
+
+    Covers the few metadata shapes worth one line: grep/glob match counts, bash
+    exit codes, and an edit's diff stat (+adds/-dels from metadata.filediff).
+    """
+    # edit: a "+A/-D" diff stat is the most useful hint for a write-shaped tool.
+    filediff = meta.get("filediff") if isinstance(meta.get("filediff"), dict) else None
+    if filediff:
+        adds = filediff.get("additions")
+        dels = filediff.get("deletions")
+        if isinstance(adds, (int, float)) or isinstance(dels, (int, float)):
+            return f"+{int(adds or 0)}/-{int(dels or 0)}"
+    # grep/glob match counts, bash exit codes.
+    for src_key, label in _OPENCODE_TOOL_META_KEYS:
+        val = meta.get(src_key)
+        if isinstance(val, (int, float)):
+            return f"{int(val)} {label}" if label == "matches" else f"{label} {int(val)}"
+    return ""
 
 
 def _run_text(cmd: list[str], timeout: float = 10.0) -> str | None:

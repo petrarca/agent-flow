@@ -114,9 +114,10 @@ only single clean channel carrying both the heartbeat and telemetry.
 stderr, no tokens/cost, needing stderr/stdout split. It stays a debug aid, not
 the supervision source.
 
-Because JSON is verbose, we do NOT dump it raw. `parse_event` keeps only the
-supervision fields and the raw line; the [CLI](cli-events.md) projects each event
-to one readable line when `--show-events` is on.
+Because JSON is verbose, we do NOT dump it raw. `parse_event` extracts the
+supervision fields plus a runner-agnostic **neutral display view** (kind/title/
+detail/status) and keeps the raw line; the [CLI](cli-events.md) renders that
+neutral view to one readable line when `--show-events` is on.
 
 ## Where it lives
 

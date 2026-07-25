@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: CLI and live events
-description: The Event stream and on_event hook, the --show-events one-line projection, and the optional Typer/rich CLI.
+description: The Event stream and on_event hook, the runner-agnostic neutral display view the CLI renders, and the optional Typer/rich CLI.
 tags: [agent-flow, cli, events, on_event, rich, typer, observability]
 timestamp: 2026-07-23T07:51:35Z
 ---
@@ -58,31 +58,43 @@ the **raw** original line. `run_agent` accepts an `on_event: (Event) -> None`
 callback, invoked per event; supervision ignores it, and display errors are
 swallowed so they can never disrupt a run.
 
-The core does **not** interpret event content or render anything — it stays
-render-agnostic. `parse_event` extracts only what supervision needs and keeps the
-raw line for a consumer to display. This avoids coupling the engine to a runner's
-(versioned) event schema.
+The **engine** does not interpret event content or render anything — it stays
+render-agnostic, using only the supervision fields (`tokens`/`cost`/`is_terminal`).
+The *display* fields are filled by the **runner** (the only thing that understands
+its wire format), so the coupling to a runtime's (versioned) event schema lives in
+exactly one place.
 
-## The projection (display concern, in the CLI)
+## The neutral display view (runner fills, CLI renders)
 
-Raw opencode NDJSON is far too verbose to show as-is, so the CLI projects each
-event to **one readable line** using a few shallow, tolerant fields:
+The one place a runtime's wire shape is interpreted is the runner's `parse_event`.
+Besides supervision fields, it normalizes each event into a runner-**agnostic**
+display view on `Event`:
+
+```
+kind    "step_start" | "step_end" | "tool" | "text" | "other"
+title   primary human summary (tool title/target, the message text, …)
+detail  secondary hint (tool metadata: "12 matches", "exit 0")
+status  tool lifecycle: "running" | "completed" | "error" | ""
+```
+
+The **CLI** renders only these neutral fields — it never re-parses `raw`. `kind`
+drives the base style; for tools, `status` refines the color (running=cyan,
+completed=green, error=red). The CLI colors only the leading keyword and leaves
+the content bare, so rich's highlighter decorates paths/numbers/strings on top:
 
 ```
 analyst - step
-analyst tool write /work/tech-stack.md
+analyst tool Edit src/app.py            (green "tool"; rich colors the path)
+analyst tool Grep "Patient" (12 matches)
 analyst The report has been written to …
 analyst step done (12,793 tokens)
 ```
 
-- `step-start` → `- step`; `step-finish` → `step done (N tokens)`
-- `tool` → `tool <name> <filePath/command>`
-- `text` → the agent's message line (trimmed)
-- unknown shapes → the event type, or the trimmed raw line
-
-This projection lives in the CLI (`_project_event`), not the runner/engine, so
-the engine never interprets event content. Unknown shapes fall back gracefully —
-it never breaks on a new event kind.
+Why this split: "how to read the stream" belongs to the runner; "how to lay it
+out and color it" belongs to the CLI; they meet on the neutral fields. A new
+runtime (Claude Code, …) fills the same fields from its own stream and the
+existing CLI renders it with **zero changes**. `raw` remains a diagnostic
+passthrough (for `--show-events`), not something the neutral renderer touches.
 
 ## Plumbing the event hook through the tiers
 
@@ -98,10 +110,11 @@ and a callable is not serializable — so it is a **build-time** value, not a
 
 ## The CLI (optional `cli` extra: typer + rich)
 
-`agent_flow.cli` provides a shared rich `Console`, `event_printer(agent)` (the
-per-event projection callback), `NodeProgressPrinter` (the default line-based
-node progress, consuming `on_node_event`), `print_results_table(results, agents=)`
-(the end-of-run Node|Agent|Outcome|Duration table), and `print_preflight_results`.
+`agent_flow.cli` provides a shared rich `Console`, `event_printer(label)` +
+`render_event(ev)` (the neutral event renderer; the label is the NODE name, so a
+live firehose stays navigable), `NodeProgressPrinter` (the default line-based node
+progress, consuming `on_node_event`), `print_results_table(results, agents=)` (the
+end-of-run Node|Agent|Outcome|Duration table), and `print_preflight_results`.
 `run_cli` wires them: default = progress lines + results table; `--show-events` =
 the raw firehose + results table. `rich`/`typer` are core dependencies, but the
 engine core stays render-agnostic: it emits `Event`s and `on_node_event` data and
@@ -109,8 +122,9 @@ returns `NodeOutcome`s, and only the `cli` module turns those into terminal outp
 
 ## Where it lives
 
-`src/agent_flow/runners.py` (`Event`, `parse_event`), `agent_runtime` (the
-`on_event` callback, Ctrl-C process-group kill), `engine.py`
-(`RunContext.on_event_factory`, `build_flow(on_event_factory=, on_node_event=)`,
-`NodeOutcome.duration_s`), `src/agent_flow/cli.py` (`event_printer`,
-`_project_event`, `NodeProgressPrinter`, `print_results_table`, `get_console`).
+`src/agent_flow/runners.py` (`Event` with the neutral display fields;
+`parse_event` fills them), `agent_runtime` (the `on_event` callback, Ctrl-C
+process-group kill), `engine.py` (`RunContext.on_event_factory`,
+`build_flow(on_event_factory=, on_node_event=)`, `NodeOutcome.duration_s`),
+`src/agent_flow/cli.py` (`event_printer`, `render_event`, `NodeProgressPrinter`,
+`print_results_table`, `get_console`).

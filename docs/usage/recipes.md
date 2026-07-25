@@ -73,6 +73,23 @@ validated: a missing required param (or a bad value) fails fast with exit code 2
 **before** any agent is spawned. Omit `params_model` to accept raw untyped `-p`
 values (the historical behavior).
 
+**Runtime-populated fields.** Some params are not user inputs — they are filled
+*at run time* (e.g. a value a node publishes via [`exports`](#exports)). Declare
+such a field with a placeholder default and mark it
+`json_schema_extra={"runtime": True}`:
+
+```python
+class MyParams(BaseSettings):
+    product_key: str                        # user input
+    # set at run time by a node's exports; not something you pass with -p:
+    analysis_timestamp: str = Field(default="UNKNOWN", json_schema_extra={"runtime": True})
+```
+
+The placeholder keeps `{analysis_timestamp}` templating resolvable from the very
+first node, while `run_cli` **omits runtime fields from the "Resolved parameters"
+summary** so they don't read as inputs you could pass. A node then overwrites the
+placeholder for downstream nodes (see [`exports`](#exports)).
+
 Prefer your own CLI? `run_cli` is optional — build any CLI you like and call
 `build_flow(...)` / `pipeline(**params)` directly (see the toy example, which
 reuses `build_run_config` and `preflight` in its own Tier-2 CLI).
@@ -204,6 +221,37 @@ agent_node("tech-stack", "tech-stack-analyst", result_schema=PydanticSchema(Tech
 The schema is injected into the agent's prompt and the result is validated
 (never fails the run — check `result["_result_valid"]` in a gate if you need to
 act on it). See [result-schema.md](../design/orchestrator/result-schema.md).
+
+## Publish a value to downstream nodes (`exports`) {#exports}
+
+A node can discover a value and hand it to the nodes that follow — without
+threading it through your own code. `agent_node(exports=...)` merges values from
+the node's `result` into the run-scoped param store, so **downstream** nodes
+template `{name}` against them.
+
+```python
+# Declarative: copy result fields into params (rename allowed via the key).
+agent_node("readiness", "readiness-check", result_schema=ReadinessResult,
+           exports={"analysis_timestamp": "analysis_timestamp",
+                    "pipeline_commit": "pipeline_commit"})
+
+# Callable: full control over what gets published.
+agent_node("readiness", "readiness-check",
+           exports=lambda result: {"mode": result["_result_obj"].suggested_mode})
+
+# A later node then templates the exported value like any other param:
+agent_node("analyst", "analyst", depends_on=("readiness",),
+           inputs={"ANALYSIS_TIMESTAMP": "{analysis_timestamp}", "MODE": "{mode}"})
+```
+
+The engine applies exports after the node settles, so later nodes pick the values
+up automatically. Pair this with a **runtime-populated** params field (see
+[typed params](#typed-required-domain-params-params_model)) to give the
+placeholder a sensible default and keep it out of the resolved-params summary.
+
+Scope: same-process, **downstream-only** — exports reach nodes that run *after*
+the publisher, never parallel-group siblings. See
+[input-plane.md](../design/orchestrator/input-plane.md#run-context-params-can-also-flow-from-a-node).
 
 ### What a gate sees
 

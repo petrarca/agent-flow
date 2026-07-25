@@ -56,11 +56,11 @@ def event_printer(label: str, *, console=None) -> Callable[[Event], None]:
     DAG unit the reader navigates by), not the agent that implements it — in a
     firehose of live lines the node is what tells you where in the flow you are.
 
-    The raw runner event (opencode NDJSON) is far too verbose to show as-is, so
-    the CLI projects it to a single line using a FEW shallow, stable fields. This
-    projection is a DISPLAY concern and lives here, not in the runner/engine —
-    the engine never interprets event content. Unknown shapes fall back to the
-    event type or a trimmed raw line, so it never breaks on a new event kind.
+    Rendering is RUNNER-AGNOSTIC: the runner already normalized the event into
+    neutral fields (kind/title/detail/status) in `parse_event`; here we only map
+    those to this CLI's palette. The CLI never re-parses the runtime's wire
+    format — that knowledge lives in the runner. A new runtime that fills the
+    same neutral fields renders here with zero changes.
 
     Usage:
         run_agent(..., on_event=event_printer("analyst"))
@@ -68,47 +68,63 @@ def event_printer(label: str, *, console=None) -> Callable[[Event], None]:
     console = console or get_console()
 
     def _print(ev: Event) -> None:
-        line = _project_event(ev.raw)
+        line = render_event(ev)
         if line:
             console.print(f"  [dim]{label}[/dim] {line}")
 
     return _print
 
 
-def _project_event(raw: str) -> str:
-    """Project one raw event line to a styled display line (best-effort).
+def render_event(ev: Event) -> str:
+    """Style one NEUTRAL event into a rich display line (this CLI's palette).
 
-    Content is shown in FULL (not truncated) — rich soft-wraps long lines in the
-    terminal; --show-events is a debug stream where seeing the whole message/tool
-    input matters more than fitting one physical line.
+    The runner owns classification (ev.kind/status) and content (ev.title/detail);
+    this owns COLOR. `kind` drives the base style; for tools, `status` refines it
+    (running=cyan, completed=green, error=red) — a richer coloring than a flat
+    hue, made possible by the neutral status field.
+
+    We deliberately color only the LEADING keyword ("tool"/"step done") and leave
+    the CONTENT (ev.title — file paths, patterns, URLs) UNSTYLED. rich's default
+    highlighter then auto-colors those tokens (paths magenta, numbers, quoted
+    strings, …). Wrapping the whole line in an explicit style would suppress that,
+    so the keyword carries our semantic status color and rich decorates the rest.
+
+    Content is shown in FULL (rich soft-wraps); --show-events is a debug stream
+    where seeing the whole line matters more than fitting one physical row.
+
+    Never raises: an unknown kind falls back to the (already trimmed) title.
     """
-    import json
+    kind = ev.kind
+    if kind == "step_start":
+        return "[dim]- step[/dim]"
+    if kind == "step_end":
+        return f"[green]step done[/green] [dim]({ev.tokens:,} tokens)[/dim]" if ev.tokens else "[green]step done[/green]"
+    if kind == "tool":
+        style = {"error": "red", "completed": "green"}.get(ev.status, "cyan")
+        detail = f" [dim]({ev.detail})[/dim]" if ev.detail else ""
+        # Color the keyword by status; leave the title bare for rich to highlight.
+        return f"[{style}]tool[/{style}] {ev.title}{detail}".rstrip()
+    if kind == "text":
+        return f"[white]{ev.title}[/white]" if ev.title else ""
+    # "other" / unknown: show the title (the event type) dimmed, if any.
+    return f"[dim]{ev.title}[/dim]" if ev.title else ""
+
+
+def _project_event(raw: str) -> str:
+    """Back-compat shim: render a raw opencode line via the neutral path.
+
+    The opencode wire-shape knowledge now lives in OpenCodeRunner.parse_event;
+    this only re-parses a raw line through it and styles the result, so callers
+    (and tests) that still pass a raw string keep working. The LIVE path uses the
+    runner-filled Event directly and never touches this.
+    """
+    from agent_flow.runners import OpenCodeRunner
 
     raw = raw.strip()
     if not raw.startswith("{"):
         return raw
-    try:
-        ev = json.loads(raw)
-    except ValueError:
-        return raw
-
-    part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
-    ptype = part.get("type") or ev.get("type") or "event"
-
-    if ptype in ("step-start", "step_start"):
-        return "[dim]- step[/dim]"
-    if ptype in ("step-finish", "step_finish"):
-        tokens = (part.get("tokens") or {}).get("total")
-        return f"[green]step done[/green] [dim]({tokens:,} tokens)[/dim]" if tokens else "[green]step done[/green]"
-    if ptype == "tool":
-        tool = part.get("tool", "tool")
-        inp = part.get("state", {}).get("input", {}) if isinstance(part.get("state"), dict) else {}
-        target = inp.get("filePath") or inp.get("command") or inp.get("pattern") or ""
-        return f"[cyan]tool {tool}[/cyan] {target}".rstrip()
-    if ptype == "text":
-        text = " ".join((part.get("text") or "").split())
-        return f"[white]{text}[/white]" if text else ""
-    return f"[dim]{ptype}[/dim]"
+    ev = OpenCodeRunner().parse_event(raw)
+    return render_event(ev) if ev.is_event else raw
 
 
 class NodeProgressPrinter:
@@ -293,6 +309,11 @@ def run_cli(
         )
         # 2) Domain params (validated against params_model, or untyped passthrough).
         params = _resolve_params(params_model, parse_params(param), console)
+        # Fields the model marks as runtime-populated (json_schema_extra
+        # {"runtime": True}) are NOT user inputs — they get an initial placeholder
+        # and are overwritten at run time (e.g. by a node's exports). Hide them
+        # from the resolved-params summary so they don't read as things you pass.
+        runtime_fields = _runtime_param_fields(params_model)
         # model / idle_timeout_s are run-wide knobs the batteries node reads from
         # params; inject the resolved values so a node uses them (a per-node
         # model=/idle_timeout_s= and an explicit -p still win, so only set if the
@@ -305,7 +326,7 @@ def run_cli(
             params.setdefault("model", cfg.model)
         params.setdefault("idle_timeout_s", str(cfg.idle_timeout_s))
         # 2b) Show the resolved settings + params (traceability before any work).
-        _print_run_summary(name, cfg, params, console)
+        _print_run_summary(name, cfg, params, console, hide=runtime_fields)
         # 3) Runtime pre-flight — abort (exit 2) on any fatal failure.
         _run_preflight(cfg.runtime, cfg.agent_dir, console)
         # 4) Run, with the chosen view (live table by default, or raw firehose).
@@ -314,14 +335,35 @@ def run_cli(
     app()
 
 
-def _print_run_summary(name: str, cfg, params: dict, console) -> None:
+def _runtime_param_fields(model: type | None) -> set[str]:
+    """Names of params_model fields marked runtime-populated (not user inputs).
+
+    A field is runtime-populated when its `Field(json_schema_extra={"runtime":
+    True})`. Such fields hold a placeholder at startup and are set at run time
+    (e.g. by a node's `exports`), so the CLI hides them from the resolved-params
+    summary. Returns an empty set when there is no model / no such fields.
+    """
+    fields = getattr(model, "model_fields", None)
+    if not fields:
+        return set()
+    out: set[str] = set()
+    for fname, finfo in fields.items():
+        extra = getattr(finfo, "json_schema_extra", None)
+        if isinstance(extra, dict) and extra.get("runtime"):
+            out.add(fname)
+    return out
+
+
+def _print_run_summary(name: str, cfg, params: dict, console, *, hide: set[str] | None = None) -> None:
     """Print the resolved run settings + domain params before the run starts.
 
     Gives traceability: you see exactly what runtime/agent_dir/run_dir and each
     domain param resolved to (from CLI/env/.env/defaults) before any agent runs.
     run_dir is shown resolved against params (it templates at run time), so the
-    actual target path is visible here too.
+    actual target path is visible here too. `hide` names params to omit (fields
+    the model marked runtime-populated — placeholders, not user inputs).
     """
+    hide = hide or set()
     from agent_flow.utils import resolve_template
 
     try:
@@ -343,8 +385,9 @@ def _print_run_summary(name: str, cfg, params: dict, console) -> None:
     for k, v in settings.items():
         console.print(f"  [cyan]{k:<{width}}[/cyan] = {v}")
     # Domain params, minus any already shown as a setting (model/idle_timeout_s
-    # are injected into params but belong under settings).
-    for k in sorted(k for k in params if k not in settings):
+    # are injected into params but belong under settings) and minus runtime-
+    # populated fields (placeholders, not user inputs).
+    for k in sorted(k for k in params if k not in settings and k not in hide):
         console.print(f"  [cyan]{k:<{width}}[/cyan] = {params[k]}")
 
 
