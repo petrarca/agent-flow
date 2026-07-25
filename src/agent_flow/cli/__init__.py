@@ -10,7 +10,9 @@ terminal output with rich/typer. Split by concern:
   - progress.py — the default per-node progress view (`NodeProgressPrinter`).
   - tables.py   — end-of-run tables (`print_results_table`,
                   `print_preflight_results`).
-  - app.py      — the reusable Typer command (`run_cli`) tying it together.
+  - app.py      — `run_cli`: builds the multi-command Typer app and wires each
+                  command module (cli/commands/) via register(app, ctx).
+  - commands/   — one module per command: run.py (`run`), nodes.py (`nodes`).
 
 The public names are re-exported here so `from agent_flow.cli import ...` (and
 `from agent_flow import ...`) stay stable regardless of the internal layout.

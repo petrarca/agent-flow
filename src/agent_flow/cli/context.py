@@ -1,0 +1,27 @@
+"""RunCliContext — the parameters run_cli threads into each command module.
+
+The pipeline CLI is a reusable factory (`run_cli`), so its Typer app cannot be a
+module-level singleton like a typical app — the nodes and settings are supplied
+by the consumer at call time. Each command module exposes a
+`register(app, ctx)` that attaches its command(s) to the shared app; this context
+is the `ctx` — the consumer-supplied bits every command may need.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from agent_flow.engine import Node
+
+
+@dataclass(frozen=True)
+class RunCliContext:
+    """Consumer-supplied CLI configuration, passed to each command's register()."""
+
+    build_nodes: Callable[[], list[Node]]  # returns the pipeline's Node list
+    name: str  # flow name (shown in help/summary; used as the Prefect flow name)
+    llm_tag: str  # concurrency tag for node execution
+    default_agent_dir: str  # fallback agent-definitions dir when unset by CLI/env
+    default_run_dir: str  # fallback run_dir ({param} templating allowed)
+    params_model: type | None  # optional pydantic-settings model for -p validation
