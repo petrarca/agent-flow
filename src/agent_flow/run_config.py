@@ -95,9 +95,8 @@ class RunConfig(BaseSettings):
     instructions_file: str = Field(default="", description="Path to a file whose content is the run-wide brief (wins over `instructions`).")
     llm_concurrency: int | None = Field(default=None, description="Max concurrent LLM agents; None -> engine default.")
     show_events: bool = Field(default=False, description="Stream live agent events to the console.")
-    show_diffs: bool = Field(
-        default=False, description="Render file-change diffs (edit/write) as syntax-highlighted blocks. Composes with show_events."
-    )
+    show_diffs: bool = Field(default=False, description="Render file-change diffs (edit/write) as blocks. Composes with show_events.")
+    diff_style: str = Field(default="unified", description="Diff layout when show_diffs is on: 'unified' (one column) or 'split' (side-by-side).")
     model: str = Field(
         default="",
         description="Model (provider/model) for every node. Empty -> the runtime resolves it from its own config. Per-node model overrides.",

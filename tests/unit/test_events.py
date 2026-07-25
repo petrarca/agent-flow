@@ -164,6 +164,55 @@ def test_render_diff_noop_without_diff(capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_diff_rows_strips_header_and_pairs_changes():
+    from agent_flow.cli import _diff_rows
+
+    diff = "Index: x\n===\n--- /a/x\n+++ /a/x\n@@ -1,2 +1,2 @@\n context\n-old line\n+new line"
+    rows = _diff_rows(diff)
+    kinds = [r[0] for r in rows]
+    # header noise (Index/===/---/+++) is dropped; @@ -> hdr, then ctx, then chg
+    assert kinds == ["hdr", "ctx", "chg"]
+    assert rows[0][1].startswith("@@")
+    assert rows[1][1] == "context" and rows[1][2] == ""  # context: same text is set on left only here
+    assert rows[2][1] == "old line" and rows[2][2] == "new line"  # change: removal|addition paired
+
+
+def test_diff_rows_unbalanced_change_pads():
+    from agent_flow.cli import _diff_rows
+
+    # two removals, one addition -> the extra removal pairs with an empty right
+    diff = "@@ -1,2 +1,1 @@\n-a\n-b\n+c"
+    rows = [r for r in _diff_rows(diff) if r[0] == "chg"]
+    assert rows == [("chg", "a", "c"), ("chg", "b", "")]
+
+
+def test_render_diff_unified_is_default(capsys):
+    # default style is "unified": one column with "- "/"+ " sign lines.
+    from rich.console import Console
+
+    from agent_flow.cli import render_diff
+    from agent_flow.runners import Event
+
+    console = Console(force_terminal=False, width=80)
+    render_diff(Event(kind="tool", diff="@@ -1 +1 @@\n-old\n+new"), console=console)
+    out = capsys.readouterr().out
+    assert "- old" in out and "+ new" in out
+
+
+def test_render_diff_split_two_columns(capsys):
+    from rich.console import Console
+
+    from agent_flow.cli import render_diff
+    from agent_flow.runners import Event
+
+    console = Console(force_terminal=False, width=80)
+    render_diff(Event(kind="tool", diff="@@ -1 +1 @@\n-old\n+new"), console=console, style="split")
+    out = capsys.readouterr().out
+    # both old and new appear, side by side on the same line
+    assert "old" in out and "new" in out
+    assert any("old" in ln and "new" in ln for ln in out.splitlines())
+
+
 def test_neutral_view_tool_metadata_hint_and_error_status():
     line = json.dumps({"part": {"type": "tool", "tool": "grep", "state": {"title": "Grep foo", "metadata": {"matches": 12}, "error": "boom"}}})
     ev = OpenCodeRunner().parse_event(line)

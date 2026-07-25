@@ -49,7 +49,7 @@ def get_console():
         return _CONSOLE
 
 
-def event_printer(label: str, *, console=None, lines: bool = True, diffs: bool = False) -> Callable[[Event], None]:
+def event_printer(label: str, *, console=None, lines: bool = True, diffs: bool = False, diff_style: str = "unified") -> Callable[[Event], None]:
     """Build an `on_event` callback that renders live events.
 
     `label` is the prefix each line carries. The engine passes the NODE name (the
@@ -78,23 +78,109 @@ def event_printer(label: str, *, console=None, lines: bool = True, diffs: bool =
             if line:
                 console.print(f"  [dim]{label}[/dim] {line}")
         if diffs and ev.diff:
-            render_diff(ev, console=console)
+            render_diff(ev, console=console, style=diff_style)
 
     return _print
 
 
-def render_diff(ev: Event, *, console=None) -> None:
-    """Render a file-change event's unified diff as a syntax-highlighted block.
+def render_diff(ev: Event, *, console=None, style: str = "unified") -> None:
+    """Render a file-change event's diff. `style` is the user's choice:
 
-    Uses rich `Syntax` with the `diff` lexer (red removals / green additions).
-    Runtime-agnostic: reads only the neutral `ev.diff` string the runner filled.
+      - "unified"  : one column, red removals / green additions, header stripped
+                     (OpenCode's headless look; robust on any terminal width).
+      - "split"    : side-by-side two columns (old | new), 50/50, for wide
+                     terminals and large edits.
+
+    Rich has no native diff widget; both are built rich-only by parsing the diff
+    (shared `_diff_rows`) and laying it out. We strip HEADER noise
+    (Index:/===/---/+++) since the tool line already names the file. Reads only
+    the neutral `ev.diff`. Never raises — falls back to a plain colored block.
     """
     if not ev.diff:
         return
-    from rich.syntax import Syntax
-
     console = console or get_console()
-    console.print(Syntax(ev.diff, "diff", theme="ansi_dark", background_color="default", word_wrap=True))
+    try:
+        if style == "split":
+            _render_side_by_side(ev.diff, console)
+        else:
+            _render_unified(ev.diff, console)
+    except Exception:  # noqa: BLE001 - display must never break a run
+        from rich.syntax import Syntax
+
+        console.print(Syntax(ev.diff, "diff", theme="ansi_dark", background_color="default", word_wrap=True))
+
+
+def _render_unified(diff: str, console) -> None:
+    """One-column diff: header stripped, magenta hunks, red/green change lines."""
+    from rich.text import Text
+
+    for kind, left, right in _diff_rows(diff):
+        if kind == "hdr":
+            console.print(Text(left, style="magenta"))
+        elif kind == "ctx":
+            console.print(Text("  " + left, style="dim"))
+        else:  # chg — emit removal then addition, sign-colored
+            if left:
+                console.print(Text("- " + left, style="red"))
+            if right:
+                console.print(Text("+ " + right, style="green"))
+
+
+def _diff_rows(diff: str) -> list[tuple[str, str, str]]:
+    """Parse a unified diff into aligned (kind, old, new) rows for a 2-col view.
+
+    kind is "ctx" | "chg" (change) | "hdr" (hunk @@ header). Header noise
+    (Index:/===/--- /+++ ) is dropped. Consecutive '-'/'+' lines are paired
+    positionally (removal left, addition right); unbalanced ones pad with "".
+    """
+    rows: list[tuple[str, str, str]] = []
+    removed: list[str] = []
+    added: list[str] = []
+
+    def flush() -> None:
+        for i in range(max(len(removed), len(added))):
+            rows.append(("chg", removed[i] if i < len(removed) else "", added[i] if i < len(added) else ""))
+        removed.clear()
+        added.clear()
+
+    for line in diff.splitlines():
+        if line.startswith(("Index:", "===", "--- ", "+++ ", "diff --git")):
+            continue  # header noise — the tool line already names the file
+        if line.startswith("@@"):
+            flush()
+            rows.append(("hdr", line, ""))
+        elif line.startswith("-"):
+            removed.append(line[1:])
+        elif line.startswith("+"):
+            added.append(line[1:])
+        else:
+            flush()
+            rows.append(("ctx", line[1:] if line.startswith(" ") else line, ""))
+    flush()
+    return rows
+
+
+def _render_side_by_side(diff: str, console) -> None:
+    """Render parsed diff rows as a borderless two-column rich Table."""
+    from rich.table import Table
+    from rich.text import Text
+
+    rows = _diff_rows(diff)
+    if not rows:
+        return
+    table = Table(show_header=False, show_edge=False, box=None, padding=(0, 1), expand=True)
+    table.add_column(ratio=1, overflow="fold")
+    table.add_column(ratio=1, overflow="fold")
+    for kind, left, right in rows:
+        if kind == "hdr":
+            table.add_row(Text(left, style="magenta"), Text(""))
+        elif kind == "ctx":
+            table.add_row(Text(left, style="dim"), Text(left, style="dim"))
+        else:  # chg — color alone carries add/remove (no -/+ glyph clutter)
+            lt = Text(left, style="red") if left else Text("")
+            rt = Text(right, style="green") if right else Text("")
+            table.add_row(lt, rt)
+    console.print(table)
 
 
 def render_event(ev: Event) -> str:
@@ -316,6 +402,9 @@ def run_cli(
         show_diffs: bool = typer.Option(
             False, "--show-diffs", help="render edit/write diffs as blocks (composes with --show-events and the live table)"
         ),
+        diff_style: str | None = typer.Option(
+            None, "--diff-style", help="diff layout with --show-diffs: unified (one column) | split (side-by-side)"
+        ),
         model: str | None = typer.Option(None, "--model", "-m", help="model for every node (provider/model); per-node model= still overrides"),
         idle_timeout: int | None = typer.Option(
             None, "--idle-timeout", help="liveness timeout (s): kill an agent only after this long with no event/sidecar"
@@ -334,6 +423,7 @@ def run_cli(
             llm_concurrency=llm_concurrency,
             show_events=True if show_events else None,
             show_diffs=True if show_diffs else None,
+            diff_style=diff_style,
             model=model,
             idle_timeout_s=idle_timeout,
         )
@@ -482,7 +572,7 @@ def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str) -> N
 
     def _event_factory(label):
         # lines only in firehose mode; diffs whenever --show-diffs is on.
-        return event_printer(label, console=console, lines=cfg.show_events, diffs=cfg.show_diffs)
+        return event_printer(label, console=console, lines=cfg.show_events, diffs=cfg.show_diffs, diff_style=cfg.diff_style)
 
     if cfg.show_events or cfg.show_diffs:
         # An event callback is needed for the firehose and/or diff blocks. Keep
