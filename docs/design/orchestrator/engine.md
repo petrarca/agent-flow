@@ -22,7 +22,7 @@ opt-in) supplies only execution mechanics — parallel fan-out, concurrency limi
 logger, and bootstrap/teardown.
 
 The engine does **not** import Tier 1 — it meets `run_agent` only through the
-caller-supplied `Node.run`. (The [batteries](batteries.md) module is the one
+caller-supplied `Node.run`. (The [node builder](node_builder.md) module is the one
 place that bridges both, on purpose.)
 
 ## `Node`

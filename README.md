@@ -19,13 +19,20 @@ into four recurring problems. agent-flow addresses each directly:
    orchestrator cannot hang or improvise the sequence. Given the same inputs, the same stages
    run in the same order.
 
-2. **Reliable execution of agentic runners.** Each agent runs as a supervised
-   subprocess with **liveness** timeouts (killed only when it goes *silent*, never
-   on a fixed wall-clock cap — long thinking/writing phases are safe), clean
-   process-group termination, bounded restarts, and a small JSON **control
-   sidecar** the agent writes to report its real outcome (no prose-parsing). A
-   crashed, stalled, or empty-output agent is detected and handled, not silently
-   accepted.
+2. **Reliable execution — subprocess or in-process.** How an agent runs is a
+   swappable **`AgentExecutor`** seam behind one contract (`invocation → result`):
+   - a **subprocess** agent (opencode, Claude Code, …) runs under liveness
+     supervision — killed only when it goes *silent*, never on a fixed wall-clock
+     cap, with clean process-group termination, bounded restarts, and a small JSON
+     **control sidecar** the agent writes to report its real outcome (no
+     prose-parsing);
+   - an **in-process** agent (e.g. a PydanticAI-style Python function) runs as a
+     direct call — no subprocess, no sidecar — returning a typed object that flows
+     into the exact same result contract.
+
+   Either way a crashed, stalled, or invalid-output agent is detected and handled,
+   not silently accepted. The sidecar and supervision are the subprocess
+   executor's private mechanism, not baked into the engine.
 
 3. **Controlled ingestion of context and runtime parameters.** A defined **input
    plane** composes each agent's prompt from ordered channels (completion
@@ -36,12 +43,15 @@ into four recurring problems. agent-flow addresses each directly:
    (CLI > env > .env > YAML > default) and flow through a **run-context service** —
    values can even be published by one node for downstream nodes (`exports`).
 
-4. **Runner-agnostic.** The agent runtime (opencode today; Claude Code, Codex, …
-   next) is a swappable `AgentRunner` strategy — only "how to build the command"
-   and "how to parse the event stream" differ; supervision, the flow, re-runs, the
-   sidecar, and the display layer are written once and stay runtime-neutral. The
-   execution backend is likewise a swappable seam: a Prefect-free **InProcessBackend**
-   (default) or an opt-in **PrefectBackend** (`--backend prefect`).
+4. **Runtime- and backend-agnostic.** Two independent seams keep the core neutral.
+   The **`AgentExecutor`** decides *how one agent runs* — a `SubprocessExecutor`
+   (whose per-runtime wire details are a further `AgentRunner` strategy: opencode
+   today; Claude Code, Codex next — only "build the command" + "parse the event
+   stream" differ) or an `InProcessExecutor` for direct Python agents. The
+   **`FlowBackend`** decides *how the graph runs* — a Prefect-free
+   **InProcessBackend** (default) or an opt-in **PrefectBackend**
+   (`--backend prefect`). The flow, re-runs, gates, input plane, and display layer
+   are written once and stay agnostic to both.
 
 ## Feature shortlist
 
@@ -84,9 +94,13 @@ into four recurring problems. agent-flow addresses each directly:
 - **The input plane** — ordered prompt composition with **content injection** of
   context files/globs, `{param}` templating, a per-run brief (`-i` / file), and
   per-node run-time instructions (`--instruct NODE=…` / config, additive last-word).
-- **Runner strategy** — `AgentRunner` (opencode + a token-free `mock`; Claude
-  Code stubbed), per-runner preflight checks and an `AgentRunnerInfo` doctor view
-  (resolved model/tools per agent dir).
+- **Agent execution seam** — `AgentExecutor` (ABC): `SubprocessExecutor` (its
+  per-runtime wire details are an `AgentRunner` strategy — opencode + a token-free
+  `mock`; Claude Code stubbed — with per-runner preflight checks and an
+  `AgentRunnerInfo` doctor view) or `InProcessExecutor` for direct Python agents
+  (e.g. PydanticAI), which return a typed object into the same result contract —
+  no subprocess, no sidecar. Attach an in-process impl via `agent_node(impl=…)` or
+  `registry.agent_impl(name)` + `NodeDef.impl_ref`.
 - **Runner-agnostic live display** — the runner normalizes each event into neutral
   fields (`kind`/`title`/`detail`/`status`/`diff`); the CLI renders them (status
   colors + rich token highlighting) with zero runtime-specific knowledge.
@@ -277,19 +291,19 @@ standards live in **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
 src/agent_flow/     the library
   core/             backend-free Tier-1 primitives (run_agent, control protocol,
                     result-schema, context ingestion, env)
-  runners/          the agent-runtime seam (AgentRunner) — opencode, mock, …
-  backends/         the execution seam (FlowBackend) — inprocess (default), prefect (opt-in)
+  runners/          the agent-execution seam (AgentExecutor: Subprocess + InProcess)
+                    and the subprocess wire adapters (AgentRunner) — opencode, mock, …
+  backends/         the graph-execution seam (FlowBackend) — inprocess (default), prefect (opt-in)
   cli/              run_cli + neutral event rendering + tables (the [cli] extra)
-  engine, gates, batteries, run_config, run_context, preflight, utils
+  engine, gates, node_builder, run_config, run_context, preflight, utils
                     the flow engine, flow-control gates, the one-call node, and
                     the run-time plumbing that ties the seams together
   flowdef/          the declarative FlowDef/NodeDef surface + compile_flow
 examples/           imperative.py & declarative.py (Tier 3) + custom_flow.py (Tier 2)
 docs/design/orchestrator/   the design (start at index.md)
-docs/design/orchestrator/   the design (start at index.md)
 ```
 
-Layer order: `utils < runners < core < engine/gates/batteries < backends < cli`.
+Layer order: `utils < runners < core < engine/gates/node_builder < backends < cli`.
 
 ## Documentation
 
@@ -298,7 +312,7 @@ Layer order: `utils < runners < core < engine/gates/batteries < backends < cli`.
   [`docs/usage/index.md`](docs/usage/index.md).
 - **Design** (the architecture and why) — problem, principles, the three tiers,
   and one focused document per concept (supervision, control-file, engine,
-  gates, batteries, input-plane, result-schema, backend, cli-events):
+  gates, node_builder, input-plane, result-schema, backend, cli-events):
   [`docs/design/orchestrator/index.md`](docs/design/orchestrator/index.md).
 
 ## Contributing & License

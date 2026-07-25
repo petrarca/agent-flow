@@ -19,7 +19,7 @@ Public API (the authoritative list is `__all__` below):
         # Tier 3: declare Nodes -> build_flow (the DAG engine)
         Node, NodeOutcome, RunContext, build_flow, NodeBlocked,
         plan_groups, interpret,
-        # batteries: one-call node for the common "run one agent" case
+        # node builder: one-call node for the common "run one agent" case
         agent_node, control_path,
         # flow-control gates — the consumer's optional hook
         Gate, GateContext, Directive,
@@ -54,7 +54,6 @@ docs/design/orchestrator/ for the full design.
 """
 
 from agent_flow.backends import FlowBackend, InProcessBackend, get_backend
-from agent_flow.batteries import agent_node, control_path
 from agent_flow.cli import NodeProgressPrinter, event_printer, get_console, print_preflight_results, print_results_table, run_cli
 from agent_flow.core import (
     AgentContentFailedError,
@@ -95,6 +94,7 @@ from agent_flow.gates import (
     rerun_on_named,
     rerun_on_signal,
 )
+from agent_flow.node_builder import agent_node, control_path
 from agent_flow.preflight import Check, check, fatal_failures
 from agent_flow.registry import FlowRegistry
 from agent_flow.run_config import (
@@ -192,7 +192,7 @@ __all__ = [
     "NodeDef",
     "compile_flow",
     "run_flow",
-    # batteries: one-call node for the common "run one agent" case
+    # node builder: one-call node for the common "run one agent" case
     "agent_node",
     "control_path",
     # context ingestion (read files -> prompt content)

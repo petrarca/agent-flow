@@ -10,11 +10,11 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from agent_flow.batteries import agent_node
 from agent_flow.core.agent_runtime import AgentResult
 from agent_flow.core.schema_pydantic import PydanticSchema
 from agent_flow.engine import interpret
 from agent_flow.gates import Continue
+from agent_flow.node_builder import agent_node
 from agent_flow.registry import FlowRegistry
 from agent_flow.runners import AgentInvocation
 from agent_flow.runners.inprocess import InProcessExecutor, adapt_result
@@ -118,7 +118,7 @@ def test_agent_node_impl_runs_in_process_and_gate_reads_typed_obj(tmp_path):
 
 def test_agent_node_impl_content_failure_surfaces_to_gate(tmp_path):
     # An impl signals a content verdict by returning a non-ok AgentResult; the
-    # batteries node surfaces it to the gate exactly like a sidecar status.
+    # agent-node surfaces it to the gate exactly like a sidecar status.
     def impl(inv):
         return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "needs_rerun", "reason": "thin"})
 

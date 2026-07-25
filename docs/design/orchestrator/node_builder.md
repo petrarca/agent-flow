@@ -1,12 +1,12 @@
 ---
 type: Concept
-title: Batteries — agent_node, the one-call node
+title: Node builder — agent_node, the one-call node
 description: The agent_node factory for the common 'run one agent' case, and the Tier-3 developer experience.
-tags: [agent-flow, batteries, agent_node, developer-experience, tier-3]
+tags: [agent-flow, node_builder, agent_node, developer-experience, tier-3]
 timestamp: 2026-07-23T07:51:35Z
 ---
 
-# Batteries: `agent_node`
+# Node builder: `agent_node`
 
 Tier 3's `Node` takes a `run` callable — maximally flexible, but it means a
 consumer would hand-write prompt-building, control-path derivation, and the
@@ -79,4 +79,4 @@ ready gates.
 
 ## Where it lives
 
-`src/agent_flow/batteries.py` (`agent_node`, `build_work_order`, `control_path`).
+`src/agent_flow/node_builder.py` (`agent_node`, `build_work_order`, `control_path`).

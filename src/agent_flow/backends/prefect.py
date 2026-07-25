@@ -73,7 +73,7 @@ class PrefectBackend(FlowBackend):
         """Prefect's run logger inside a flow, else the stdlib logger.
 
         run_group / build_flow call this outside a task context too, so degrade
-        gracefully when there is no active run (mirrors batteries._node_logger).
+        gracefully when there is no active run (mirrors node_builder._node_logger).
         """
         try:
             from prefect import get_run_logger

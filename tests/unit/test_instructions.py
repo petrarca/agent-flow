@@ -7,15 +7,15 @@ Composition contract (final prompt order):
 import tempfile
 from pathlib import Path
 
-from agent_flow.batteries import agent_node
 from agent_flow.engine import interpret
 from agent_flow.gates import Continue
+from agent_flow.node_builder import agent_node
 
 
 def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, shared_context=(), node_instructions=None):
-    """Run a batteries node with a stubbed EXECUTOR that captures the invocation.
+    """Run a agent-node with a stubbed EXECUTOR that captures the invocation.
 
-    batteries builds a neutral AgentInvocation and hands it to an AgentExecutor;
+    the agent-node builds a neutral AgentInvocation and hands it to an AgentExecutor;
     we stub get_executor to capture that invocation (its per-node prompt and the
     run-wide shared_* blocks stay SEPARATE fields — the composition contract).
     """
@@ -32,7 +32,7 @@ def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, 
             captured["shared_context"] = inv.shared_context
             return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "ok"}, completion="completed")
 
-    monkeypatch.setattr("agent_flow.batteries.get_executor", lambda _runtime: _FakeExecutor())
+    monkeypatch.setattr("agent_flow.node_builder.get_executor", lambda _runtime: _FakeExecutor())
     interpret(
         node,
         run_dir=Path(run_dir) if run_dir else Path(tempfile.gettempdir()),
@@ -48,7 +48,7 @@ def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, 
 def test_shared_instructions_forwarded_to_run_agent(monkeypatch, tmp_path):
     node = agent_node("n", "agent-x", inputs={"K": "v"})
     cap = _capture_prompt(monkeypatch, node, shared="Use code-graph alongside RAG.")
-    # The batteries node forwards the run-wide brief to run_agent verbatim.
+    # The agent-node forwards the run-wide brief to run_agent verbatim.
     assert cap["shared"] == "Use code-graph alongside RAG."
 
 
@@ -111,7 +111,7 @@ def test_shared_context_sources_read_and_forwarded(monkeypatch, tmp_path):
     (tmp_path / "sec.md").write_text("SECURITY: never log secrets.")
     node = agent_node("n", "agent-x", inputs={"K": "v"})
     cap = _capture_prompt(monkeypatch, node, run_dir=tmp_path, shared_context=("sec.md",))
-    # The batteries node reads the run-wide sources into CONTENT and forwards it.
+    # The agent-node reads the run-wide sources into CONTENT and forwards it.
     assert "SECURITY: never log secrets." in cap["shared_context"]
 
 

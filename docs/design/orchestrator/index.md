@@ -85,7 +85,7 @@ Each tier is usable on its own; the number reflects how close you are to the met
 
 ```
 TIER 3  DECLARATIVE          declare Nodes -> build_flow() -> a runnable flow callable (dispatches to the backend)
-        agent_node() = one call per agent (batteries)
+        agent_node() = one call per agent (node builder)
               │ composes
 TIER 2  PRIMITIVES           call run_agent() as the leaf of YOUR OWN Prefect flow
               │ uses
@@ -130,7 +130,7 @@ build_flow(nodes, name="tech")(product_key="acme", runtime="opencode")  # no run
 | Engine | [engine.md](engine.md) | `Node`, `plan_groups`, `build_flow`; DAG + parallel groups; bounded re-runs; cross-node jump-back |
 | FlowDef | [flowdef.md](flowdef.md) | the declarative surface: `FlowDef`/`NodeDef` (serializable data), the `FlowRegistry` (gates/exports/runs/schemas by name; `(ctx, **config)` gates), `compile_flow`/`run_flow` |
 | Gates | [gates.md](gates.md) | `Directive` (Continue/Restart/GoTo/Stop), `GateContext`, ready-made gates — the consumer's flow-control hook |
-| Batteries | [batteries.md](batteries.md) | `agent_node` — the one-call node; the Tier-3 developer experience |
+| Node builder | [node_builder.md](node_builder.md) | `agent_node` — the one-call node; the Tier-3 developer experience |
 | Input plane | [input-plane.md](input-plane.md) | The prompt channels (ingested context + inline instructions, global & per-node) + persona; templating; the CLI brief; run-context + `exports` (result->params) |
 | Result schema | [result-schema.md](result-schema.md) | Typed agent output; Pydantic-optional; opt-in consumer convenience |
 | Backend | [backend.md](backend.md) | `FlowBackend` seam; InProcessBackend (default, in-process) and PrefectBackend (opt-in); deployment modes |
@@ -138,7 +138,7 @@ build_flow(nodes, name="tech")(product_key="acme", runtime="opencode")  # no run
 
 ## Prototype status
 
-Implemented and tested in this repo: Tiers 1–3, gates + ready gates, batteries,
+Implemented and tested in this repo: Tiers 1–3, gates + ready gates, node_builder,
 control-file contract + protocol injection, result-schema seam, live events +
 CLI, bounded re-runs and cross-node jump-back. Two runnable examples
 (`examples/custom_flow.py` = Tier 2, `examples` = Tier 3), both

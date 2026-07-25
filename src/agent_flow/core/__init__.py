@@ -12,7 +12,7 @@ Layer order (who may depend on whom):
             including runners — the bottom leaf)
         <  runners  (pure strategy: build_command / parse_event)
         <  core  (run_agent uses a runner; validates output; reads context)
-        <  engine / gates / batteries
+        <  engine / gates / node_builder
         <  backends  (the execution seam)
         <  cli
 

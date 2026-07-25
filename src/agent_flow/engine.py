@@ -57,7 +57,7 @@ class RunContext:
              …) threaded through build_flow unchanged. The engine does not
              interpret these — the run callable does. Domain-opaque by design.
     on_event_factory  optional per-node event-printer FACTORY: given a display
-             LABEL (the batteries node passes the NODE name — the DAG unit the
+             LABEL (the agent-node passes the NODE name — the DAG unit the
              reader navigates by, not the agent that implements it), returns a
              per-event callback (or None) — the ACTUAL callback
              `run_agent(on_event=...)` expects at Tier 1. Named differently from
@@ -85,7 +85,7 @@ class RunContext:
     # plumbing, not a domain param.
     shared_context: tuple[str, ...] = ()
     # Run-time per-node instructions {node_name: text}, from CLI --instruct / the
-    # config node_instructions: section. A batteries node appends its own entry
+    # config node_instructions: section. A agent-node appends its own entry
     # LAST (after the build-time per-node instructions), so it is the most recent
     # standing guidance before the work order — additive, last-word override.
     node_instructions: dict[str, str] = field(default_factory=dict)
@@ -496,7 +496,7 @@ def build_flow(
             this process via a threadpool, no Prefect) or "prefect" (opt-in;
             @task/@flow, run UI).
         on_event_factory: optional per-node event-printer factory (display label
-            -> a per-event callback); the batteries node passes the NODE name as
+            -> a per-event callback); the agent-node passes the NODE name as
             the label. Reaches each node via RunContext.on_event_factory. Kept
             here (build time) rather than in `params` because it is a callable
             (not serializable) and is engine plumbing, not a domain input.
@@ -511,7 +511,7 @@ def build_flow(
             non-serializable closure, engine plumbing not a domain input).
         shared_instructions: optional run-wide brief injected into EVERY agent's
             prompt (e.g. a global directive from the CLI/start). Reaches each node
-            via RunContext.shared_instructions; a batteries node forwards it to
+            via RunContext.shared_instructions; an agent-node forwards it to
             run_agent.
         shared_context: optional run-wide context SOURCES (file paths / globs)
             whose CONTENT is injected into every agent — rules/standards the

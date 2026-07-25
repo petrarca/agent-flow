@@ -1,8 +1,8 @@
-"""Unit tests for the batteries layer: agent_node, ready gates, cross-node jump-back."""
+"""Unit tests for the agent-node layer: agent_node, ready gates, cross-node jump-back."""
 
-from agent_flow.batteries import agent_node, build_work_order, control_path
 from agent_flow.engine import Node, NodeOutcome, _walk, plan_groups
 from agent_flow.gates import Continue, GateContext, GoTo, Restart, require_file, rerun_on_signal
+from agent_flow.node_builder import agent_node, build_work_order, control_path
 
 
 class _L:
@@ -68,7 +68,7 @@ def test_gate_receives_validated_result_obj(tmp_path, monkeypatch):
         name = "fake"
         run = staticmethod(_run)
 
-    monkeypatch.setattr("agent_flow.batteries.get_executor", lambda _runtime: _FakeExecutor())
+    monkeypatch.setattr("agent_flow.node_builder.get_executor", lambda _runtime: _FakeExecutor())
 
     seen = {}
 

@@ -71,7 +71,7 @@ Plus a **separate** channel that is NOT part of this prompt:
 
 Context sources (2, 4) accept file paths or globs; a source matching no file is
 warned about and skipped, never a crash. `run_agent` itself (Tier 1) takes the
-already-read content string (`shared_context=...`); the batteries layer reads the
+already-read content string (`shared_context=...`); the node-builder layer reads the
 files for you.
 
 ## Templating
@@ -162,7 +162,7 @@ Three entry surfaces, all producing a `{node_name: text}` map:
 - **Programmatic** — `build_flow(node_instructions={"analyst": "…"})`.
 
 CLI `--instruct` **merges over** the config section (CLI wins per node); the merged
-map is threaded via `RunContext.node_instructions` and each batteries node appends
+map is threaded via `RunContext.node_instructions` and each agent-node appends
 its own entry.
 
 **Additive, LAST word.** The run-time instruction is appended AFTER the build-time
@@ -186,7 +186,7 @@ differently.
 ## Where it lives
 
 `src/agent_flow/core/control_protocol.py` (block 1), `core.agent_runtime.run_agent`
-(composes 1 + 2 + the caller prompt), `batteries.agent_node` (composes 4 + 5 + 6
+(composes 1 + 2 + the caller prompt), `node_builder.agent_node` (composes 4 + 5 + 6
 and forwards 2/3), the `RunContext.shared_instructions` / `RunContext.node_instructions`
 / `build_flow(node_instructions=)` plumbing in `engine.py`, and the CLI
 `--instruct` + config `node_instructions:` handling in `cli/app.py` / `run_config.py`.

@@ -81,7 +81,7 @@ def register(app, ctx: RunCliContext) -> None:
         cfg.node_instructions = {**cfg.node_instructions, **parse_params(instruct)}
         params = _resolve_params(ctx.params_model, parse_params(param), console)
         runtime_fields = runtime_param_fields(ctx.params_model)
-        # model / idle_timeout_s are run-wide knobs a batteries node reads from
+        # model / idle_timeout_s are run-wide knobs an agent-node reads from
         # params; inject the resolved values (an explicit -p / per-node value still
         # wins). model only when set (empty -> the runtime resolves it).
         if cfg.model:

@@ -23,7 +23,7 @@ Errors: an exception from the impl is NOT swallowed — it propagates, and the
 engine's per-node criticality maps it (blocking -> Stop, degrade -> degraded),
 exactly as a subprocess crash would. The impl signals a CONTENT failure (a
 verdict, retry-won't-help) by returning an AgentResult / dict with a non-ok
-status, which the batteries node surfaces to the gate the same way as a sidecar.
+status, which the agent-node surfaces to the gate the same way as a sidecar.
 """
 
 from __future__ import annotations

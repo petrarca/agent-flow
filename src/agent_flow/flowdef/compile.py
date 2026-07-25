@@ -2,7 +2,7 @@
 
 Resolves each NodeDef's NAME references against the FlowRegistry and produces the
 internal `Node` list the engine runs. An `agent` node compiles to the standard
-batteries agent-run (via agent_node); a `run_ref` node uses the registered custom
+standard agent-run (via agent_node); a `run_ref` node uses the registered custom
 run. gate/export/result_schema names are threaded through so the engine resolves
 them at run time (gates/exports) or the run uses them (schema).
 """
@@ -81,12 +81,12 @@ def _compile_node(nd: NodeDef, registry) -> Node:
 
 
 def _compile_agent_node(nd: NodeDef, registry, schema) -> Node:
-    """A standard 'run one agent' node: delegate to the batteries builder.
+    """A standard 'run one agent' node: delegate to the node builder.
 
     An `impl_ref` resolves to a registered in-process agent impl (the node then
     runs in-process, no subprocess); absent it, the node runs as a subprocess.
     """
-    from agent_flow.batteries import agent_node
+    from agent_flow.node_builder import agent_node
 
     impl = registry.get_agent_impl(nd.impl_ref) if nd.impl_ref else None
     return agent_node(

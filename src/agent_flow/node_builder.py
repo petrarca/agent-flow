@@ -1,10 +1,10 @@
-"""Batteries — the one-call helper for the common case: a node that runs ONE agent.
+"""Node builder — the one-call helper for the common case: a node that runs ONE agent.
 
 Layer 3's `Node` takes a `run` callable, which is maximally flexible but means a
-consumer hand-writes prompt-building, control-path derivation, and the run_agent
-call for every node. The overwhelmingly common shape is simply: "run one runtime
-agent, hand it a work order of KEY: value inputs, point it at a control file, get
-the result." `agent_node(...)` builds exactly that node in one call.
+consumer hand-writes prompt-building, control-path derivation, and the executor
+call for every node. The overwhelmingly common shape is simply: "run one agent,
+hand it a work order of KEY: value inputs, get the result." `agent_node(...)`
+builds exactly that node in one call.
 
 It is a CONVENIENCE, not a new layer: it returns a plain `Node`, so it composes
 with hand-written `run` callables in the same graph. Domain-neutral by design —
@@ -14,7 +14,7 @@ gate; the engine's bounded `GoTo` drives the re-run. Any node can route flow to
 any upstream node — the library imposes no adjacency.
 
 This module is the one place allowed to depend on BOTH the engine (Node) and the
-Layer-1 core (run_agent) — keeping `engine.py` itself decoupled from the runtime.
+runner/executor seam — keeping `engine.py` itself decoupled from the runtime.
 """
 
 from __future__ import annotations
