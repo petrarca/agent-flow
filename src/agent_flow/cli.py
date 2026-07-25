@@ -315,14 +315,24 @@ def _print_run_summary(name: str, cfg, params: dict, console) -> None:
         shown_run_dir = resolve_template(cfg.run_dir, params, strict=True) if cfg.run_dir else "(temp)"
     except KeyError:
         shown_run_dir = cfg.run_dir  # unresolved template; the run will error clearly
-    console.print(f"[bold]{name}[/bold] — resolved run")
-    console.print(f"  [dim]runtime  [/dim] {cfg.runtime}")
-    console.print(f"  [dim]agent_dir[/dim] {cfg.agent_dir or '(none)'}")
-    console.print(f"  [dim]run_dir  [/dim] {shown_run_dir}")
-    if params:
-        console.print("  [dim]params[/dim]")
-        for k in sorted(params):
-            console.print(f"    [dim]{k}[/dim] = {params[k]}")
+    # Uniform `key = value` lines under a clear headline. Settings first, then
+    # the domain params — everything the run resolved to, before any work.
+    console.print(f"[bold]Resolved parameters[/bold] [dim]({name})[/dim]")
+    settings = {
+        "runtime": cfg.runtime,
+        "agent_dir": cfg.agent_dir or "(none)",
+        "run_dir": shown_run_dir,
+        "model": cfg.model or "(per-node default)",
+        "idle_timeout_s": cfg.idle_timeout_s if cfg.idle_timeout_s is not None else "(per-node default)",
+    }
+    rows = {**settings, **params}
+    width = max((len(k) for k in rows), default=0)
+    for k, v in settings.items():
+        console.print(f"  [cyan]{k:<{width}}[/cyan] = {v}")
+    # Domain params, minus any already shown as a setting (model/idle_timeout_s
+    # are injected into params but belong under settings).
+    for k in sorted(k for k in params if k not in settings):
+        console.print(f"  [cyan]{k:<{width}}[/cyan] = {params[k]}")
 
 
 def _resolve_params(model: type | None, cli_params: dict[str, str], console) -> dict:
