@@ -272,12 +272,38 @@ def run_cli(
         )
         # 2) Domain params (validated against params_model, or untyped passthrough).
         params = _resolve_params(params_model, parse_params(param), console)
+        # 2b) Show the resolved settings + params (traceability before any work).
+        _print_run_summary(name, cfg, params, console)
         # 3) Runtime pre-flight — abort (exit 2) on any fatal failure.
         _run_preflight(cfg.runtime, cfg.agent_dir, console)
         # 4) Run, with the chosen view (live table by default, or raw firehose).
         _run_with_view(build_nodes(), params, cfg, console, name=name, llm_tag=llm_tag)
 
     app()
+
+
+def _print_run_summary(name: str, cfg, params: dict, console) -> None:
+    """Print the resolved run settings + domain params before the run starts.
+
+    Gives traceability: you see exactly what runtime/agent_dir/run_dir and each
+    domain param resolved to (from CLI/env/.env/defaults) before any agent runs.
+    run_dir is shown resolved against params (it templates at run time), so the
+    actual target path is visible here too.
+    """
+    from agent_flow.utils import resolve_template
+
+    try:
+        shown_run_dir = resolve_template(cfg.run_dir, params, strict=True) if cfg.run_dir else "(temp)"
+    except KeyError:
+        shown_run_dir = cfg.run_dir  # unresolved template; the run will error clearly
+    console.print(f"[bold]{name}[/bold] — resolved run")
+    console.print(f"  [dim]runtime  [/dim] {cfg.runtime}")
+    console.print(f"  [dim]agent_dir[/dim] {cfg.agent_dir or '(none)'}")
+    console.print(f"  [dim]run_dir  [/dim] {shown_run_dir}")
+    if params:
+        console.print("  [dim]params[/dim]")
+        for k in sorted(params):
+            console.print(f"    [dim]{k}[/dim] = {params[k]}")
 
 
 def _resolve_params(model: type | None, cli_params: dict[str, str], console) -> dict:
