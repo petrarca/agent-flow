@@ -51,6 +51,11 @@ class NodeDef(BaseModel):
     exports: dict[str, str] | None = None
     export_ref: str | None = None
 
+    # In-process execution: a registered agent-impl name (registry.agent_impl).
+    # When set, the node runs the agent as a direct in-process call (no
+    # subprocess/sidecar) via InProcessExecutor; `agent` stays as the label.
+    impl_ref: str | None = None
+
     # Per-node runtime overrides.
     model: str | None = None
     idle_timeout_s: int | None = None

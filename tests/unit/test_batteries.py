@@ -46,6 +46,7 @@ def test_gate_receives_validated_result_obj(tmp_path, monkeypatch):
 
     from pydantic import BaseModel
 
+    from agent_flow.core.agent_runtime import AgentResult
     from agent_flow.core.schema_pydantic import PydanticSchema
     from agent_flow.engine import interpret
 
@@ -53,16 +54,21 @@ def test_gate_receives_validated_result_obj(tmp_path, monkeypatch):
         summary: str
         languages: list[str]
 
-    class _Result:
-        control = {"status": "ok"}
-        tokens = cost = events = 0
-        duration_s = 0.0
-        completion = "sidecar"
-        result_valid = True
-        result_obj = R(summary="s", languages=["Python", "Go"])
-        result_errors = ()
+    def _run(inv):
+        return AgentResult(
+            agent=inv.agent,
+            exit_code=0,
+            duration_s=0.0,
+            control={"status": "ok"},
+            completion="completed",
+            result_obj=R(summary="s", languages=["Python", "Go"]),
+        )
 
-    monkeypatch.setattr("agent_flow.batteries.run_agent", lambda **kw: _Result())
+    class _FakeExecutor:
+        name = "fake"
+        run = staticmethod(_run)
+
+    monkeypatch.setattr("agent_flow.batteries.get_executor", lambda _runtime: _FakeExecutor())
 
     seen = {}
 

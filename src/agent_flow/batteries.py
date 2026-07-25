@@ -20,13 +20,13 @@ Layer-1 core (run_agent) — keeping `engine.py` itself decoupled from the runti
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
-from agent_flow.core import DEFAULT_IDLE_TIMEOUT_S, run_agent
+from agent_flow.core import DEFAULT_IDLE_TIMEOUT_S
 from agent_flow.engine import Criticality, Node, RunContext
 from agent_flow.gates import Gate
-from agent_flow.runners import get_runner
+from agent_flow.runners import AgentInvocation, get_executor
+from agent_flow.runners.inprocess import InProcessExecutor
 from agent_flow.utils import resolve_template
 
 
@@ -83,6 +83,7 @@ def agent_node(
     agent_dir: str | None = None,
     exports: Callable[[dict], Any] | dict[str, str] | None = None,
     export_ref: str | None = None,
+    impl: Callable[..., Any] | None = None,
 ) -> Node:
     """Build a `Node` that runs ONE runtime agent as a supervised subprocess.
 
@@ -126,6 +127,14 @@ def agent_node(
             captured provenance or a chosen mode) to the agents that follow.
             Same-process, downstream-only; never targets parallel-group siblings
             (see run_context module SCOPE).
+        impl: optional IN-PROCESS agent implementation — a callable
+            `(AgentInvocation) -> AgentResult | pydantic model | dict`. When set,
+            the node runs the agent as a direct Python call via InProcessExecutor
+            (no subprocess, no control sidecar) instead of spawning `runtime`; it
+            receives the same neutral invocation a subprocess agent would (the
+            composed prompt, model, run_dir, result_schema, ...). `agent` remains
+            the display label. The declarative equivalent is NodeDef.impl_ref +
+            registry.agent_impl(name). See runners/inprocess.py.
 
     Returns a plain `Node`, so it mixes freely with hand-written `run` nodes.
     """
@@ -137,7 +146,6 @@ def agent_node(
         from agent_flow.core import read_context_blocks
 
         warn = logging.getLogger("agent_flow").warning
-        control_abs = ctx.run_dir / control_path(name)
         # Expose the run_dir to input templates as {run_dir}, alongside params.
         tmpl = {**ctx.params, "run_dir": str(ctx.run_dir)}
         work_order = build_work_order(inputs, tmpl)
@@ -145,7 +153,8 @@ def agent_node(
         # The caller-visible prompt, composed in order:
         #   [per-node context] [per-node instructions] [additional (standing)]
         #   [one-time instruction] [work order]
-        # (Run-wide context + instructions are prepended by run_agent.)
+        # (Run-wide context + instructions are prepended by the executor via
+        # compose_prompt; a subprocess executor also prepends the control preamble.)
         parts: list[str] = []
         node_ctx = read_context_blocks(context, params=ctx.params, run_dir=ctx.run_dir, warn=warn)
         if node_ctx:
@@ -196,20 +205,25 @@ def agent_node(
         # implements it (agent is an impl detail). In a firehose of live lines,
         # the node label is what tells you where in the flow you are.
         make_printer = ctx.on_event_factory
-        result = run_agent(
+        # Build the neutral invocation once; the executor decides HOW to run it.
+        inv = AgentInvocation(
             agent=agent,
             prompt=prompt,
             run_dir=ctx.run_dir,
-            agent_dir=Path(eff_agent_dir) if eff_agent_dir else None,
-            runner=get_runner(runtime),
-            idle_timeout_s=eff_idle,
-            model=eff_model,
-            control_file=control_abs,
+            node=name,
             result_schema=result_schema,
-            on_event=make_printer(name) if callable(make_printer) else None,
+            model=eff_model,
+            agent_dir=eff_agent_dir or "",
             shared_instructions=ctx.shared_instructions,
             shared_context=shared_ctx,
+            idle_timeout_s=eff_idle,
+            on_event=make_printer(name) if callable(make_printer) else None,
         )
+        # An in-process impl (agent_node(impl=...) or a resolved impl_ref) runs the
+        # agent as a direct Python call — no subprocess/sidecar. Otherwise the
+        # runtime string selects a subprocess executor. Same invocation either way.
+        executor = InProcessExecutor(impl, name=runtime) if impl is not None else get_executor(runtime)
+        result = executor.run(inv)
         log(
             "node %s: agent=%s -> %s in %.1fs (tokens=%d cost=$%.4f completion=%s)",
             name,

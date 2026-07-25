@@ -35,8 +35,38 @@ next to the helpers it needs.
 from __future__ import annotations
 
 import abc
+from dataclasses import dataclass, field
 
 from agent_flow.runners.base import AgentInvocation
+
+
+@dataclass
+class AgentResult:
+    """Outcome of running one agent invocation — the executor seam's OUTPUT type.
+
+    Runtime-neutral: a subprocess executor fills it from a control sidecar + event
+    telemetry; an in-process executor fills it from a Python call's return. The
+    fields mean the same thing regardless of how the agent ran.
+    """
+
+    agent: str
+    exit_code: int | None
+    duration_s: float
+    control: dict = field(default_factory=dict)  # status envelope (status/reason/rerun_required/result)
+    # Telemetry (subprocess: harvested from the event stream; in-process: from the SDK usage).
+    tokens: int = 0
+    cost: float = 0.0
+    events: int = 0
+    # How the run terminated: "completed" | "sidecar" | "stale" | "hard_cap".
+    completion: str = "completed"
+    # Result-schema validation outcome (only meaningful when a result_schema was
+    # supplied). result_valid is True when no schema was given (nothing to fail).
+    # result_obj is a pydantic model INSTANCE when a PydanticSchema was used, else
+    # None (a dict schema / no schema produce no new object — the dict is already
+    # in control["result"]). A gate reads these — the engine never auto-fails.
+    result_valid: bool = True
+    result_obj: object = None
+    result_errors: tuple[str, ...] = ()
 
 
 class AgentExecutor(abc.ABC):
@@ -45,7 +75,7 @@ class AgentExecutor(abc.ABC):
     name: str
 
     @abc.abstractmethod
-    def run(self, inv: AgentInvocation):  # -> AgentResult (untyped here to avoid a core import cycle)
+    def run(self, inv: AgentInvocation) -> AgentResult:
         """Execute the invocation and return an AgentResult.
 
         Implementations receive the FULL neutral invocation and must return a

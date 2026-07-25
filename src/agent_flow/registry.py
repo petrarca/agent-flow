@@ -62,6 +62,7 @@ class FlowRegistry:
         self._exports: dict[str, ExportImpl] = {}
         self._runs: dict[str, Callable[..., Any]] = {}  # custom run impls (NodeDef.run_ref)
         self._schemas: dict[str, Any] = {}  # result-schema impls (NodeDef.result_schema by name)
+        self._agent_impls: dict[str, Callable[..., Any]] = {}  # in-process agent impls (NodeDef.impl_ref)
         # event -> list of (node_scope, hook). node_scope is None (all nodes) or a
         # frozenset of node names; ignored for group events.
         self._hooks: dict[str, list[tuple[frozenset[str] | None, Hook]]] = {e: [] for e in _EVENTS}
@@ -144,6 +145,26 @@ class FlowRegistry:
 
         return deco
 
+    def agent_impl(self, name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Register an in-process AGENT IMPL `(inv) -> AgentResult|BaseModel|dict`.
+
+        The counterpart of a subprocess agent: a Python callable that a node runs
+        IN-PROCESS (e.g. a PydanticAI agent) via an InProcessExecutor, instead of
+        spawning a CLI runtime. A NodeDef references it by `impl_ref="name"`
+        (resolved at compile time onto the node); the imperative `agent_node`
+        accepts the callable directly via `impl=`. See runners/inprocess.py for
+        the accepted return shapes.
+
+            @registry.agent_impl("classify")
+            def classify(inv): ...   # returns a pydantic model / dict / AgentResult
+        """
+
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self._agent_impls[name] = fn
+            return fn
+
+        return deco
+
     def on(self, event: str, *, node: str | list[str] | tuple[str, ...] | None = None) -> Callable[[Hook], Hook]:
         """Register an OBSERVING hook for a lifecycle `event` (decorator).
 
@@ -207,11 +228,21 @@ class FlowRegistry:
         except KeyError:
             raise ValueError(f"unknown result_schema {name!r} (registered: {sorted(self._schemas)})") from None
 
+    def get_agent_impl(self, name: str) -> Callable[..., Any]:
+        """Resolve a named in-process agent impl."""
+        try:
+            return self._agent_impls[name]
+        except KeyError:
+            raise ValueError(f"unknown agent impl {name!r} (registered: {sorted(self._agent_impls)})") from None
+
     def has_gate(self, name: str) -> bool:
         return name in self._gates
 
     def has_schema(self, name: str) -> bool:
         return name in self._schemas
+
+    def has_agent_impl(self, name: str) -> bool:
+        return name in self._agent_impls
 
     def fire(self, event: str, /, *args: Any, _node_name: str | None = None, **kwargs: Any) -> None:
         """Fire the observing hooks registered for `event`.

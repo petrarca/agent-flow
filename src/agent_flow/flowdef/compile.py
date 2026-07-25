@@ -68,20 +68,27 @@ def _validate_refs(flow_def: FlowDef, registry) -> None:
             registry.get_run(n.run_ref)  # raises if unknown
         if n.export_ref:
             registry.get_export(n.export_ref)  # raises if unknown
+        if n.impl_ref and not registry.has_agent_impl(n.impl_ref):
+            raise ValueError(f"node {n.name!r}: unknown agent impl {n.impl_ref!r}")
 
 
 def _compile_node(nd: NodeDef, registry) -> Node:
     """One NodeDef -> one runtime Node."""
     schema = registry.get_schema(nd.result_schema) if nd.result_schema else None
     if nd.agent:
-        return _compile_agent_node(nd, schema)
+        return _compile_agent_node(nd, registry, schema)
     return _compile_custom_node(nd, registry, schema)
 
 
-def _compile_agent_node(nd: NodeDef, schema) -> Node:
-    """A standard 'run one agent' node: delegate to the batteries builder."""
+def _compile_agent_node(nd: NodeDef, registry, schema) -> Node:
+    """A standard 'run one agent' node: delegate to the batteries builder.
+
+    An `impl_ref` resolves to a registered in-process agent impl (the node then
+    runs in-process, no subprocess); absent it, the node runs as a subprocess.
+    """
     from agent_flow.batteries import agent_node
 
+    impl = registry.get_agent_impl(nd.impl_ref) if nd.impl_ref else None
     return agent_node(
         name=nd.name,
         agent=nd.agent,
@@ -100,6 +107,7 @@ def _compile_agent_node(nd: NodeDef, schema) -> Node:
         model=nd.model,
         idle_timeout_s=nd.idle_timeout_s,
         agent_dir=nd.agent_dir,
+        impl=impl,
     )
 
 

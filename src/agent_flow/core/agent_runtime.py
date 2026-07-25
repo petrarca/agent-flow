@@ -33,14 +33,14 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from agent_flow.core.control_protocol import build_control_preamble
 from agent_flow.core.schema import ResultSchema, coerce_schema
 from agent_flow.runners import AgentInvocation, AgentRunner, Event
 from agent_flow.runners.base import DEFAULT_IDLE_TIMEOUT_S, compose_prompt
-from agent_flow.runners.executor import AgentExecutor
+from agent_flow.runners.executor import AgentExecutor, AgentResult
 
 # Liveness supervision.
 #   IDLE = max silence (no runner event) before the agent is deemed STALE.
@@ -76,30 +76,6 @@ class AgentCrashError(RuntimeError):
     This represents a process-level crash (CLI error, OOM, rate-limit 429, …).
     It is transient and the retry policy SHOULD retry it.
     """
-
-
-@dataclass
-class AgentResult:
-    """Outcome of one supervised agent run."""
-
-    agent: str
-    exit_code: int | None
-    duration_s: float
-    control: dict = field(default_factory=dict)  # status from the sidecar
-    # Telemetry harvested from opencode's --format json event stream.
-    tokens: int = 0
-    cost: float = 0.0
-    events: int = 0
-    # How the run terminated: "completed" | "sidecar" | "stale" | "hard_cap".
-    completion: str = "completed"
-    # Result-schema validation outcome (only meaningful when a result_schema was
-    # supplied). result_valid is True when no schema was given (nothing to fail).
-    # result_obj is a Pydantic model INSTANCE when a PydanticSchema was used, else
-    # None (a dict schema / no schema produce no new object — the dict is already
-    # in control["result"]). A gate reads these — the engine never auto-fails.
-    result_valid: bool = True
-    result_obj: object = None
-    result_errors: tuple[str, ...] = ()
 
 
 @dataclass

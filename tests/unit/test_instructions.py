@@ -13,25 +13,26 @@ from agent_flow.gates import Continue
 
 
 def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, shared_context=(), node_instructions=None):
-    """Run a batteries node with a stubbed run_agent that captures the prompt."""
+    """Run a batteries node with a stubbed EXECUTOR that captures the invocation.
+
+    batteries builds a neutral AgentInvocation and hands it to an AgentExecutor;
+    we stub get_executor to capture that invocation (its per-node prompt and the
+    run-wide shared_* blocks stay SEPARATE fields — the composition contract).
+    """
+    from agent_flow.core.agent_runtime import AgentResult
+
     captured = {}
 
-    class _Result:
-        control = {"status": "ok"}
-        tokens = cost = events = 0
-        completion = "sidecar"
-        duration_s = 0.0
-        result_valid = True
-        result_obj = None
-        result_errors = ()
+    class _FakeExecutor:
+        name = "fake"
 
-    def fake_run_agent(*, agent, prompt, shared_instructions="", shared_context="", **kw):
-        captured["prompt"] = prompt
-        captured["shared"] = shared_instructions
-        captured["shared_context"] = shared_context
-        return _Result()
+        def run(self, inv):
+            captured["prompt"] = inv.prompt
+            captured["shared"] = inv.shared_instructions
+            captured["shared_context"] = inv.shared_context
+            return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "ok"}, completion="completed")
 
-    monkeypatch.setattr("agent_flow.batteries.run_agent", fake_run_agent)
+    monkeypatch.setattr("agent_flow.batteries.get_executor", lambda _runtime: _FakeExecutor())
     interpret(
         node,
         run_dir=Path(run_dir) if run_dir else Path(tempfile.gettempdir()),
