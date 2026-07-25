@@ -94,6 +94,7 @@ from agent_flow.gates import (
     rerun_on_signal,
 )
 from agent_flow.preflight import Check, check, fatal_failures
+from agent_flow.registry import FlowRegistry
 from agent_flow.run_config import (
     RunConfig,
     build_run_config,
@@ -178,6 +179,7 @@ __all__ = [
     "FlowBackend",
     "InProcessBackend",
     "get_backend",
+    "FlowRegistry",
     # batteries: one-call node for the common "run one agent" case
     "agent_node",
     "control_path",

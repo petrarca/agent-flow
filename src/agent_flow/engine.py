@@ -134,6 +134,17 @@ class Node:
     # Either a callable `(result) -> Mapping[str, Any]`, or a declarative map
     # `{param_name: result_field}`. See agent_node(exports=...) and run_context.
     exports: Callable[[dict[str, Any]], Any] | dict[str, str] | None = None
+    # Data references into a FlowRegistry (the serializable form; resolved by the
+    # engine at run time). A node's flow-control is a NAME + args, not a baked-in
+    # callable — so a node/definition stays serializable and the impl lives once
+    # in the registry. gate_ref names a registered gate factory; gate_args are
+    # its kwargs. export_ref names a registered export impl (the inline `exports`
+    # dict/callable above still works and takes precedence when set). When gate_ref
+    # is set it is resolved via the registry; when only `gate` (a callable) is set
+    # the engine registers it under a generated ref. See registry.FlowRegistry.
+    gate_ref: str | None = None
+    gate_args: dict[str, Any] = field(default_factory=dict)
+    export_ref: str | None = None
 
 
 def _group_membership(nodes: list[Node]) -> tuple[dict[str, list[Node]], list[str]]:
@@ -238,6 +249,7 @@ def interpret(
     shared_context: tuple[str, ...] = (),
     agent_dir: str = "",
     node_instructions: dict[str, str] | None = None,
+    registry: Any = None,
 ) -> NodeOutcome:
     """Run one node to completion, interpreting its gate's directives.
 
@@ -247,9 +259,17 @@ def interpret(
     surfaced via NodeOutcome.goto for the walker to act on (jump-back).
 
     `on_error` maps a raised exception to a status per criticality (and may
-    itself raise NodeBlocked).
+    itself raise NodeBlocked). `registry` (a FlowRegistry) resolves the node's
+    gate (from `gate_ref`+`gate_args`, or a callable `gate` auto-registered) and
+    export_ref, and receives observing hooks; a default is created if None.
     """
     from agent_flow.run_context import get_run_context
+
+    if registry is None:
+        from agent_flow.registry import FlowRegistry
+
+        registry = FlowRegistry()
+    gate = _resolve_gate(node, registry)
 
     cycles = 0
     while True:
@@ -279,8 +299,8 @@ def interpret(
         # directly instead of digging the `_result_obj` key out of `result`.
         obj = result.get("_result_obj") if isinstance(result, dict) else None
         directive = (
-            node.gate(GateContext(result=result, obj=obj, node=node, run_dir=run_dir, cycles=cycles, params=eff_params, agent_dir=agent_dir))
-            if node.gate
+            gate(GateContext(result=result, obj=obj, node=node, run_dir=run_dir, cycles=cycles, params=eff_params, agent_dir=agent_dir))
+            if gate
             else Continue()
         )
 
@@ -297,16 +317,20 @@ def interpret(
 
         # Node is settling (Continue / cross-node GoTo / exhausted Restart): apply
         # its result->params exports to the run-context for DOWNSTREAM nodes.
-        _apply_exports(node, result, obj, log)
+        _apply_exports(node, result, obj, log, registry)
 
         if isinstance(directive, GoTo) and directive.node != node.name:
             # Cross-node jump-back: the node itself is done; the walker decides
             # whether to rewind to the target (bounded there).
             log(f"node {node.name}: gate -> GoTo {directive.node} ({directive.note})")
-            return NodeOutcome(status="ok", goto=directive.node)
+            outcome = NodeOutcome(status="ok", goto=directive.node)
+            _fire_after_node(registry, node, outcome, log)
+            return outcome
 
         # Continue, or an exhausted Restart.
-        return NodeOutcome(status="ok")
+        outcome = NodeOutcome(status="ok")
+        _fire_after_node(registry, node, outcome, log)
+        return outcome
 
 
 _MISSING = object()
@@ -319,24 +343,48 @@ def _read_field(src: Any, field: str) -> Any:
     return getattr(src, field, _MISSING)
 
 
-def _apply_exports(node: Node, result: Any, obj: Any, log: Callable[[str], None]) -> None:
+def _resolve_gate(node: Node, registry: Any):
+    """Resolve a node's gate from the registry: gate_ref+args, or a callable gate.
+
+    Precedence: an explicit gate_ref (data) wins; else a callable `node.gate`
+    (back-compat) is auto-registered and used; else None (always Continue).
+    """
+    if node.gate_ref:
+        return registry.build_gate(node.gate_ref, node.gate_args)
+    if node.gate is not None:
+        return node.gate  # a hand-supplied callable; used directly
+    return None
+
+
+def _fire_after_node(registry: Any, node: Node, outcome: NodeOutcome, log: Callable[[str], None]) -> None:
+    """Fire observing after_node hooks (telemetry/cross-cutting). Never steers flow."""
+    try:
+        registry.fire("after_node", node, outcome)
+    except Exception as exc:  # noqa: BLE001 - an observer must never break the run
+        log(f"node {node.name}: after_node hook failed ({exc}) — ignored")
+
+
+def _apply_exports(node: Node, result: Any, obj: Any, log: Callable[[str], None], registry: Any) -> None:
     """Merge a node's result-derived exports into the run-context service.
 
-    The consumer's `node.exports` sees the VALIDATED typed object when the node
-    declared a `result_schema` (a pydantic instance), else the raw result dict —
-    one payload, no signature sniffing. Two forms:
-      - callable `(payload) -> Mapping` — full control.
-      - declarative `{param_name: field}` — copy fields (attribute or dict key).
+    The consumer's exports see the VALIDATED typed object when the node declared
+    a `result_schema` (a pydantic instance), else the raw result dict — one
+    payload, no signature sniffing. Sources (first present wins):
+      - `node.export_ref` — a named export impl resolved via the registry.
+      - `node.exports` callable `(payload) -> Mapping` — full control.
+      - `node.exports` declarative `{param_name: field}` — copy fields.
     Missing fields are skipped. Never raises: a mistake logs and is ignored.
     """
     spec = node.exports
-    if not spec:
+    if not spec and not node.export_ref:
         return
     from agent_flow.run_context import get_run_context
 
     payload = obj if obj is not None else result
     try:
-        if callable(spec):
+        if node.export_ref:
+            derived = dict(registry.get_export(node.export_ref)(payload) or {})
+        elif callable(spec):
             derived = dict(spec(payload) or {})
         else:
             derived = {param: v for param, fld in spec.items() if (v := _read_field(payload, fld)) is not _MISSING}
@@ -360,6 +408,7 @@ def build_flow(
     agent_dir: str = "",
     node_instructions: dict[str, str] | None = None,
     backend: str = "inprocess",
+    registry: Any = None,
 ):
     """Compile a Node graph into a runnable flow callable.
 
@@ -413,6 +462,10 @@ def build_flow(
     from agent_flow.backends import get_backend
 
     backend_impl = get_backend(backend, llm_tag=llm_tag)
+    if registry is None:
+        from agent_flow.registry import FlowRegistry
+
+        registry = FlowRegistry()  # built-in gates only
 
     shared_context_t = tuple(shared_context or ())
     node_instructions_d = dict(node_instructions or {})
@@ -458,6 +511,7 @@ def build_flow(
                 shared_context=shared_context_t,
                 agent_dir=agent_dir,
                 node_instructions=node_instructions_d,
+                registry=registry,
             )
             # Stamp the node's wall-clock duration (timed here, where it runs).
             outcome = replace(outcome, duration_s=time.monotonic() - started)
