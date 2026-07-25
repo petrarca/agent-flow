@@ -50,6 +50,8 @@ into four recurring problems. agent-flow addresses each directly:
 - **Re-runs as jump-back** — a re-run rewinds to the named node and re-flows
   *forward* from there (re-running it + everything downstream), backward-only,
   bounded by `max_cycles`.
+- **Start partway** — `--start-from NODE` (or a parallel-group) enters the flow
+  at a chosen node, skipping upstream, to iterate on a late stage.
 - **Liveness supervision** — idle-timeout (not wall-clock) kill, process-group
   termination.
 - **Control sidecar** — a per-node JSON envelope the agent writes; the engine

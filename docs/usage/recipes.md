@@ -210,6 +210,35 @@ CLI `--instruct` merges over the config `node_instructions:` (CLI wins per node)
 Pairs naturally with re-entering the flow at a node to iterate. See
 [input-plane](../design/orchestrator/input-plane.md#per-node-run-time-instructions).
 
+## Start partway through the flow (`--start-from`)
+
+Begin at a chosen node (or parallel-group) and run forward, skipping the nodes
+before it — to iterate on a late stage without re-running the expensive upstream:
+
+```bash
+# re-run only extractor -> summary -> …, steering the extractor for this pass:
+python my_flow.py -p product_key=acme \
+  --start-from extractor \
+  --instruct extractor="re-derive the RAG counts; the na bucket looked off"
+```
+
+```python
+build_flow(nodes, name="my-pipeline")(product_key="acme", start_from="extractor")
+```
+
+`start_from` names a **node** or a **parallel-group** (`agent_node(parallel_group=…)`):
+a group name enters the whole fan-out; a member node resolves to the same group
+(you can't enter "in the middle" of a parallel group — the group is the unit).
+
+**Caveat — you assert the upstream is done.** Skipping earlier nodes means their
+side-effects did not happen this run: their **output files must already exist**
+(from a prior run) for the start node to read, and any params they would have
+**exported** (e.g. a readiness check's `pipeline_commit`) won't be set — runtime
+-populated params fall back to their defaults. `start_from` is a forward entry
+point set once; it is distinct from re-run jump-back (a gate can still send the
+flow back to a skipped node, and it will run then). CLI/programmatic only — not a
+persisted config setting.
+
 ## Make agents actually read rules/standards (ingest context)
 
 Telling an agent to "read the security rules" is unreliable; injecting the

@@ -409,6 +409,9 @@ def run_cli(
         instruct: list[str] | None = typer.Option(  # noqa: B008 - Typer idiom
             None, "--instruct", help="per-node instruction NODE=text (repeatable); appended LAST to the node's prompt"
         ),
+        start_from: str | None = typer.Option(
+            None, "--start-from", help="begin at this node or parallel-group, skipping upstream (assumes their outputs already exist)"
+        ),
         llm_concurrency: int | None = typer.Option(None, "--llm-concurrency"),
         show_events: bool = typer.Option(False, "--show-events", "-v", help="raw per-event firehose (instead of the live table)"),
         show_diffs: bool = typer.Option(
@@ -466,7 +469,7 @@ def run_cli(
         # 3) Runtime pre-flight — abort (exit 2) on any fatal failure.
         _run_preflight(cfg.runtime, cfg.agent_dir, console)
         # 4) Run, with the chosen view (live table by default, or raw firehose).
-        _run_with_view(build_nodes(), params, cfg, console, name=name, llm_tag=llm_tag)
+        _run_with_view(build_nodes(), params, cfg, console, name=name, llm_tag=llm_tag, start_from=start_from or "")
 
     app()
 
@@ -549,7 +552,7 @@ def _run_preflight(runtime: str, agent_dir: str, console) -> None:
         sys.exit(2)
 
 
-def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str) -> None:
+def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str, start_from: str = "") -> None:
     """Run the pipeline under the chosen view, then print the results table.
 
     Two independent knobs compose (see the matrix):
@@ -591,13 +594,14 @@ def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str) -> N
             on_event_factory=on_event_factory,
             on_node_event=on_node_event,
             render_results=True,
+            start_from=start_from,
         )
     except KeyboardInterrupt:
         console.print("[yellow]Interrupted[/yellow] — stopped by user (Ctrl-C).")
         sys.exit(130)
 
 
-def _build_and_run(nodes, params, cfg, console, *, name, llm_tag, on_event_factory, on_node_event, render_results):
+def _build_and_run(nodes, params, cfg, console, *, name, llm_tag, on_event_factory, on_node_event, render_results, start_from=""):
     """Compile the flow with the given hooks and run it; optionally print results."""
     from agent_flow.engine import build_flow
 
@@ -612,7 +616,12 @@ def _build_and_run(nodes, params, cfg, console, *, name, llm_tag, on_event_facto
         agent_dir=cfg.agent_dir,
         node_instructions=cfg.node_instructions,
     )
-    result = pipeline(run_dir=cfg.run_dir, runtime=cfg.runtime, **params)
+    # start_from is a per-INVOCATION forward entry point (not persisted config):
+    # begin at that node, skipping upstream. Passed straight to the pipeline call.
+    call_kwargs = {"run_dir": cfg.run_dir, "runtime": cfg.runtime, **params}
+    if start_from:
+        call_kwargs["start_from"] = start_from
+    result = pipeline(**call_kwargs)
     if render_results:
         agents = {n.name: n.agent for n in nodes}
         print_results_table(result, title=name, agents=agents, console=console)

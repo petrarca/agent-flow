@@ -465,7 +465,7 @@ def build_flow(
         return out
 
     @flow(name=name)
-    def _pipeline(run_dir: str = "", **params: Any) -> dict:
+    def _pipeline(run_dir: str = "", start_from: str = "", **params: Any) -> dict:
         from agent_flow.run_context import init_run_context
         from agent_flow.utils import resolve_run_dir
 
@@ -490,6 +490,7 @@ def build_flow(
         logger.info("run_dir: %s", wd)
         if llm_concurrency is not None:
             _apply_concurrency_limit(llm_tag, llm_concurrency, logger.info, logger.warning)
+        start_index = _resolve_start_index(start_from, by_name, group_index, node_group, logger)
         results = _walk(
             planned,
             run_group=lambda group: _run_group(group, wd, params, logger),
@@ -497,6 +498,7 @@ def build_flow(
             node_group=node_group,
             by_name=by_name,
             logger=logger,
+            start_index=start_index,
         )
         # Log a compact {node: status} summary — not the verbose NodeOutcome reprs.
         logger.info("%s done: %s", name, {n: oc.status for n, oc in results.items()})
@@ -505,15 +507,58 @@ def build_flow(
     return _pipeline
 
 
-def _walk(planned, *, run_group, group_index, node_group, by_name, logger) -> dict[str, NodeOutcome]:
+def _resolve_start_index(start_from: str, by_name, group_index, node_group, logger) -> int:
+    """Translate a start_from NODE name to its GROUP index (0 when unset).
+
+    Forward entry point: the walk begins at the group CONTAINING start_from and
+    proceeds forward. Granularity is the GROUP, not the node — a parallel group is
+    the indivisible unit of execution, so if start_from is one member of a parallel
+    group, the WHOLE group runs (you cannot enter "in the middle" of a fan-out).
+    We log the entry group's members so that is visible, not surprising.
+
+    `start_from` accepts either a NODE name or a parallel-GROUP name (the name you
+    passed as agent_node(parallel_group=...)). A group name is the natural way to
+    enter a fan-out; a member node name resolves to the same group.
+
+    Skipping upstream assumes those nodes' side-effects (files on disk) and
+    exported params already exist — the CALLER's responsibility (see docs).
+    Runtime-populated params fall back to their defaults when their producer is
+    skipped. Unknown name -> error.
+    """
+    if not start_from:
+        return 0
+    # Accept a node name OR a group name (node_group values are the group keys).
+    if start_from in by_name:
+        group_key = node_group[start_from]
+    elif start_from in group_index:  # a parallel-group name
+        group_key = start_from
+    else:
+        known = sorted(set(by_name) | set(group_index))
+        raise ValueError(f"start_from={start_from!r} is not a known node or group (known: {known})")
+    start_index = group_index[group_key]
+    entry = sorted(n for n in by_name if group_index[node_group[n]] == start_index)
+    skipped = sorted(n for n in by_name if group_index[node_group[n]] < start_index)
+    if len(entry) > 1:
+        logger.info("start_from=%s: entering at PARALLEL group %s (all run), skipping %s", start_from, entry, skipped)
+    else:
+        logger.info("start_from=%s: entering at %s, skipping %s", start_from, entry, skipped)
+    return start_index
+
+
+def _walk(planned, *, run_group, group_index, node_group, by_name, logger, start_index: int = 0) -> dict[str, NodeOutcome]:
     """Walk the planned groups, honoring bounded cross-node jump-backs (GoTo).
 
     Returns per-node NodeOutcome (status + duration_s), so callers can render
     both. On a re-run (jump-back), a node's later outcome replaces the earlier.
+
+    `start_index` is the FORWARD entry point (default 0 = the first group): the
+    walk begins at that group, skipping earlier ones. This is orthogonal to
+    jump-back — it sets where the walk STARTS; jump-back mutates position DURING
+    the run. Node->index translation is the caller's job (this stays mechanical).
     """
     results: dict[str, NodeOutcome] = {}
     jumps: dict[str, int] = {}
-    i = 0
+    i = start_index
     while i < len(planned):
         _key, group = planned[i]
         outcomes = run_group(group)
