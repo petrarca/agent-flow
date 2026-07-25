@@ -204,6 +204,7 @@ def run_cli(
     name: str = "agent-flow",
     llm_tag: str = "llm",
     default_agent_dir: str = "",
+    default_run_dir: str = "",
     params_model: type | None = None,
 ) -> None:
     """Run a pipeline from a UNIFIED CLI: generic flags + --config + --param.
@@ -216,7 +217,10 @@ def run_cli(
       - -p/--param KEY=VALUE (repeatable) for DOMAIN params.
 
     Generic settings resolve via RunConfig (precedence: CLI flag > env
-    AGENT_FLOW_* > .env > --config YAML > default).
+    AGENT_FLOW_* > .env > --config YAML > default). `default_agent_dir` /
+    `default_run_dir` supply the pipeline's own fallbacks when neither the CLI nor
+    env set them; `default_run_dir` may use `{param}` templating (e.g.
+    "{repos_root}/{product_key}/…"), resolved strictly at run time.
 
     Domain params (`params_model`):
       - None (default): -p values pass straight through as an untyped string dict
@@ -259,7 +263,7 @@ def run_cli(
         cfg = build_run_config(
             config_file=config or None,
             runtime=runtime,
-            run_dir=run_dir,
+            run_dir=run_dir or (default_run_dir or None),
             agent_dir=agent_dir or (default_agent_dir or None),
             instructions=instructions,
             instructions_file=instructions_file,
