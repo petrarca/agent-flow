@@ -35,12 +35,12 @@ tasks:
   example:tech:
     desc: 'Run the tech-assessment example DAG. Override: task example:tech PRODUCT=my-product RUNTIME=mock RUNDIR=/path SHOW_EVENTS=--show-events'
     cmds:
-      - .venv/bin/python -m examples.tech_assessment.tech_flow -p product_key="{{.PRODUCT}}" -p repos_root=/tmp/repos --run-dir "{{.RUNDIR}}" --runtime "{{.RUNTIME}}" {{.SHOW_EVENTS}}
+      - .venv/bin/python -m examples.tech_assessment.tech_flow run -p product_key="{{.PRODUCT}}" -p repos_root=/tmp/repos --run-dir "{{.RUNDIR}}" --runtime "{{.RUNTIME}}" {{.SHOW_EVENTS}}
 
   example:tech:mock:
     desc: Run the tech-assessment example with the MOCK runtime (no tokens)
     cmds:
-      - .venv/bin/python -m examples.tech_assessment.tech_flow -p product_key="{{.PRODUCT}}" -p repos_root=/tmp/repos --run-dir "{{.RUNDIR}}" --runtime mock {{.SHOW_EVENTS}}
+      - .venv/bin/python -m examples.tech_assessment.tech_flow run -p product_key="{{.PRODUCT}}" -p repos_root=/tmp/repos --run-dir "{{.RUNDIR}}" --runtime mock {{.SHOW_EVENTS}}
 
   example:toy:
     desc: Run the toy 3-stage pipeline (analyst -> verifier -> extractor). SHOW_EVENTS=--show-events for a live view

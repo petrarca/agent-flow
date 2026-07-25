@@ -26,11 +26,11 @@ def main() -> None:
 
 ```bash
 # generic settings as flags + DOMAIN params via -p/--param KEY=VALUE:
-python -m my_pkg.flow -p product_key=my-product -p repos_root=/tmp/repos \
+python -m my_pkg.flow run -p product_key=my-product -p repos_root=/tmp/repos \
     --runtime opencode --run-dir "{repos_root}/{product_key}/output" -i "use code-graph"
 
 # or put the generic settings in a YAML config file:
-python -m my_pkg.flow --config run.yml -p product_key=my-product
+python -m my_pkg.flow run --config run.yml -p product_key=my-product
 ```
 
 ```yaml
@@ -162,7 +162,7 @@ build_flow(nodes, name="my-pipeline", shared_instructions=brief)
 ```
 
 ```bash
-python my_flow.py --instructions "Experimental code-graph support is available; use it alongside RAG where sensible."
+python my_flow.py run --instructions "Experimental code-graph support is available; use it alongside RAG where sensible."
 ```
 
 (Wire `--instructions`/`-i` yourself with Typer/argparse, as the tech-assessment
@@ -189,7 +189,7 @@ is the most recent standing guidance and overrides earlier ones by recency:
 
 ```bash
 # CLI (repeatable; NODE=text like -p):
-python my_flow.py -p product_key=acme \
+python my_flow.py run -p product_key=acme \
   --instruct analyst="Ignore the compact-table instruction; produce the full breakdown." \
   --instruct summary="Lead with the tenancy gap."
 ```
@@ -217,7 +217,7 @@ before it — to iterate on a late stage without re-running the expensive upstre
 
 ```bash
 # re-run only extractor -> summary -> …, steering the extractor for this pass:
-python my_flow.py -p product_key=acme \
+python my_flow.py run -p product_key=acme \
   --start-from extractor \
   --instruct extractor="re-derive the RAG counts; the na bucket looked off"
 ```
@@ -248,7 +248,7 @@ after it either. `--start-from` runs *from* a group *to the end*; `--only` runs
 
 ```bash
 # re-run ONLY the extractor, nothing before or after it:
-python my_flow.py -p product_key=acme \
+python my_flow.py run -p product_key=acme \
   --only extractor \
   --instruct extractor="re-derive the RAG counts; the na bucket looked off"
 ```
@@ -379,10 +379,10 @@ heavy dependency. It is the right choice for everyday single runs.
 
 ```bash
 # default: in-process backend (nothing to pass)
-python my_flow.py -p product_key=acme
+python my_flow.py run -p product_key=acme
 
 # opt into Prefect for the run UI / history / scheduling / scale
-python my_flow.py -p product_key=acme --backend prefect
+python my_flow.py run -p product_key=acme --backend prefect
 # or persist the choice for a session:
 export AGENT_FLOW_BACKEND=prefect
 ```

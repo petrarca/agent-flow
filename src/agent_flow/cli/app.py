@@ -90,7 +90,17 @@ def run_cli(
 
     from agent_flow.run_config import build_run_config, parse_params, runtime_param_fields
 
-    app = typer.Typer(add_completion=False, help=f"Run the {name} pipeline.")
+    # A multi-command app (subcommands): `run` (the pipeline) today, with room for
+    # `info` / `doctor` later. no_args_is_help shows the command list on bare
+    # invocation. A no-op callback forces Typer to KEEP the group structure even
+    # with a single command (otherwise Typer collapses to that command and `run`
+    # becomes implicit) — so `run` is always explicit and adding commands later
+    # never changes how `run` is invoked.
+    app = typer.Typer(add_completion=False, no_args_is_help=True, help=f"{name} pipeline CLI.")
+
+    @app.callback(help=f"{name} — deterministic agent-flow pipeline. Use a subcommand (e.g. `run`).")
+    def _main() -> None:
+        pass
 
     @app.command()
     def run(
