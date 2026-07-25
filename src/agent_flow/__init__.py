@@ -14,7 +14,7 @@ Public API (the authoritative list is `__all__` below):
         AgentTimeoutError, AgentContentFailedError, AgentCrashError,
         # runners (subprocess wire adapters) + the execution seam
         AgentRunner, AgentInvocation, Event,
-        AgentExecutor, get_executor, compose_prompt,
+        AgentExecutor, InProcessExecutor, AgentImpl, get_executor, compose_prompt,
         OpenCodeRunner, MockRunner, get_runner,
         # Tier 3: declare Nodes -> build_flow (the DAG engine)
         Node, NodeOutcome, RunContext, build_flow, NodeBlocked,
@@ -116,10 +116,12 @@ from agent_flow.run_context import (
 )
 from agent_flow.runners import (
     AgentExecutor,
+    AgentImpl,
     AgentInvocation,
     AgentRunner,
     AgentRunnerInfo,
     Event,
+    InProcessExecutor,
     MockRunner,
     OpenCodeRunner,
     compose_prompt,
@@ -140,6 +142,8 @@ __all__ = [
     "AgentRunnerInfo",
     "AgentInvocation",
     "AgentExecutor",
+    "InProcessExecutor",
+    "AgentImpl",
     "Event",
     "OpenCodeRunner",
     "MockRunner",

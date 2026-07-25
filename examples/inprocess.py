@@ -35,8 +35,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from agent_flow import FlowDef, FlowRegistry, NodeDef
-from agent_flow.runners import AgentInvocation
+from agent_flow import AgentInvocation, FlowDef, FlowRegistry, NodeDef
 
 
 # --- Typed outputs (what each "agent" returns) ------------------------------
