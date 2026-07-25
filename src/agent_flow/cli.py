@@ -49,8 +49,12 @@ def get_console():
         return _CONSOLE
 
 
-def event_printer(agent: str, *, console=None) -> Callable[[Event], None]:
+def event_printer(label: str, *, console=None) -> Callable[[Event], None]:
     """Build an `on_event` callback that prints ONE readable line per live event.
+
+    `label` is the prefix each line carries. The engine passes the NODE name (the
+    DAG unit the reader navigates by), not the agent that implements it — in a
+    firehose of live lines the node is what tells you where in the flow you are.
 
     The raw runner event (opencode NDJSON) is far too verbose to show as-is, so
     the CLI projects it to a single line using a FEW shallow, stable fields. This
@@ -59,14 +63,14 @@ def event_printer(agent: str, *, console=None) -> Callable[[Event], None]:
     event type or a trimmed raw line, so it never breaks on a new event kind.
 
     Usage:
-        run_agent(..., on_event=event_printer("tech-stack-analyst"))
+        run_agent(..., on_event=event_printer("analyst"))
     """
     console = console or get_console()
 
     def _print(ev: Event) -> None:
         line = _project_event(ev.raw)
         if line:
-            console.print(f"  [dim]{agent}[/dim] {line}")
+            console.print(f"  [dim]{label}[/dim] {line}")
 
     return _print
 
@@ -396,8 +400,8 @@ def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str) -> N
     exit 130 (SIGINT) with a short message instead of a raw traceback.
     """
 
-    def _raw_event_factory(agent):
-        return event_printer(agent, console=console)
+    def _raw_event_factory(label):
+        return event_printer(label, console=console)
 
     if cfg.show_events:
         on_event_factory = _raw_event_factory

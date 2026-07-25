@@ -1,4 +1,12 @@
-"""Unit tests for the runtime pre-flight checks."""
+"""Unit tests for the runtime pre-flight checks.
+
+The generic module (`preflight`) owns only runtime-agnostic checks
+(`check_prefect_importable`, `check_agent_dir_exists`). Runtime-specific
+checks (opencode on PATH, not-nested session, `.opencode/agent*` layout) live
+on the runner via `preflight_checks(agent_dir)` and reach `check()` through
+that seam — so they are exercised here via `check("opencode", ...)`, not as
+standalone functions.
+"""
 
 import pytest
 
@@ -12,45 +20,42 @@ def agent_dir(tmp_path):
     return tmp_path
 
 
-def test_agent_dir_ok(agent_dir):
-    c = preflight.check_agent_dir(agent_dir)
+# --- generic checks ---------------------------------------------------------
+
+
+def test_agent_dir_exists_ok(agent_dir):
+    c = preflight.check_agent_dir_exists(agent_dir)
     assert c.ok and c.fatal
 
 
-def test_agent_dir_missing_path(tmp_path):
-    c = preflight.check_agent_dir(tmp_path / "nope")
+def test_agent_dir_exists_missing_path(tmp_path):
+    c = preflight.check_agent_dir_exists(tmp_path / "nope")
     assert not c.ok and c.fatal
 
 
-def test_agent_dir_none():
-    c = preflight.check_agent_dir(None)
+def test_agent_dir_exists_none():
+    c = preflight.check_agent_dir_exists(None)
     assert not c.ok and c.fatal
 
 
-def test_agent_dir_without_opencode(tmp_path):
-    # exists but no .opencode/agent* inside
-    c = preflight.check_agent_dir(tmp_path)
-    assert not c.ok
-
-
-def test_not_nested_session_pass(monkeypatch):
-    monkeypatch.delenv("OPENCODE", raising=False)
-    assert preflight.check_not_nested_session().ok
-
-
-def test_not_nested_session_fail(monkeypatch):
-    monkeypatch.setenv("OPENCODE", "1")
-    c = preflight.check_not_nested_session()
-    assert not c.ok and c.fatal
+def test_agent_dir_exists_is_layout_agnostic(tmp_path):
+    # The generic check only verifies the dir is set and exists; the opencode
+    # LAYOUT (.opencode/agent*) is the runner's concern, not this one.
+    c = preflight.check_agent_dir_exists(tmp_path)
+    assert c.ok and c.fatal
 
 
 def test_prefect_importable():
     assert preflight.check_prefect_importable().ok
 
 
+# --- runtime seam: check() delegates runtime checks to the runner -----------
+
+
 def test_check_mock_skips_opencode_specific_checks(agent_dir, monkeypatch):
-    # Even inside an opencode session, the mock runtime does not run the
-    # opencode-installed / not-nested checks.
+    # Even inside an opencode session, the mock runtime contributes no
+    # opencode-installed / not-nested / layout checks (MockRunner has no
+    # preflight_checks). Only the generic checks run.
     monkeypatch.setenv("OPENCODE", "1")
     names = {c.name for c in preflight.check("mock", agent_dir)}
     assert "opencode-installed" not in names
@@ -61,16 +66,36 @@ def test_check_mock_skips_opencode_specific_checks(agent_dir, monkeypatch):
 def test_check_opencode_includes_runtime_checks(agent_dir, monkeypatch):
     monkeypatch.delenv("OPENCODE", raising=False)
     names = {c.name for c in preflight.check("opencode", agent_dir)}
-    assert {"opencode-installed", "not-nested-session"} <= names
+    # generic + runner-contributed opencode checks
+    assert {"prefect-importable", "agent-dir", "opencode-installed", "not-nested-session"} <= names
+
+
+def test_check_opencode_not_nested_fails_inside_session(agent_dir, monkeypatch):
+    monkeypatch.setenv("OPENCODE", "1")
+    checks = {c.name: c for c in preflight.check("opencode", agent_dir)}
+    assert not checks["not-nested-session"].ok
+    assert checks["not-nested-session"].fatal
+
+
+def test_check_opencode_layout_fails_without_agent_dir(tmp_path, monkeypatch):
+    # agent_dir exists but has no .opencode/agent* -> the runner's layout check fails.
+    monkeypatch.delenv("OPENCODE", raising=False)
+    checks = {c.name: c for c in preflight.check("opencode", tmp_path)}
+    assert not checks["opencode-agent-layout"].ok
+
+
+def test_check_unknown_runtime_runs_only_generic_checks(agent_dir):
+    # An unknown runtime contributes no runner checks; generic ones still run.
+    names = {c.name for c in preflight.check("does-not-exist", agent_dir)}
+    assert names == {"prefect-importable", "agent-dir"}
 
 
 def test_fatal_failures_filters(agent_dir, monkeypatch):
     monkeypatch.setenv("OPENCODE", "1")
-    results = preflight.check("opencode", tmp_bad := (agent_dir / "nope"))
+    results = preflight.check("opencode", agent_dir / "nope")
     failures = preflight.fatal_failures(results)
-    # agent-dir (bad path) + not-nested-session are fatal failures here
     names = {c.name for c in failures}
+    # bad agent-dir + not-nested-session are both fatal failures here
     assert "agent-dir" in names
     assert "not-nested-session" in names
     assert all(c.fatal and not c.ok for c in failures)
-    _ = tmp_bad

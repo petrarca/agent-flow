@@ -54,13 +54,15 @@ class RunContext:
     params   pipeline-supplied DOMAIN run parameters (product key, repos root,
              …) threaded through build_flow unchanged. The engine does not
              interpret these — the run callable does. Domain-opaque by design.
-    on_event_factory  optional per-agent event-printer FACTORY: given an agent
-             name, returns a per-event callback (or None) — the ACTUAL callback
+    on_event_factory  optional per-node event-printer FACTORY: given a display
+             LABEL (the batteries node passes the NODE name — the DAG unit the
+             reader navigates by, not the agent that implements it), returns a
+             per-event callback (or None) — the ACTUAL callback
              `run_agent(on_event=...)` expects at Tier 1. Named differently from
-             that Tier-1 `on_event` on purpose: at Tier 3 the agent name is not
-             known until inside a node's `run`, so this is a factory, not a
-             callback. It is ENGINE plumbing, not a domain param — a build-time
-             concern (set via build_flow), kept out of `params` and off the
+             that Tier-1 `on_event` on purpose: at Tier 3 the label is not known
+             until inside a node's `run`, so this is a factory, not a callback.
+             It is ENGINE plumbing, not a domain param — a build-time concern
+             (set via build_flow), kept out of `params` and off the
              task-serialization path since a callable is not serializable.
     """
 
@@ -305,11 +307,11 @@ def build_flow(
         name: Prefect flow name.
         llm_tag: concurrency tag applied to each node task (for a shared limit).
         llm_concurrency: if set, a global concurrency limit on `llm_tag`.
-        on_event_factory: optional per-agent event-printer factory (agent name ->
-            a per-event callback). Reaches each node via
-            RunContext.on_event_factory. Kept here (build time) rather than in
-            `params` because it is a callable (not serializable) and is engine
-            plumbing, not a domain input.
+        on_event_factory: optional per-node event-printer factory (display label
+            -> a per-event callback); the batteries node passes the NODE name as
+            the label. Reaches each node via RunContext.on_event_factory. Kept
+            here (build time) rather than in `params` because it is a callable
+            (not serializable) and is engine plumbing, not a domain input.
         on_node_event: optional DAG-node lifecycle callback
             `(node_name, phase, status, agent) -> None`. Called with phase="start"
             (status=None) when a node begins and phase="finish" (status is the

@@ -155,8 +155,11 @@ def agent_node(
         log = _node_logger()
         log("node %s: agent=%s runtime=%s model=%s idle_timeout_s=%s", name, agent, runtime, eff_model, eff_idle)
         # on_event_factory is a typed RunContext field (engine plumbing), NOT a
-        # params key — see RunContext.on_event_factory. Calling it with this
-        # node's agent name yields the actual per-event callback run_agent wants.
+        # params key — see RunContext.on_event_factory. We build the per-event
+        # callback with the NODE name (not the agent): the node is the DAG unit
+        # the reader navigates by, and it may differ from the agent that
+        # implements it (agent is an impl detail). In a firehose of live lines,
+        # the node label is what tells you where in the flow you are.
         make_printer = ctx.on_event_factory
         result = run_agent(
             agent=agent,
@@ -168,7 +171,7 @@ def agent_node(
             model=eff_model,
             control_file=control_abs,
             result_schema=result_schema,
-            on_event=make_printer(agent) if callable(make_printer) else None,
+            on_event=make_printer(name) if callable(make_printer) else None,
             shared_instructions=ctx.shared_instructions,
             shared_context=shared_ctx,
         )

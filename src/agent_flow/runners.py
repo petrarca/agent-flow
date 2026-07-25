@@ -18,14 +18,48 @@ across every runner. That keeps the reliability contract uniform.
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-# The library NEVER hardcodes a model. When no model is configured (param/env/
-# CLI/programmatic), the runner omits --model so the runtime (opencode) resolves
-# it from its own config/provider/router. A model is passed through ONLY when
-# explicitly set.
+from pydantic import BaseModel, Field
+
+# Model contract. The library NEVER hardcodes a model. When no model is
+# configured (param/env/CLI/programmatic), the runner omits --model so the
+# runtime resolves it from its own config/provider/router. A model is passed
+# through ONLY when explicitly set.
+#
+# The library's guarantee stops there: "no invented model; an explicit value is
+# passed through". It does NOT guarantee the explicit model WINS — final
+# precedence is the runtime's own. On opencode a CLI --model beats config; on
+# Claude Code a managed/MDM policy setting outranks CLI args and can override
+# --model. So model precedence is a per-runner property owned by the runner, not
+# a cross-runtime invariant. Do not build upper-layer logic assuming --model is
+# final.
+
+
+class AgentRunnerInfo(BaseModel):
+    """Diagnostic self-description of a runner's runtime (best-effort).
+
+    Returned by the optional `AgentRunner.info()` for a doctor/summary view — it
+    reports what the RUNTIME says about itself, never library-invented values. A
+    field is left None/[] when the runtime cannot be introspected — either
+    transiently (binary missing, command failed) or STRUCTURALLY, when the
+    runtime exposes no way to resolve it from a CLI. E.g. opencode reports the
+    resolved model/tools via `opencode debug config`, but Claude Code has no
+    equivalent CLI subcommand (resolution is SDK-only), so its info() may report
+    version/availability only and leave resolved_model=None, tools=[]. A None
+    field therefore means "not introspectable here", not "misconfigured".
+    info() must never raise.
+    """
+
+    name: str = Field(description="Runner id (e.g. 'opencode', 'mock', 'claude').")
+    available: bool = Field(default=False, description="Is the runtime usable (binary found / importable)?")
+    version: str | None = Field(default=None, description="Runtime version, if it reports one.")
+    resolved_model: str | None = Field(default=None, description="The model the RUNTIME would actually use (its own default); None if unknown.")
+    tools: list[str] = Field(default_factory=list, description="Tools / MCP servers the runtime exposes, if it can report them.")
+    detail: str = Field(default="", description="Freeform notes (path, config source, error hints).")
 
 
 @dataclass(frozen=True)
@@ -72,7 +106,22 @@ class Event:
 
 @runtime_checkable
 class AgentRunner(Protocol):
-    """Strategy for one agent-execution backend. Owns command + event parsing only."""
+    """Strategy for one agent-execution backend.
+
+    REQUIRED: `build_command` (the argv) + `parse_event` (stdout line -> Event).
+    Everything else (supervision, kill, sidecar, DAG) is runner-agnostic.
+
+    OPTIONAL (a runner may implement them; callers use getattr/hasattr):
+      - `preflight_checks(agent_dir) -> list[Check]`: runtime pre-conditions this
+        runner needs (binary on PATH, not-nested, expected agent-dir layout).
+        `preflight.check` asks the selected runner for these — so runtime
+        specifics live in the runner, not the generic preflight module.
+      - `info(agent_dir=None) -> AgentRunnerInfo`: a best-effort diagnostic
+        self-description (version, resolved model, tools). Takes agent_dir because
+        a runtime's config (model, tools) is resolved RELATIVE TO that dir — the
+        same runner in a different agent_dir may see a different model/tool set,
+        so this is effectively a per-node property. Must not raise.
+    """
 
     name: str
 
@@ -131,6 +180,99 @@ class OpenCodeRunner:
             return Event(tokens=tokens, cost=cost, is_terminal=part.get("reason") == "stop", raw=stripped)
         return Event(raw=stripped)  # a real event (heartbeat), no telemetry
 
+    def preflight_checks(self, agent_dir: str | Path | None) -> list:
+        """opencode-specific pre-conditions: binary on PATH, not nested, agent layout."""
+        from agent_flow.preflight import Check
+
+        checks: list[Check] = [_opencode_installed_check(), _not_nested_check()]
+        # opencode resolves agents from `<agent_dir>/.opencode/agent*`.
+        if agent_dir:
+            oc = Path(agent_dir) / ".opencode"
+            if not (oc.is_dir() and any(oc.glob("agent*"))):
+                checks.append(Check("opencode-agent-layout", False, True, f"no .opencode/agent* under {agent_dir} (opencode --dir target)."))
+            else:
+                checks.append(Check("opencode-agent-layout", True, True, f"agent definitions at {oc}"))
+        return checks
+
+    def info(self, agent_dir: str | Path | None = None) -> AgentRunnerInfo:
+        """Best-effort diagnostics: opencode version + its config AS RESOLVED IN agent_dir.
+
+        opencode resolves its config (model, MCP tools, providers) relative to the
+        directory it runs in (it walks up from --dir to the git root, merging
+        opencode.json + global). So the resolved model and tools are a PER-DIR
+        (hence per-node) property: the same runner in a different agent_dir can see
+        a different model and a different tool set. We therefore introspect with
+        cwd=agent_dir. With no agent_dir, we report only version/availability.
+        """
+        path = shutil.which("opencode")
+        if not path:
+            return AgentRunnerInfo(name=self.name, available=False, detail="opencode not found on PATH")
+        version = _run_text(["opencode", "--version"])
+        if not agent_dir:
+            return AgentRunnerInfo(
+                name=self.name, available=True, version=version, detail=f"found at {path}; pass agent_dir for resolved model/tools"
+            )
+        cfg = _opencode_debug_config(cwd=str(agent_dir))
+        model = cfg.get("model")
+        tools = sorted(k for k, v in (cfg.get("mcp") or {}).items() if isinstance(v, dict) and v.get("enabled"))
+        return AgentRunnerInfo(
+            name=self.name,
+            available=True,
+            version=version,
+            resolved_model=model,
+            tools=tools,
+            detail=f"found at {path}; config resolved in {agent_dir}",
+        )
+
+
+def _run_text(cmd: list[str], timeout: float = 10.0) -> str | None:
+    """Run a command and return its stripped stdout first line, or None on any error."""
+    import subprocess
+
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+    except OSError, subprocess.SubprocessError:
+        return None
+    line = (out.stdout or "").strip().splitlines()
+    return line[0].strip() if line else None
+
+
+def _opencode_debug_config(cwd: str | None = None) -> dict:
+    """`opencode debug config` (run in `cwd`) parsed to a dict; {} on any failure.
+
+    Run with cwd=agent_dir: opencode resolves config relative to where it runs
+    (there is no --dir flag on `debug config`), so the cwd determines the model
+    and enabled MCP tools reported.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(["opencode", "debug", "config"], capture_output=True, text=True, timeout=15.0, check=False, cwd=cwd)
+        return json.loads(out.stdout)
+    except OSError, subprocess.SubprocessError, json.JSONDecodeError:
+        return {}
+
+
+def _opencode_installed_check():
+    from agent_flow.preflight import Check
+
+    path = shutil.which("opencode")
+    if path:
+        return Check("opencode-installed", True, True, f"found at {path}")
+    return Check("opencode-installed", False, True, "opencode not found on PATH. Install it and ensure `opencode` is executable.")
+
+
+def _not_nested_check():
+    import os
+
+    from agent_flow.preflight import Check
+
+    if os.environ.get("OPENCODE") == "1":
+        return Check(
+            "not-nested-session", False, True, "Running inside an opencode session (OPENCODE=1). Start from a normal shell, outside opencode."
+        )
+    return Check("not-nested-session", True, True, "not inside an opencode session")
+
 
 # mock (no LLM, no tokens) — used for token-free demos/tests
 
@@ -152,6 +294,9 @@ class MockRunner:
 
     def parse_event(self, line: str) -> Event:
         return Event.none()  # mock finishes fast; completion is via sidecar
+
+    def info(self, agent_dir: str | Path | None = None) -> AgentRunnerInfo:
+        return AgentRunnerInfo(name=self.name, available=True, detail="local no-token stub; no model, no external tools")
 
 
 # Stubs for future runners (documented, not implemented)
@@ -175,6 +320,15 @@ class ClaudeCodeRunner:
     parse_event would decode Claude's stream-json event shape into an Event
     (tokens/cost from the final usage event; is_terminal on the finish event).
     Left unimplemented until we actually run Claude Code.
+
+    info() note: Claude Code has NO CLI subcommand that prints resolved config
+    (opencode's `debug config` has no equivalent). Resolution is SDK-only
+    (`resolveSettings({cwd})`, alpha). So info() should report version/available
+    from `claude --version` and leave resolved_model=None, tools=[] (or call the
+    Agent SDK if a dependency on it is later accepted). Config resolves relative
+    to cwd here too (.claude/settings.local.json > project > user), with a
+    managed/MDM policy tier ABOVE CLI args — hence the model-precedence caveat in
+    the module header.
     """
 
     name = "claude"

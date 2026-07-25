@@ -95,6 +95,7 @@ from agent_flow.run_config import (
 from agent_flow.runners import (
     AgentInvocation,
     AgentRunner,
+    AgentRunnerInfo,
     Event,
     MockRunner,
     OpenCodeRunner,
@@ -113,6 +114,7 @@ __all__ = [
     "AgentCrashError",
     # runners
     "AgentRunner",
+    "AgentRunnerInfo",
     "AgentInvocation",
     "Event",
     "OpenCodeRunner",

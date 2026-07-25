@@ -20,8 +20,6 @@ failures at once rather than one-at-a-time.
 
 from __future__ import annotations
 
-import os
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,48 +40,19 @@ class Check:
     detail: str
 
 
-def check_opencode_installed() -> Check:
-    """opencode must be on PATH and executable (only relevant for the real runtime)."""
-    path = shutil.which("opencode")
-    if path:
-        return Check("opencode-installed", True, True, f"found at {path}")
-    return Check(
-        "opencode-installed",
-        False,
-        True,
-        "opencode not found on PATH. Install it and ensure `opencode` is executable.",
-    )
+def check_agent_dir_exists(agent_dir: str | Path | None) -> Check:
+    """The agent-definitions dir must be configured and exist (runtime-agnostic).
 
-
-def check_not_nested_session() -> Check:
-    """Refuse to run inside an active opencode session (nested -> UnknownError).
-
-    opencode marks an active session with OPENCODE=1 (and OPENCODE_PID). Spawning
-    a child opencode from within one fails with UnknownError, so this is fatal for
-    the opencode runtime.
+    The specific LAYOUT a runtime expects inside it (e.g. opencode's
+    `.opencode/agent*`) is checked by that runtime's runner via
+    `preflight_checks` — this generic check only verifies it is set and is a dir.
     """
-    if os.environ.get("OPENCODE") == "1":
-        return Check(
-            "not-nested-session",
-            False,
-            True,
-            "Running inside an opencode session (OPENCODE=1). Start the pipeline from a normal shell, outside opencode.",
-        )
-    return Check("not-nested-session", True, True, "not inside an opencode session")
-
-
-def check_agent_dir(agent_dir: str | Path | None) -> Check:
-    """The agent-definitions dir must exist and contain an .opencode/agent* dir."""
     if not agent_dir:
         return Check("agent-dir", False, True, "no agent_dir configured (set --agent-dir / AGENT_FLOW_AGENT_DIR / default_agent_dir).")
     base = Path(agent_dir)
     if not base.is_dir():
         return Check("agent-dir", False, True, f"agent_dir does not exist: {base}")
-    opencode_dir = base / ".opencode"
-    has_agents = opencode_dir.is_dir() and any(opencode_dir.glob("agent*"))
-    if not has_agents:
-        return Check("agent-dir", False, True, f"no .opencode/agent* directory under {base} (opencode --dir target).")
-    return Check("agent-dir", True, True, f"agent definitions at {opencode_dir}")
+    return Check("agent-dir", True, True, f"agent_dir at {base}")
 
 
 def check_prefect_importable() -> Check:
@@ -98,20 +67,29 @@ def check_prefect_importable() -> Check:
 def check(runtime: str, agent_dir: str | Path | None) -> list[Check]:
     """Run the pre-flight checks relevant to `runtime` and return their outcomes.
 
-    - The opencode runtime needs opencode installed, a non-nested session, and a
-      valid agent_dir.
-    - The mock runtime skips the opencode-specific checks (no binary, nesting is
-      harmless), but still needs a valid agent_dir (agents are still resolved
-      from .opencode/agent*).
-    - Prefect is always checked (it powers the engine for every runtime).
+    Two layers, so no runtime specifics live here:
+    - GENERIC (every runtime): prefect importable + agent_dir configured/exists.
+    - RUNTIME-SPECIFIC: whatever the selected runner contributes via its optional
+      `preflight_checks(agent_dir)` — e.g. OpenCodeRunner checks opencode is on
+      PATH, we are not nested in an opencode session, and the `.opencode/agent*`
+      layout. A runner without the method (mock, or a minimal one) contributes
+      nothing. This is the seam that lets a new runtime (Claude Code, …) declare
+      its own pre-conditions without touching this module.
 
     Returns all outcomes (passing and failing); the caller decides based on
-    `.fatal` and `.ok`.
+    `.fatal` and `.ok`. An unknown runtime contributes no runner checks (its
+    absence surfaces later); the generic checks still run.
     """
-    results: list[Check] = [check_prefect_importable(), check_agent_dir(agent_dir)]
-    if runtime == "opencode":
-        results.append(check_opencode_installed())
-        results.append(check_not_nested_session())
+    from agent_flow.runners import get_runner
+
+    results: list[Check] = [check_prefect_importable(), check_agent_dir_exists(agent_dir)]
+    try:
+        runner = get_runner(runtime)
+    except ValueError:
+        return results  # unknown runtime -> only the generic checks
+    runner_checks = getattr(runner, "preflight_checks", None)
+    if callable(runner_checks):
+        results.extend(runner_checks(agent_dir))
     return results
 
 
