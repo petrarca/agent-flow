@@ -94,17 +94,25 @@ def render_diff(ev: Event, *, console=None, style: str = "unified") -> None:
 
     Rich has no native diff widget; both are built rich-only by parsing the diff
     (shared `_diff_rows`) and laying it out. We strip HEADER noise
-    (Index:/===/---/+++) since the tool line already names the file. Reads only
-    the neutral `ev.diff`. Never raises — falls back to a plain colored block.
+    (Index:/===/---/+++) since the tool line already names the file. The block is
+    bracketed by a thin top rule LABELLED with the file (from `ev.title`, since we
+    stripped the diff's own filename header) and a plain bottom rule, so it stands
+    out from surrounding log lines. Reads only neutral `ev` fields. Never raises —
+    falls back to a plain colored block.
     """
     if not ev.diff:
         return
     console = console or get_console()
     try:
+        from rich.rule import Rule
+
+        label = ev.title or "diff"
+        console.print(Rule(f"[dim]{label}[/dim]", style="dim", characters="\u2500"))
         if style == "split":
             _render_side_by_side(ev.diff, console)
         else:
             _render_unified(ev.diff, console)
+        console.print(Rule(style="dim", characters="\u2500"))
     except Exception:  # noqa: BLE001 - display must never break a run
         from rich.syntax import Syntax
 

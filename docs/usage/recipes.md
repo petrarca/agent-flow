@@ -312,7 +312,9 @@ edit changed, or with `--show-events` to add diff blocks to the firehose:
 | `--show-events` | firehose | no |
 | `--show-events --show-diffs` | firehose | yes |
 
-Pick the layout with `--diff-style` (or `AGENT_FLOW_DIFF_STYLE`):
+Each diff block is bracketed by a thin hairline rule — the top rule labelled with
+the file — so it stands out from surrounding log lines. Pick the layout with
+`--diff-style` (or `AGENT_FLOW_DIFF_STYLE`):
 
 - `unified` (default) — one column: magenta hunk header, red `-` removals / green
   `+` additions, dim context. The diff header noise (`Index:`/`---`/`+++`) is

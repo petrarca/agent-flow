@@ -213,6 +213,21 @@ def test_render_diff_split_two_columns(capsys):
     assert any("old" in ln and "new" in ln for ln in out.splitlines())
 
 
+def test_render_diff_is_bracketed_with_filename_label(capsys):
+    # the block is framed by top/bottom hairline rules; the top rule carries the
+    # file (from ev.title, since the diff's own filename header is stripped).
+    from rich.console import Console
+
+    from agent_flow.cli import render_diff
+    from agent_flow.runners import Event
+
+    console = Console(force_terminal=False, width=80)
+    render_diff(Event(kind="tool", title="Edit app.py", diff="@@ -1 +1 @@\n-old\n+new"), console=console)
+    out = capsys.readouterr().out
+    assert "Edit app.py" in out  # filename label on the top rule
+    assert "\u2500" in out  # hairline rule character
+
+
 def test_neutral_view_tool_metadata_hint_and_error_status():
     line = json.dumps({"part": {"type": "tool", "tool": "grep", "state": {"title": "Grep foo", "metadata": {"matches": 12}, "error": "boom"}}})
     ev = OpenCodeRunner().parse_event(line)
