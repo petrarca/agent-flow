@@ -144,3 +144,53 @@ def test_interpret_degrade_error_continues(tmp_path):
         raise RuntimeError("kaboom")
 
     assert _run(tmp_path, Node("a", run=boom, criticality="degrade")) == "degraded"
+
+
+# --- one-time instruction (Restart/GoTo `instruction`) ------------------------
+
+
+def test_one_time_instruction_reaches_next_attempt_only(tmp_path):
+    # A self-Restart carrying an instruction must deliver it to the NEXT attempt's
+    # RunContext.one_time_instruction, and NOT to any later attempt (it is cleared
+    # after being consumed once — the "one-time" contract).
+    seen: list[str] = []
+
+    def run(ctx):
+        seen.append(ctx.one_time_instruction)
+        return {}
+
+    # attempt 0 -> Restart(instruction=...); attempt 1 -> Restart() (no text);
+    # attempt 2 -> Continue. max_cycles=2 allows both restarts.
+    def gate(ctx):
+        if ctx.cycles == 0:
+            return Restart(instruction="fix the Deployment section")
+        if ctx.cycles == 1:
+            return Restart()
+        return Continue()
+
+    node = Node("a", run=run, gate=gate, max_cycles=2)
+    interpret(node, run_dir=Path(tmp_path), params={}, on_error=_criticality)
+    # attempt 0: none (fresh run); attempt 1: the instruction; attempt 2: cleared.
+    assert seen == ["", "fix the Deployment section", ""]
+
+
+def test_one_time_instruction_seeded_for_first_attempt(tmp_path):
+    # The walker seeds a target node's first attempt via interpret(one_time_instruction=…)
+    # when the flow resumes here from a cross-node GoTo.
+    seen = {}
+
+    def run(ctx):
+        seen["instr"] = ctx.one_time_instruction
+        return {}
+
+    interpret(Node("a", run=run), run_dir=Path(tmp_path), params={}, on_error=_criticality, one_time_instruction="redo finding X")
+    assert seen["instr"] == "redo finding X"
+
+
+def test_cross_node_goto_carries_instruction_on_outcome(tmp_path):
+    # A cross-node GoTo surfaces its instruction on NodeOutcome.instruction so the
+    # walker can hand it to the target node's next run.
+    node = Node("a", run=_noop, gate=lambda _ctx: GoTo("b", instruction="start over at b"))
+    outcome = interpret(node, run_dir=Path(tmp_path), params={}, on_error=_criticality)
+    assert outcome.goto == "b"
+    assert outcome.instruction == "start over at b"

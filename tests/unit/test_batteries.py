@@ -201,3 +201,37 @@ def test_walk_ignores_forward_goto():
 
     _walk(planned, run_group=run_group, group_index=gi, node_group=ng, by_name={"A": a, "B": b}, logger=_L())
     assert calls == ["A", "B"]  # forward goto ignored, no rewind
+
+
+def test_walk_delivers_goto_instruction_to_target():
+    # A cross-node GoTo carrying an instruction lands in pending_instructions
+    # keyed by the TARGET node, for run_node to hand to the target's next run.
+    a = Node("A", run=lambda c: None, max_cycles=1)
+    b = Node("B", run=lambda c: None, depends_on=("A",), max_cycles=1)
+    planned, gi, ng = _plan([a, b])
+    pending: dict[str, str] = {}
+    state = {"jumped": False}
+
+    def run_group(group):
+        out = {}
+        for n in group:
+            if n.name == "B" and not state["jumped"]:
+                state["jumped"] = True
+                out[n.name] = NodeOutcome(status="ok", goto="A", instruction="redo A")
+            else:
+                out[n.name] = NodeOutcome(status="ok")
+        return out
+
+    _walk(
+        planned,
+        run_group=run_group,
+        group_index=gi,
+        node_group=ng,
+        by_name={"A": a, "B": b},
+        logger=_L(),
+        pending_instructions=pending,
+    )
+    # After the run settles, A's slot has been popped (delivered); but we can at
+    # least assert the instruction was routed to the target key during the jump.
+    # Since this run_group does not drain `pending`, it remains recorded for A.
+    assert pending.get("A") == "redo A"

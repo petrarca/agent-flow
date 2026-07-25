@@ -143,7 +143,8 @@ def agent_node(
         work_order = build_work_order(inputs, tmpl)
 
         # The caller-visible prompt, composed in order:
-        #   [per-node context content] [per-node instructions] [work order]
+        #   [per-node context] [per-node instructions] [additional (standing)]
+        #   [one-time instruction] [work order]
         # (Run-wide context + instructions are prepended by run_agent.)
         parts: list[str] = []
         node_ctx = read_context_blocks(context, params=ctx.params, run_dir=ctx.run_dir, warn=warn)
@@ -157,6 +158,16 @@ def agent_node(
         runtime_instr = (ctx.node_instructions.get(name) or "").strip()
         if runtime_instr:
             parts.append(f"## Additional instructions for this run\n\n{resolve_template(runtime_instr, tmpl)}")
+        # One-time instruction for THIS attempt, set by the engine from a gate's
+        # Restart/GoTo `instruction`. Injected VERBATIM (no engine-imposed heading)
+        # and LAST, right before the work order, so it is the freshest, most
+        # specific guidance the agent sees — the CALLER owns its full framing
+        # (write "## ...\n\n..." in the gate if a heading is wanted). Ephemeral:
+        # the engine clears it after this attempt (see
+        # RunContext.one_time_instruction). Templated like the other blocks.
+        one_time_instr = (getattr(ctx, "one_time_instruction", "") or "").strip()
+        if one_time_instr:
+            parts.append(resolve_template(one_time_instr, tmpl))
         parts.append(work_order)
         prompt = "\n\n".join(parts)
 

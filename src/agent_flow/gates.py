@@ -22,6 +22,10 @@ Directives:
     Restart()           re-run THIS node's agent (bounded by max_cycles)
     GoTo(node)          resume the flow at a named node (re-run loops, jump-back)
     Stop(reason)        abort the whole pipeline (e.g. blocking-criticality failure)
+
+Restart and GoTo carry an optional one-time `instruction` (plain-text prompt
+guidance for the re-run) — distinct from Stop's `reason` (a backward-looking
+abort message for the operator/log). See each directive's docstring.
 """
 
 from __future__ import annotations
@@ -41,10 +45,17 @@ class Continue:
 class Restart:
     """Re-run this node's agent. Bounded by the runner's max-cycles guard.
 
-    note: optional context threaded into the re-run prompt (e.g. why).
+    instruction: an optional ONE-TIME instruction for the re-run — plain text
+        appended to the re-run prompt as its own block (the freshest, last
+        standing guidance before the work order). It is NOT a param: it is
+        prompt content, not a `{placeholder}` value. Ephemeral by design — it
+        applies to the next attempt only and is cleared once that attempt's
+        prompt is built, so it never leaks into a subsequent cycle. Use it to
+        tell the agent what to fix on the retry (e.g. "the report is missing the
+        Deployment section — add it").
     """
 
-    note: str = ""
+    instruction: str = ""
 
 
 @dataclass(frozen=True)
@@ -55,11 +66,16 @@ class GoTo:
     consistency-check jump-back. Bounded by the runner's max-cycles guard to
     prevent loops.
 
-    note: optional context threaded into the target node's prompt.
+    instruction: an optional ONE-TIME instruction for the TARGET node's next run
+        — same semantics as Restart.instruction (plain-text prompt block, appended
+        last, ephemeral / single-attempt), but delivered to the node we resume at
+        rather than this one. Note a GoTo is a RESUME, not inherently a re-run:
+        the target may be an earlier node the flow returns to. Use it to steer
+        that node's run (e.g. a verifier telling the analyst which finding to fix).
     """
 
     node: str
-    note: str = ""
+    instruction: str = ""
 
 
 @dataclass(frozen=True)
@@ -142,7 +158,7 @@ def require_file(ctx: GateContext, *, relpath: str, on_missing: Directive | None
     rel = _resolve_relpath(relpath, ctx)
     if produced(ctx.run_dir / rel):
         return Continue()
-    return on_missing if on_missing is not None else Restart(note=f"required file missing: {rel}")
+    return on_missing if on_missing is not None else Restart(instruction=f"The required file is missing: {rel}. Produce it.")
 
 
 def rerun_on_signal(ctx: GateContext, *, target: str, control_file: str | None = None) -> Directive:
@@ -162,7 +178,7 @@ def rerun_on_signal(ctx: GateContext, *, target: str, control_file: str | None =
     node_name = getattr(ctx.node, "name", None) or str(ctx.node)
     cf = control_file or f"{node_name}.control.json"
     if rerun_from_sidecar(ctx.run_dir / cf):
-        return GoTo(node=target, note=f"{node_name} signalled re-run of {target}")
+        return GoTo(node=target, instruction=f"{node_name} signalled a re-run of {target}.")
     return Continue()
 
 
@@ -183,7 +199,7 @@ def rerun_on_named(ctx: GateContext, *, control_file: str | None = None) -> Dire
     named = rerun_from_sidecar(ctx.run_dir / cf)
     if named:
         target = named[0]
-        return GoTo(node=target, note=f"{node_name} signalled re-run of {target}")
+        return GoTo(node=target, instruction=f"{node_name} signalled a re-run of {target}.")
     return Continue()
 
 

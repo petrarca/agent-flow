@@ -89,6 +89,16 @@ class RunContext:
     # LAST (after the build-time per-node instructions), so it is the most recent
     # standing guidance before the work order — additive, last-word override.
     node_instructions: dict[str, str] = field(default_factory=dict)
+    # A ONE-TIME instruction for THIS run attempt only. Today it is set by the
+    # engine from a gate's Restart/GoTo `instruction`, but the field's nature is
+    # general: a single-attempt instruction handed to a node's next run, not
+    # intrinsically about re-running. Unlike node_instructions (standing, whole
+    # run) it is ephemeral: the node's `run` appends it as the LAST prompt block
+    # (freshest guidance, right before the work order), and the engine clears it so
+    # the next attempt does not inherit it. It is injected VERBATIM — the engine
+    # imposes NO heading or wrapping; the caller that produced it owns the full
+    # framing. Plain-text prompt content, NOT a param. Empty on a first/clean run.
+    one_time_instruction: str = ""
 
 
 # A node's work: perform the invocation, return whatever the gate will inspect
@@ -216,12 +226,15 @@ class NodeOutcome:
     goto         a node name to resume the flow at, when the gate returned a
                  cross-node GoTo (jump-back). None for the common case. The walker
                  (build_flow) honors it; interpret handles only the self-loop.
+    instruction  the one-time instruction attached to a cross-node GoTo, for the
+                 walker to deliver to the TARGET node's next run. Empty otherwise.
     duration_s   wall-clock seconds the node took (set by build_flow's task; 0.0
                  when produced by interpret directly, e.g. in unit tests).
     """
 
     status: str
     goto: str | None = None
+    instruction: str = ""
     duration_s: float = 0.0
 
 
@@ -250,6 +263,7 @@ def interpret(
     agent_dir: str = "",
     node_instructions: dict[str, str] | None = None,
     registry: Any = None,
+    one_time_instruction: str = "",
 ) -> NodeOutcome:
     """Run one node to completion, interpreting its gate's directives.
 
@@ -257,6 +271,13 @@ def interpret(
     gate returns Stop. Restart (and GoTo-to-self) re-run the node in place,
     bounded by max_cycles. A cross-node GoTo(other) is NOT handled here — it is
     surfaced via NodeOutcome.goto for the walker to act on (jump-back).
+
+    `one_time_instruction` is a single-attempt instruction for the FIRST attempt
+    only (the walker passes it when the flow resumes at this node from a
+    cross-node GoTo, so the target receives the gate's `instruction` — note a
+    GoTo is a RESUME, not necessarily a re-run). It is folded into that attempt's
+    prompt and then cleared; a self-loop Restart/self-GoTo sets a fresh one from
+    its own directive for the next in-place attempt.
 
     `on_error` maps a raised exception to a status per criticality (and may
     itself raise NodeBlocked). `registry` (a FlowRegistry) resolves the node's
@@ -272,6 +293,11 @@ def interpret(
     gate = _resolve_gate(node, registry)
 
     cycles = 0
+    # One-time-instruction carrier: seeded from the walker (cross-node GoTo
+    # delivery), then re-set from each self Restart/GoTo directive. Consumed into
+    # an attempt's prompt and cleared immediately after, so it applies to exactly
+    # one attempt (see RunContext.one_time_instruction).
+    pending_instruction = one_time_instruction
     while True:
         # Observing hook: before each run attempt (fires again on re-run cycles).
         _fire_hook(registry, "before_node", node, log, node)
@@ -279,6 +305,11 @@ def interpret(
         # snapshot, so this node sees any values UPSTREAM nodes exported. Snapshot
         # is taken at THIS node's start -> a stable view for its whole execution.
         eff_params = {**params, **get_run_context().snapshot()}
+        # Hand this attempt its one-time instruction (if any), then clear the
+        # carrier: it is now the node's to render; a subsequent cycle starts blank
+        # unless the gate below sets a fresh one.
+        attempt_instruction = pending_instruction
+        pending_instruction = ""
         try:
             result = node.run(
                 RunContext(
@@ -291,6 +322,7 @@ def interpret(
                     shared_context=shared_context,
                     agent_dir=agent_dir,
                     node_instructions=dict(node_instructions or {}),
+                    one_time_instruction=attempt_instruction,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - deliberately broad: the run callable is caller code
@@ -314,8 +346,9 @@ def interpret(
         restart = isinstance(directive, Restart) or (isinstance(directive, GoTo) and directive.node == node.name)
         if restart and cycles < node.max_cycles:
             cycles += 1
-            note = getattr(directive, "note", "")
-            log(f"node {node.name}: gate -> re-run cycle {cycles} ({note})")
+            # Carry the directive's one-time instruction into the NEXT attempt.
+            pending_instruction = getattr(directive, "instruction", "")
+            log(f"node {node.name}: gate -> re-run cycle {cycles} ({pending_instruction})")
             continue
 
         # Node is settling (Continue / cross-node GoTo / exhausted Restart): apply
@@ -324,9 +357,11 @@ def interpret(
 
         if isinstance(directive, GoTo) and directive.node != node.name:
             # Cross-node jump-back: the node itself is done; the walker decides
-            # whether to rewind to the target (bounded there).
-            log(f"node {node.name}: gate -> GoTo {directive.node} ({directive.note})")
-            outcome = NodeOutcome(status="ok", goto=directive.node)
+            # whether to rewind to the target (bounded there). Carry the one-time
+            # instruction on the outcome so the walker can deliver it to the TARGET
+            # node's next run.
+            log(f"node {node.name}: gate -> GoTo {directive.node} ({directive.instruction})")
+            outcome = NodeOutcome(status="ok", goto=directive.node, instruction=directive.instruction)
             _fire_hook(registry, "after_node", node, log, node, outcome)
             return outcome
 
@@ -503,18 +538,26 @@ def build_flow(
     node_group = {n.name: (n.parallel_group or n.name) for n in nodes}
     _emit = _make_node_emitter(on_node_event)
 
-    def _make_run_node(wd: Path, params: dict, logger) -> Callable[[str], NodeOutcome]:
+    def _make_run_node(wd: Path, params: dict, logger, pending: dict[str, str]) -> Callable[[str], NodeOutcome]:
         """Build the backend-agnostic 'run ONE node' closure for this run.
 
         Captures the resolved run_dir/params/logger. The backend calls it (inline
         or on N threads / Prefect tasks) but never decides what running a node
         MEANS — that is interpret(gate directives + criticality + bounded re-runs)
         plus start/finish emits and duration stamping, all here.
+
+        `pending` is the run's {node_name: one-time-instruction} store: when the
+        walker jumps back to a node it records the GoTo's instruction here, and
+        this closure pops it (once) to hand the target node's re-run its one-time
+        instruction. Empty for a normal forward run.
         """
 
         def run_node(node_name: str) -> NodeOutcome:
             node = by_name[node_name]
             started = time.monotonic()
+            # Pop this node's pending one-time instruction (from a prior cross-node
+            # GoTo), if any — delivered to exactly this run, then gone.
+            attempt_instruction = pending.pop(node_name, "")
 
             def _on_error(n: Node, exc: Exception) -> str:
                 if n.criticality == "blocking":
@@ -540,6 +583,7 @@ def build_flow(
                 agent_dir=agent_dir,
                 node_instructions=node_instructions_d,
                 registry=registry,
+                one_time_instruction=attempt_instruction,
             )
             # Stamp the node's wall-clock duration (timed here, where it runs).
             outcome = replace(outcome, duration_s=time.monotonic() - started)
@@ -576,7 +620,10 @@ def build_flow(
             logger.info("run_dir: %s", wd)
             if llm_concurrency is not None:
                 backend_impl.apply_concurrency_limit(llm_tag, llm_concurrency, logger.info, logger.warning)
-            run_node = _make_run_node(wd, params, logger)
+            # Run-scoped {node: one-time instruction} store; the walker fills it on
+            # a cross-node GoTo, run_node drains it into the target's re-run.
+            pending_instructions: dict[str, str] = {}
+            run_node = _make_run_node(wd, params, logger, pending_instructions)
             run_group = _make_group_runner(backend_impl, registry, run_node, logger)
             start_index, single_group = _resolve_entry(start_from, only, by_name, group_index, node_group, logger)
             results = _walk(
@@ -588,6 +635,7 @@ def build_flow(
                 logger=logger,
                 start_index=start_index,
                 single_group=single_group,
+                pending_instructions=pending_instructions,
             )
             # Compact {node: status} summary — not the verbose NodeOutcome reprs.
             logger.info("%s done: %s", name, {n: oc.status for n, oc in results.items()})
@@ -681,7 +729,16 @@ def _resolve_only_index(only: str, by_name, group_index, node_group, logger) -> 
 
 
 def _walk(
-    planned, *, run_group, group_index, node_group, by_name, logger, start_index: int = 0, single_group: bool = False
+    planned,
+    *,
+    run_group,
+    group_index,
+    node_group,
+    by_name,
+    logger,
+    start_index: int = 0,
+    single_group: bool = False,
+    pending_instructions: dict[str, str] | None = None,
 ) -> dict[str, NodeOutcome]:
     """Walk the planned groups, honoring bounded cross-node jump-backs (GoTo).
 
@@ -711,10 +768,23 @@ def _walk(
         target = _pick_jump_back(outcomes, node_group, group_index, i, jumps, by_name, logger)
         if target is not None:
             jumps[target] = jumps.get(target, 0) + 1
+            # Deliver the jumping node's one-time instruction to the target's re-run.
+            if pending_instructions is not None:
+                instr = _instruction_for_target(outcomes, target)
+                if instr:
+                    pending_instructions[target] = instr
             i = group_index[node_group[target]]  # rewind to the target's group
             continue
         i += 1
     return results
+
+
+def _instruction_for_target(outcomes: dict[str, NodeOutcome], target: str) -> str:
+    """The one-time instruction from the outcome whose GoTo chose `target` (or "")."""
+    for oc in outcomes.values():
+        if oc.goto == target and oc.instruction:
+            return oc.instruction
+    return ""
 
 
 def _pick_jump_back(outcomes, node_group, group_index, current_i, jumps, by_name, logger) -> str | None:

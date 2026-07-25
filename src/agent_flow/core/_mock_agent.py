@@ -139,9 +139,14 @@ def _write_sidecar(prompt: str, payload: dict, fallback_report: Path) -> None:
 def run_tech_analyst(agent: str, prompt: str) -> None:
     product = _kv(prompt, "PRODUCT_KEY") or "unknown-product"
     report = Path(_kv(prompt, "REPORT") or f"{agent}.md")
-    rerun_note = _kv(prompt, "RERUN_NOTE")
+    # A one-time instruction (from a gate's Restart/GoTo `instruction`) is injected
+    # VERBATIM into the prompt by the engine — there is no fixed key/heading (the
+    # caller owns the framing). For test/demo visibility, echo it into the report
+    # when the caller marked it with the "ONE_TIME:" convention. Absent it, the
+    # mechanism still works; the mock simply has nothing distinctive to echo.
+    one_time = _kv(prompt, "ONE_TIME")
     report.parent.mkdir(parents=True, exist_ok=True)
-    note = f"\n> Re-run addressed: {rerun_note}\n" if rerun_note else ""
+    note = f"\n> One-time instruction addressed: {one_time}\n" if one_time else ""
     report.write_text(
         f"# {report.stem} — {product}\n{note}\n"
         "## Summary\n"
