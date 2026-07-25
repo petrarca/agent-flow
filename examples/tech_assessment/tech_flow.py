@@ -30,15 +30,15 @@ Run (the CLI is the library's reusable run_cli — generic flags + -p/--param):
 
 from __future__ import annotations
 
-# Load .env into os.environ FIRST — before bootstrap() (so the file may set
-# PREFECT_API_URL / PREFECT_PERSIST) and before any subprocess is spawned.
+# Load .env into os.environ FIRST — before any subprocess is spawned (the file
+# may set AGENT_FLOW_BACKEND / AGENT_FLOW_MODEL / runtime knobs).
 from agent_flow.core.env import load_env
 
 load_env()
 
-from agent_flow._prefect_env import bootstrap  # noqa: E402
-
-bootstrap()
+# No Prefect bootstrap here: run_cli builds the flow on the LOCAL backend by
+# default (no Prefect, no temp server). If you select --backend prefect (or
+# AGENT_FLOW_BACKEND=prefect), PrefectBackend runs its own bootstrap() then.
 
 from pathlib import Path  # noqa: E402
 

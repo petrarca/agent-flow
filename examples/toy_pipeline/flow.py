@@ -35,7 +35,7 @@ from pathlib import Path
 # disables the startup telemetry races that cause "database is locked".
 # #12: bootstrap() is a no-op when PREFECT_HOME is already set, so test code
 # can set that env var before importing this module to avoid the side effects.
-from agent_flow._prefect_env import bootstrap
+from agent_flow.backends._prefect_env import bootstrap
 
 bootstrap()
 

@@ -49,6 +49,7 @@ for how to build a pipeline on this library, and docs/design/orchestrator/ for
 the full design.
 """
 
+from agent_flow.backends import FlowBackend, LocalBackend, get_backend
 from agent_flow.batteries import agent_node, control_path
 from agent_flow.cli import NodeProgressPrinter, event_printer, get_console, print_preflight_results, print_results_table, run_cli
 from agent_flow.core import (
@@ -171,6 +172,10 @@ __all__ = [
     "build_flow",
     "plan_groups",
     "interpret",
+    # execution backends (swappable; local default, prefect opt-in)
+    "FlowBackend",
+    "LocalBackend",
+    "get_backend",
     # batteries: one-call node for the common "run one agent" case
     "agent_node",
     "control_path",

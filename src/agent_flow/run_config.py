@@ -125,6 +125,9 @@ class RunConfig(BaseSettings):
     )
 
     runtime: str = Field(default="opencode", description="Agent runtime: 'opencode' (real) or 'mock' (no-token stub).")
+    backend: str = Field(
+        default="local", description="Execution backend: 'local' (in-process, no Prefect; default) or 'prefect' (opt-in run UI/scale)."
+    )
     run_dir: str = Field(
         default="",
         description="Control-sidecar + relative-artifact root. Supports {param} templating; empty -> a fresh temp dir per run.",

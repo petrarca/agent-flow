@@ -370,6 +370,37 @@ def gate(ctx):
 
 In short: **read `ctx.obj` when you set a schema; `ctx.result` otherwise.**
 
+## Choose the execution backend (`--backend`)
+
+The DAG runs on a swappable execution backend. The default is a Prefect-free
+**local** backend — in-process threads for parallel groups, a semaphore for the
+concurrency limit, stdlib logging. No temporary server, fast startup, one fewer
+heavy dependency. It is the right choice for everyday single runs.
+
+```bash
+# default: local backend (nothing to pass)
+python my_flow.py -p product_key=acme
+
+# opt into Prefect for the run UI / history / scheduling / scale
+python my_flow.py -p product_key=acme --backend prefect
+# or persist the choice for a session:
+export AGENT_FLOW_BACKEND=prefect
+```
+
+```python
+build_flow(nodes, name="p", backend="local")     # default
+build_flow(nodes, name="p", backend="prefect")   # opt-in
+```
+
+The **engine owns the flow logic** (ordering, parallel fan-out, jump-back,
+`--start-from`/`--only`, run-context); the backend only executes. So switching
+backends changes *how* nodes run, never *what* runs or in what order — the
+outcomes are identical. Prefect is imported only when you select `prefect`, so
+the core primitives and a default local run stay Prefect-free.
+
+Adding another backend (Hatchet, Temporal, a bespoke loop) = subclass
+`FlowBackend` and register it; nothing in your pipeline changes.
+
 ## Watch progress live
 
 Via `run_cli`, the **default** view prints one line per node transition, with the

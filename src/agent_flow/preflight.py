@@ -56,19 +56,22 @@ def check_agent_dir_exists(agent_dir: str | Path | None) -> Check:
 
 
 def check_prefect_importable() -> Check:
-    """Prefect must import (it is a core dependency and drives the flow engine)."""
+    """Prefect must import (only relevant when the Prefect backend is selected)."""
     try:
         __import__("prefect")
-    except ImportError as exc:  # pragma: no cover - prefect is a core dep
+    except ImportError as exc:
         return Check("prefect-importable", False, True, f"cannot import prefect: {exc}")
     return Check("prefect-importable", True, True, "prefect importable")
 
 
-def check(runtime: str, agent_dir: str | Path | None) -> list[Check]:
-    """Run the pre-flight checks relevant to `runtime` and return their outcomes.
+def check(runtime: str, agent_dir: str | Path | None, backend: str = "local") -> list[Check]:
+    """Run the pre-flight checks relevant to `runtime`/`backend` and return them.
 
-    Two layers, so no runtime specifics live here:
-    - GENERIC (every runtime): prefect importable + agent_dir configured/exists.
+    Layers, so no runtime/backend specifics live here:
+    - GENERIC (always): agent_dir configured/exists.
+    - BACKEND-SPECIFIC: the Prefect backend additionally requires prefect to
+      import; the local backend needs nothing (no check added). So a
+      dependency-light local run does not fail merely because Prefect is absent.
     - RUNTIME-SPECIFIC: whatever the selected runner contributes via its optional
       `preflight_checks(agent_dir)` — e.g. OpenCodeRunner checks opencode is on
       PATH, we are not nested in an opencode session, and the `.opencode/agent*`
@@ -82,11 +85,13 @@ def check(runtime: str, agent_dir: str | Path | None) -> list[Check]:
     """
     from agent_flow.runners import get_runner
 
-    results: list[Check] = [check_prefect_importable(), check_agent_dir_exists(agent_dir)]
+    results: list[Check] = [check_agent_dir_exists(agent_dir)]
+    if backend == "prefect":
+        results.insert(0, check_prefect_importable())
     try:
         runner = get_runner(runtime)
     except ValueError:
-        return results  # unknown runtime -> only the generic checks
+        return results  # unknown runtime -> only the generic/backend checks
     runner_checks = getattr(runner, "preflight_checks", None)
     if callable(runner_checks):
         results.extend(runner_checks(agent_dir))

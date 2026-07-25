@@ -60,14 +60,28 @@ def test_check_mock_skips_opencode_specific_checks(agent_dir, monkeypatch):
     names = {c.name for c in preflight.check("mock", agent_dir)}
     assert "opencode-installed" not in names
     assert "not-nested-session" not in names
-    assert {"prefect-importable", "agent-dir"} <= names
+    assert "agent-dir" in names
+
+
+def test_check_local_backend_omits_prefect(agent_dir):
+    # Default (local) backend: no prefect-importable check — a local run must not
+    # fail merely because Prefect is absent.
+    names = {c.name for c in preflight.check("mock", agent_dir)}
+    assert "prefect-importable" not in names
+
+
+def test_check_prefect_backend_includes_prefect(agent_dir):
+    # Selecting the prefect backend adds the prefect-importable check.
+    names = {c.name for c in preflight.check("mock", agent_dir, backend="prefect")}
+    assert "prefect-importable" in names
 
 
 def test_check_opencode_includes_runtime_checks(agent_dir, monkeypatch):
     monkeypatch.delenv("OPENCODE", raising=False)
     names = {c.name for c in preflight.check("opencode", agent_dir)}
-    # generic + runner-contributed opencode checks
-    assert {"prefect-importable", "agent-dir", "opencode-installed", "not-nested-session"} <= names
+    # generic (agent-dir) + runner-contributed opencode checks; no prefect (local)
+    assert {"agent-dir", "opencode-installed", "not-nested-session"} <= names
+    assert "prefect-importable" not in names
 
 
 def test_check_opencode_not_nested_fails_inside_session(agent_dir, monkeypatch):
@@ -87,7 +101,7 @@ def test_check_opencode_layout_fails_without_agent_dir(tmp_path, monkeypatch):
 def test_check_unknown_runtime_runs_only_generic_checks(agent_dir):
     # An unknown runtime contributes no runner checks; generic ones still run.
     names = {c.name for c in preflight.check("does-not-exist", agent_dir)}
-    assert names == {"prefect-importable", "agent-dir"}
+    assert names == {"agent-dir"}
 
 
 def test_fatal_failures_filters(agent_dir, monkeypatch):

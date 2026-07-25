@@ -26,7 +26,37 @@ team.
 | Temporal | MIT | cluster + DB + workers | event-sourced replay (strongest) | yes |
 | Dagster | Apache-2.0 | server + Postgres | robust scheduler | yes |
 
-## Decision: Prefect 3, backend kept swappable
+## The seam is real: FlowBackend (local default, Prefect opt-in)
+
+The execution backend is a first-class abstraction, not just "Prefect behind a
+lazy import". `agent_flow.backends.FlowBackend` is an `abc.ABC` with a concrete
+template-method `run_group` (the solo-vs-parallel branch + failure->degraded
+mapping, identical for every backend) and backend-specific primitives:
+`run_session` (establish an execution context — a Prefect `@flow`, or nothing),
+`_execute_parallel` (the fan-out primitive — Prefect `.submit()` or a
+`ThreadPoolExecutor`), `apply_concurrency_limit`, `get_logger`, and
+`bootstrap`/`teardown` lifecycle hooks. `get_backend(name)` resolves one.
+
+Two backends ship:
+
+- **LocalBackend (default)** — in-process: a `ThreadPoolExecutor` for parallel
+  groups, a `threading.Semaphore` for the LLM concurrency limit, stdlib logging.
+  No Prefect, no temporary server, fast startup, one fewer heavy dependency at
+  run time. This is what an everyday single run uses.
+- **PrefectBackend (opt-in)** — the Prefect-3 behavior below (`@task`/`@flow`,
+  `submit()`/`wait()`, `get_run_logger()`, a global server-side concurrency
+  limit, the run UI). Prefect is imported lazily inside the backend, so nothing
+  is loaded unless you select it.
+
+Select with `build_flow(nodes, backend="local"|"prefect")`, the CLI
+`--backend local|prefect`, or `AGENT_FLOW_BACKEND`. The **engine owns all flow
+logic** (plan, walk, jump-back, `start_from`/`only`, run-context); the backend
+only executes. The core primitives (`run_agent`, runners) and the pure DAG
+helpers (`plan_groups`/`interpret`/`_walk`) stay Prefect-free — guarded by an
+import-isolation test that runs them (and a LocalBackend flow) with `prefect`
+blocked.
+
+## Decision: Prefect 3, kept as ONE backend among the swappable set
 
 **Why Prefect.** Best-balanced fit for finite batch, Python-native, no human
 gates — and the most mature Python-native option (largest community, lowest risk
@@ -48,11 +78,12 @@ first-class per-key rate limits, built-in UI + OTel/Prometheus), but younger and
 its Python SDK is a thin client over a Go engine. For a 1–2 person team, Prefect's
 maturity outweighs Hatchet's edge today — but not enough to accept lock-in.
 
-**Swappability is first-class.** All domain logic (supervision, gates, re-run
-loops, injection, telemetry, the declared graph) is backend-agnostic. Only
-`build_flow` and its task/retry/concurrency wrappers touch Prefect; Prefect is
-imported lazily inside it. Switching to Hatchet later = write one
-`build_flow_hatchet()`; the graphs and all primitives do not move.
+**Swappability is first-class — and now realized.** All domain logic
+(supervision, gates, re-run loops, injection, telemetry, the declared graph) is
+backend-agnostic. A backend is a `FlowBackend` subclass; Prefect is one of two
+shipped implementations (LocalBackend being the other, default). Adding Hatchet
+later = write one `HatchetBackend(FlowBackend)` and register it; the graphs, the
+engine, and all primitives do not move.
 
 **Exit criteria:** to **Hatchet** if Postgres-only ops / built-in rate limiting /
 its UI become compelling or throughput exceeds Prefect's comfort zone; to **DBOS**
@@ -74,5 +105,9 @@ workload becomes long-lived / human-gated (not this pipeline).
 
 ## Where it lives
 
-`src/agent_flow/engine.py` (`build_flow`, the only Prefect-touching code) and
-`src/agent_flow/_prefect_env.py` (`bootstrap`, the three modes).
+- `src/agent_flow/backends/` — the seam: `base.py` (`FlowBackend` ABC),
+  `local.py` (`LocalBackend`, default), `prefect.py` (`PrefectBackend`,
+  lazy-import), `_prefect_env.py` (`bootstrap`, the three Prefect modes, owned by
+  PrefectBackend), and `__init__.py` (`get_backend` factory + registry).
+- `src/agent_flow/engine.py` (`build_flow`) — dispatches execution through the
+  selected backend; contains no Prefect code itself.

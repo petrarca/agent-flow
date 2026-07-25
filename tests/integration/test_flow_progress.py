@@ -10,11 +10,7 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
-# Bootstrap Prefect BEFORE importing anything that imports prefect.
-from agent_flow._prefect_env import bootstrap  # noqa: E402
-
-bootstrap()
-
+# build_flow defaults to the local backend (no Prefect), so no bootstrap needed.
 from pathlib import Path  # noqa: E402
 
 from agent_flow import agent_node, build_flow  # noqa: E402

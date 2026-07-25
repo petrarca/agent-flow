@@ -385,11 +385,12 @@ def run_cli(
         downstream ({name} templating) is unchanged either way.
 
     Before building the flow, run_cli validates settings/params (fail fast) and
-    runs runtime pre-flight checks (opencode installed, not nested, agent_dir,
-    prefect) — all before any token is spent.
+    runs runtime/backend pre-flight checks (opencode installed, not nested,
+    agent_dir; prefect only when --backend prefect) — before any token is spent.
 
-    IMPORTANT: the calling module must have already run env.load_env() and
-    _prefect_env.bootstrap() before importing Prefect (as the examples do).
+    Backend lifecycle (bootstrap/teardown) is owned by the selected backend and
+    runs inside build_flow's pipeline; the caller does not bootstrap Prefect.
+    The default backend is local (no Prefect); pass --backend prefect to opt in.
     """
     import typer
 
@@ -402,6 +403,7 @@ def run_cli(
         config: str = typer.Option("", "--config", "-c", help="YAML run config (generic settings)"),
         param: list[str] | None = typer.Option(None, "--param", "-p", help="domain param KEY=VALUE (repeatable)"),  # noqa: B008 - Typer idiom
         runtime: str | None = typer.Option(None, help="opencode | mock"),
+        backend: str | None = typer.Option(None, "--backend", help="execution backend: local (default, no Prefect) | prefect (opt-in run UI/scale)"),
         run_dir: str | None = typer.Option(None, "--run-dir"),
         agent_dir: str | None = typer.Option(None, "--agent-dir", help="where agent definitions live (opencode --dir)"),
         instructions: str | None = typer.Option(None, "--instructions", "-i", help="run-wide brief for every agent"),
@@ -436,6 +438,7 @@ def run_cli(
         cfg = build_run_config(
             config_file=config or None,
             runtime=runtime,
+            backend=backend,
             run_dir=run_dir or (default_run_dir or None),
             agent_dir=agent_dir or (default_agent_dir or None),
             instructions=instructions,
@@ -472,7 +475,7 @@ def run_cli(
         # 2b) Show the resolved settings + params (traceability before any work).
         _print_run_summary(name, cfg, params, console, hide=runtime_fields)
         # 3) Runtime pre-flight — abort (exit 2) on any fatal failure.
-        _run_preflight(cfg.runtime, cfg.agent_dir, console)
+        _run_preflight(cfg.runtime, cfg.agent_dir, cfg.backend, console)
         # 4) Run, with the chosen view (live table by default, or raw firehose).
         if start_from and only:
             console.print(
@@ -545,15 +548,15 @@ def _resolve_params(model: type | None, cli_params: dict[str, str], console) -> 
     return {k: ("" if v is None else str(v)) for k, v in settings.model_dump(mode="json").items()}
 
 
-def _run_preflight(runtime: str, agent_dir: str, console) -> None:
-    """Run runtime pre-flight checks; on any fatal failure show them and exit 2.
+def _run_preflight(runtime: str, agent_dir: str, backend: str, console) -> None:
+    """Run runtime/backend pre-flight checks; on any fatal failure show them and exit 2.
 
     The full check list is shown only when something fails (so a clean run stays
     quiet); the caller sees exactly which pre-conditions are missing.
     """
     from agent_flow import preflight
 
-    results = preflight.check(runtime, agent_dir)
+    results = preflight.check(runtime, agent_dir, backend)
     failures = preflight.fatal_failures(results)
     if failures:
         print_preflight_results(results, title="Pre-flight checks (run aborted)", console=console)
@@ -626,6 +629,7 @@ def _build_and_run(nodes, params, cfg, console, *, name, llm_tag, on_event_facto
         shared_instructions=cfg.resolved_instructions(),
         agent_dir=cfg.agent_dir,
         node_instructions=cfg.node_instructions,
+        backend=cfg.backend,
     )
     # start_from / only are per-INVOCATION forward-entry knobs (not persisted
     # config): start_from begins at a group and runs forward; only runs a single

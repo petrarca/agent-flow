@@ -38,7 +38,8 @@ into four recurring problems. agent-flow addresses each directly:
    next) is a swappable `AgentRunner` strategy — only "how to build the command"
    and "how to parse the event stream" differ; supervision, the DAG, re-runs, the
    sidecar, and the display layer are written once and stay runtime-neutral. The
-   execution backend (Prefect) is likewise a swappable seam.
+   execution backend is likewise a swappable seam: a Prefect-free **LocalBackend**
+   (default) or an opt-in **PrefectBackend** (`--backend prefect`).
 
 ## Feature shortlist
 
@@ -81,8 +82,11 @@ into four recurring problems. agent-flow addresses each directly:
 - **Settings** — `RunConfig` (pydantic-settings, `AGENT_FLOW_*`) with a strict
   precedence chain; domain params typed via a `params_model` (missing required →
   fail fast, exit 2).
-- **Pluggable backend** — `build_flow` compiles to a Prefect flow (parallelism,
-  retries, concurrency limits, run UI); Prefect is imported only there.
+- **Pluggable execution backend** — `FlowBackend` (ABC): a Prefect-free
+  **LocalBackend** (default; threadpool + semaphore + stdlib logging, no temp
+  server) or an opt-in **PrefectBackend** (`--backend prefect` / `build_flow(...,
+  backend="prefect")`) for the run UI, scheduling, and scale. The core
+  primitives + DAG logic stay Prefect-free (import-isolation-guarded).
 - **Three usage tiers** — from one supervised agent up to a declared graph (below).
 
 ## Three usage tiers (high level → low level)

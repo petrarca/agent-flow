@@ -357,22 +357,29 @@ def build_flow(
     shared_context: Iterable[str] | None = None,
     agent_dir: str = "",
     node_instructions: dict[str, str] | None = None,
+    backend: str = "local",
 ):
-    """Compile a Node graph into a runnable Prefect flow.
+    """Compile a Node graph into a runnable flow callable.
 
-    Returns a Prefect `@flow`-decorated callable `f(run_dir, **params) -> dict`
+    Returns a callable `f(run_dir, start_from="", only="", **params) -> dict`
     that walks the DAG (`plan_groups`), fans out parallel groups concurrently,
     and runs each node via `interpret` (gate directives + criticality + bounded
     re-runs). `params` are threaded unchanged into every node's RunContext.
 
-    Prefect is imported lazily HERE (not at module import) so the engine module
-    can be imported before the app calls `_prefect_env.bootstrap()`.
+    The ENGINE owns all flow logic (plan/walk/jump-back/start_from/only/
+    run-context); the selected `backend` supplies only execution mechanics
+    (parallel fan-out, concurrency limit, logger, bootstrap/teardown). Backends
+    are resolved lazily HERE so the engine module imports without pulling any
+    backend (Prefect stays optional).
 
     Args:
         nodes: the pipeline DAG.
-        name: Prefect flow name.
+        name: flow name (used by the Prefect backend's @flow).
         llm_tag: concurrency tag applied to each node task (for a shared limit).
-        llm_concurrency: if set, a global concurrency limit on `llm_tag`.
+        llm_concurrency: if set, a concurrency limit on `llm_tag` (global on the
+            Prefect backend; a process-local semaphore on the local backend).
+        backend: execution backend name — "local" (default; in-process
+            threadpool, no Prefect) or "prefect" (opt-in; @task/@flow, run UI).
         on_event_factory: optional per-node event-printer factory (display label
             -> a per-event callback); the batteries node passes the NODE name as
             the label. Reaches each node via RunContext.on_event_factory. Kept
@@ -400,8 +407,9 @@ def build_flow(
             Reaches each node via RunContext.agent_dir. Templated at run time.
             Independent of run_dir (agents-here vs artifacts-there).
     """
-    from prefect import flow, get_run_logger, task
-    from prefect.futures import wait
+    from agent_flow.backends import get_backend
+
+    backend_impl = get_backend(backend, llm_tag=llm_tag)
 
     shared_context_t = tuple(shared_context or ())
     node_instructions_d = dict(node_instructions or {})
@@ -411,99 +419,99 @@ def build_flow(
     node_group = {n.name: (n.parallel_group or n.name) for n in nodes}
     _emit = _make_node_emitter(on_node_event)
 
-    @task(tags=[llm_tag])
-    def _node_task(node_name: str, run_dir: str, params: dict) -> NodeOutcome:
-        node = by_name[node_name]
-        logger = get_run_logger()
+    def _make_run_node(wd: Path, params: dict, logger) -> Callable[[str], NodeOutcome]:
+        """Build the backend-agnostic 'run ONE node' closure for this run.
 
-        started = time.monotonic()
+        Captures the resolved run_dir/params/logger. The backend calls it (inline
+        or on N threads / Prefect tasks) but never decides what running a node
+        MEANS — that is interpret(gate directives + criticality + bounded re-runs)
+        plus start/finish emits and duration stamping, all here.
+        """
 
-        def _on_error(n: Node, exc: Exception) -> str:
-            if n.criticality == "blocking":
-                logger.error("BLOCKING node %s failed: %s", n.name, exc)
-                _emit(n.name, "finish", "failed", n.agent)
-                raise NodeBlocked(f"{n.name}: {exc}") from exc
-            logger.warning("DEGRADE node %s failed: %s — continuing", n.name, exc)
-            return "degraded"
+        def run_node(node_name: str) -> NodeOutcome:
+            node = by_name[node_name]
+            started = time.monotonic()
 
-        # Name the node in the log (Prefect's own task-run id is opaque).
-        logger.info("node %s: start (criticality=%s)", node.name, node.criticality)
-        _emit(node.name, "start", None, node.agent)
-        # on_event_factory is a build-time closure (not serializable), so it is
-        # bound here — never passed through the task's `params` arg.
-        # shared_instructions / shared_context / agent_dir are likewise build-time
-        # values threaded into every node.
-        outcome = interpret(
-            node,
-            run_dir=Path(run_dir),
-            params=params,
-            on_error=_on_error,
-            log=logger.info,
-            on_event_factory=on_event_factory,
-            shared_instructions=shared_instructions,
-            shared_context=shared_context_t,
-            agent_dir=agent_dir,
-            node_instructions=node_instructions_d,
-        )
-        # Stamp the node's wall-clock duration (timed here, where the node runs).
-        outcome = replace(outcome, duration_s=time.monotonic() - started)
-        logger.info("node %s: %s (%.1fs)", node.name, outcome.status, outcome.duration_s)
-        _emit(node.name, "finish", outcome.status, node.agent)
-        return outcome
+            def _on_error(n: Node, exc: Exception) -> str:
+                if n.criticality == "blocking":
+                    logger.error("BLOCKING node %s failed: %s", n.name, exc)
+                    _emit(n.name, "finish", "failed", n.agent)
+                    raise NodeBlocked(f"{n.name}: {exc}") from exc
+                logger.warning("DEGRADE node %s failed: %s — continuing", n.name, exc)
+                return "degraded"
 
-    def _run_group(group: list[Node], wd: Path, params: dict, logger) -> dict[str, NodeOutcome]:
-        """Execute one group (solo inline, multi via submit+wait). Returns per-node outcomes."""
-        if len(group) == 1:
-            n = group[0]
-            return {n.name: _node_task(n.name, str(wd), params)}
-        logger.info("PARALLEL group: %s", [n.name for n in group])
-        futures = [_node_task.submit(n.name, str(wd), params) for n in group]
-        wait(futures)
-        out: dict[str, NodeOutcome] = {}
-        for n, fut in zip(group, futures, strict=True):
-            out[n.name] = fut.result() if fut.state.is_completed() else NodeOutcome(status="degraded")
-        return out
+            logger.info("node %s: start (criticality=%s)", node.name, node.criticality)
+            _emit(node.name, "start", None, node.agent)
+            # on_event_factory / shared_instructions / shared_context / agent_dir
+            # are build-time values threaded into every node.
+            outcome = interpret(
+                node,
+                run_dir=wd,
+                params=params,
+                on_error=_on_error,
+                log=logger.info,
+                on_event_factory=on_event_factory,
+                shared_instructions=shared_instructions,
+                shared_context=shared_context_t,
+                agent_dir=agent_dir,
+                node_instructions=node_instructions_d,
+            )
+            # Stamp the node's wall-clock duration (timed here, where it runs).
+            outcome = replace(outcome, duration_s=time.monotonic() - started)
+            logger.info("node %s: %s (%.1fs)", node.name, outcome.status, outcome.duration_s)
+            _emit(node.name, "finish", outcome.status, node.agent)
+            return outcome
 
-    @flow(name=name)
+        return run_node
+
     def _pipeline(run_dir: str = "", start_from: str = "", only: str = "", **params: Any) -> dict:
-        from agent_flow.core import resolve_run_dir
+        from agent_flow.core import resolve_run_dir, resolve_template
         from agent_flow.run_context import init_run_context
 
-        # Install the run-scoped domain-param store from the initial params. Nodes
-        # read a snapshot of it (so upstream exports are visible) and export hooks
-        # write to it. Same-process, run-scoped (see run_context module SCOPE).
+        # Install the run-scoped domain-param store from the initial params.
+        # Nodes read a snapshot (so upstream exports are visible) and export hooks
+        # write to it. Same-process, run-scoped (see run_context SCOPE).
         init_run_context(params)
-
-        logger = get_run_logger()
         # run_dir supports the same `{param}` templating as node inputs, but
         # STRICT: a path is never valid half-substituted, so a missing placeholder
-        # is a hard error (not a dir literally named "{product_key}").
-        from agent_flow.core import resolve_template
-
+        # is a hard error (not a dir literally named "{key}").
         try:
-            run_dir = resolve_template(run_dir, params, strict=True)
+            resolved_run_dir = resolve_template(run_dir, params, strict=True)
         except KeyError as exc:
             raise ValueError(f"run_dir template references unknown param {exc}; available params: {sorted(params)}") from exc
-        # Empty run_dir -> a fresh dir under <temp>/agent-flow/ (never litter cwd).
-        wd = resolve_run_dir(run_dir, name=name)
+        # Empty run_dir -> a fresh dir under <temp>/agent-flow/ (never cwd).
+        wd = resolve_run_dir(resolved_run_dir, name=name)
         wd.mkdir(parents=True, exist_ok=True)
-        logger.info("run_dir: %s", wd)
-        if llm_concurrency is not None:
-            _apply_concurrency_limit(llm_tag, llm_concurrency, logger.info, logger.warning)
-        start_index, single_group = _resolve_entry(start_from, only, by_name, group_index, node_group, logger)
-        results = _walk(
-            planned,
-            run_group=lambda group: _run_group(group, wd, params, logger),
-            group_index=group_index,
-            node_group=node_group,
-            by_name=by_name,
-            logger=logger,
-            start_index=start_index,
-            single_group=single_group,
-        )
-        # Log a compact {node: status} summary — not the verbose NodeOutcome reprs.
-        logger.info("%s done: %s", name, {n: oc.status for n, oc in results.items()})
-        return results
+
+        def _walk_session() -> dict[str, NodeOutcome]:
+            # Runs INSIDE the backend's execution context (a Prefect @flow for the
+            # prefect backend; directly for local) — so the logger, concurrency
+            # limit, and node submission all bind to that context here.
+            logger = backend_impl.get_logger()
+            logger.info("run_dir: %s", wd)
+            if llm_concurrency is not None:
+                backend_impl.apply_concurrency_limit(llm_tag, llm_concurrency, logger.info, logger.warning)
+            run_node = _make_run_node(wd, params, logger)
+            start_index, single_group = _resolve_entry(start_from, only, by_name, group_index, node_group, logger)
+            results = _walk(
+                planned,
+                run_group=lambda group: backend_impl.run_group(group, run_node),
+                group_index=group_index,
+                node_group=node_group,
+                by_name=by_name,
+                logger=logger,
+                start_index=start_index,
+                single_group=single_group,
+            )
+            # Compact {node: status} summary — not the verbose NodeOutcome reprs.
+            logger.info("%s done: %s", name, {n: oc.status for n, oc in results.items()})
+            return results
+
+        backend_impl.bootstrap()
+        try:
+            return backend_impl.run_session(name, _walk_session)
+        finally:
+            backend_impl.teardown()
 
     return _pipeline
 
@@ -647,22 +655,3 @@ def _pick_jump_back(outcomes, node_group, group_index, current_i, jumps, by_name
         logger.info("jump-back to %r (re-running from its group)", target)
         return target
     return None
-
-
-def _apply_concurrency_limit(tag: str, limit: int, info, warn) -> None:
-    """Best-effort global concurrency limit on a task tag (idempotent)."""
-    import anyio
-    import httpx
-    from prefect.client.orchestration import get_client
-    from prefect.exceptions import PrefectException
-
-    async def _create() -> None:
-        async with get_client() as client:
-            await client.create_concurrency_limit(tag=tag, concurrency_limit=limit)
-
-    # A pre-existing limit or a transient client error must not fail the run.
-    try:
-        anyio.run(_create)
-        info(f"LLM concurrency limit set to {limit}")
-    except (PrefectException, httpx.HTTPError, OSError) as exc:
-        warn(f"concurrency limit setup skipped: {exc}")
