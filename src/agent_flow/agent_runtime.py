@@ -45,8 +45,10 @@ from agent_flow.schema import ResultSchema, coerce_schema
 # This is the ONLY guard: an agent that keeps emitting events is alive and runs
 # as long as it makes progress; one that has gone quiet for idle_timeout_s is
 # hung -> kill. There is deliberately NO absolute cap — progress, not elapsed
-# time, decides liveness.
-DEFAULT_IDLE_TIMEOUT_S = 30
+# time, decides liveness. The default is generous because real LLM agents can
+# pause 60-90s between tool calls (thinking, long writes); tune per run via the
+# CLI --idle-timeout / AGENT_FLOW_IDLE_TIMEOUT_S, or per node via agent_node.
+DEFAULT_IDLE_TIMEOUT_S = 120
 
 
 class AgentTimeoutError(RuntimeError):

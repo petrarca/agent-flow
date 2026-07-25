@@ -18,7 +18,7 @@ Each stage:
     the last completed stage instead of starting over (#9: TOCTOU-safe).
 
 Model choice is owned here (the orchestrator), not in the agent .md files:
-each StageConfig may pin a model; unspecified stages fall back to DEFAULT_MODEL.
+each StageConfig may pin a model; unspecified stages pass no model -> the runtime resolves it.
 
 Run it:
     uv run --with prefect python -m agent_flow.flow --topic "Hexagonal architecture" --runtime mock
@@ -48,7 +48,7 @@ from agent_flow.agent_runtime import (  # noqa: E402
     AgentResult,
     run_agent,
 )
-from agent_flow.runners import DEFAULT_MODEL, MockRunner, OpenCodeRunner  # noqa: E402
+from agent_flow.runners import MockRunner, OpenCodeRunner  # noqa: E402
 
 # This example's own opencode project dir (holds .opencode/agent/*.md).
 _PACKAGE_DIR = Path(__file__).resolve().parent  # noqa: E402
@@ -99,7 +99,7 @@ class StageConfig:
     agent: str
     timeout_s: int
     retries: int
-    model: str | None = None  # None -> DEFAULT_MODEL
+    model: str | None = None  # None -> no --model; runtime resolves it
 
 
 # The pipeline graph. Edit models/timeouts/retries here — agents stay agnostic.
@@ -195,8 +195,9 @@ def run_stage(
             logger.info("stage %s already complete -> resuming (skip)", stage.name)
             return done
 
-    model = stage.model or DEFAULT_MODEL
-    logger.info("stage %s: agent=%s model=%s timeout=%ss", stage.name, stage.agent, model, stage.timeout_s)
+    # None -> no --model; the runtime resolves the model from its own config.
+    model = stage.model
+    logger.info("stage %s: agent=%s model=%s timeout=%ss", stage.name, stage.agent, model or "(runtime default)", stage.timeout_s)
 
     # Optional live-event display (Prefect INFO logs remain the diagnostics).
     on_event = None

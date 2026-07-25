@@ -46,7 +46,7 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
-from agent_flow.runners import DEFAULT_MODEL
+from agent_flow.agent_runtime import DEFAULT_IDLE_TIMEOUT_S
 
 # The generic run settings the library knows. Anything else at a YAML config's
 # top level (that is not one of these and not `params`) is a typo -> rejected.
@@ -95,12 +95,12 @@ class RunConfig(BaseSettings):
     llm_concurrency: int | None = Field(default=None, description="Max concurrent LLM agents; None -> engine default.")
     show_events: bool = Field(default=False, description="Stream live agent events to the console.")
     model: str = Field(
-        default=DEFAULT_MODEL,
-        description="Model for every node (provider/model). Defaults to the library default; per-node agent_node(model=) still overrides.",
+        default="",
+        description="Model (provider/model) for every node. Empty -> the runtime resolves it from its own config. Per-node model overrides.",
     )
-    idle_timeout_s: int | None = Field(
-        default=None,
-        description="Liveness timeout: kill an agent only after this many seconds with NO event AND NO sidecar. None -> per-node default.",
+    idle_timeout_s: int = Field(
+        default=DEFAULT_IDLE_TIMEOUT_S,
+        description="Liveness timeout (s): kill an agent only after this long with no event/sidecar. Per-node idle_timeout_s overrides.",
     )
 
     # The YAML --config path for the current construction. Stashed on the class

@@ -22,10 +22,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agent_flow.agent_runtime import run_agent
+from agent_flow.agent_runtime import DEFAULT_IDLE_TIMEOUT_S, run_agent
 from agent_flow.engine import Criticality, Node, RunContext
 from agent_flow.gates import Gate
-from agent_flow.runners import DEFAULT_MODEL, get_runner
+from agent_flow.runners import get_runner
 from agent_flow.utils import resolve_template
 
 
@@ -76,7 +76,7 @@ def agent_node(
     result_schema: object = None,
     max_cycles: int = 1,
     model: str | None = None,
-    idle_timeout_s: int = 120,
+    idle_timeout_s: int | None = None,
     agent_dir: str | None = None,
 ) -> Node:
     """Build a `Node` that runs ONE runtime agent as a supervised subprocess.
@@ -144,10 +144,14 @@ def agent_node(
         eff_agent_dir = resolve_template(agent_dir, tmpl) if agent_dir else resolve_template(ctx.agent_dir, tmpl)
 
         runtime = ctx.params.get("runtime", "opencode")
-        eff_model = model or ctx.params.get("model") or DEFAULT_MODEL
-        # A run-time idle_timeout_s (from the CLI/env) overrides the per-node
-        # build-time default; the per-node value is the fallback.
-        eff_idle = int(ctx.params.get("idle_timeout_s") or idle_timeout_s)
+        # A per-node model (agent_node arg) wins; else the run-wide model from
+        # params. Empty ("") means "no model" -> the runner omits --model and the
+        # runtime resolves it. The library never substitutes a hardcoded model.
+        eff_model = model or ctx.params.get("model") or ""
+        # idle_timeout_s: a per-node override (agent_node arg) wins; else the
+        # run-wide value from params (RunConfig / CLI --idle-timeout); else the
+        # library default. No number is hardcoded on the node.
+        eff_idle = int(idle_timeout_s if idle_timeout_s is not None else (ctx.params.get("idle_timeout_s") or DEFAULT_IDLE_TIMEOUT_S))
         log = _node_logger()
         log("node %s: agent=%s runtime=%s model=%s idle_timeout_s=%s", name, agent, runtime, eff_model, eff_idle)
         # on_event_factory is a typed RunContext field (engine plumbing), NOT a

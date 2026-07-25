@@ -10,8 +10,8 @@ Prerequisites (see design doc §14):
   - working provider credentials in the process env (via .env / exported), and
   - run OUTSIDE an opencode session (nested opencode invocation errors with an
     opencode UnknownError — a runtime artifact, not a library issue).
-Optionally override the model with AGENT_FLOW_E2E_MODEL (default: the runner's
-DEFAULT_MODEL, i.e. azure-claude/Claude Sonnet 4.6).
+Optionally set AGENT_FLOW_E2E_MODEL to force a model; unset -> no --model, so
+opencode resolves the model from its own config.
 
 Skipped by default so unit + mock-integration runs stay green everywhere.
 """

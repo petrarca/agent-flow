@@ -5,7 +5,6 @@ import json
 import pytest
 
 from agent_flow.runners import (
-    DEFAULT_MODEL,
     AgentInvocation,
     MockRunner,
     OpenCodeRunner,
@@ -34,9 +33,16 @@ def test_opencode_build_command_shape():
     assert cmd[-1] == "PRODUCT_KEY: x"  # prompt is the trailing positional
 
 
-def test_opencode_build_command_default_model():
+def test_opencode_build_command_omits_model_when_unset():
+    # No model configured -> NO --model flag, so the runtime (opencode) resolves
+    # the model from its own config. The library never hardcodes a model.
     cmd = OpenCodeRunner().build_command(AgentInvocation(agent="a", prompt="p"))
-    assert DEFAULT_MODEL in cmd
+    assert "--model" not in cmd
+
+
+def test_mock_build_command_omits_model_when_unset():
+    cmd = MockRunner().build_command(AgentInvocation(agent="a", prompt="p"))
+    assert "--model" not in cmd
 
 
 def test_opencode_build_command_emits_dir_when_agent_dir_set():

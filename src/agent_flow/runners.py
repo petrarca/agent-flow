@@ -22,7 +22,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-DEFAULT_MODEL = "azure-claude/Claude Sonnet 4.6"
+# The library NEVER hardcodes a model. When no model is configured (param/env/
+# CLI/programmatic), the runner omits --model so the runtime (opencode) resolves
+# it from its own config/provider/router. A model is passed through ONLY when
+# explicitly set.
 
 
 @dataclass(frozen=True)
@@ -97,7 +100,12 @@ class OpenCodeRunner:
         # (which opencode otherwise flags as an "external directory" and
         # auto-REJECTS) must be allowed. The agent .md still explicitly denies
         # bash/webfetch, so --auto only greenlights the tools the agent permits.
-        cmd = ["opencode", "run", "--agent", inv.agent, "--model", inv.model or DEFAULT_MODEL, "--format", "json", "--auto"]
+        # Only force a model when one was explicitly configured (param/env/CLI/
+        # programmatic). With no model, OMIT --model so opencode resolves it from
+        # its own config/router — the library never hardcodes a model.
+        cmd = ["opencode", "run", "--agent", inv.agent, "--format", "json", "--auto"]
+        if inv.model:
+            cmd += ["--model", inv.model]
         # --dir points opencode at the project where .opencode/agent lives, so
         # agents resolve regardless of the process cwd (opencode chdir's into it).
         if inv.agent_dir:
@@ -137,7 +145,10 @@ class MockRunner:
         self._stub = stub or (Path(__file__).resolve().parent / "_mock_agent.py")
 
     def build_command(self, inv: AgentInvocation) -> list[str]:
-        return ["python3", str(self._stub), "--agent", inv.agent, "--prompt", inv.prompt, "--model", inv.model or DEFAULT_MODEL]
+        cmd = ["python3", str(self._stub), "--agent", inv.agent, "--prompt", inv.prompt]
+        if inv.model:
+            cmd += ["--model", inv.model]
+        return cmd
 
     def parse_event(self, line: str) -> Event:
         return Event.none()  # mock finishes fast; completion is via sidecar
