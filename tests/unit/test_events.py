@@ -115,13 +115,53 @@ def test_neutral_view_tool_name_not_doubled_when_title_has_verb():
     assert ev.title == "Edit app.py"
 
 
-def test_neutral_view_edit_shows_diff_stat():
-    # an edit carries metadata.filediff.additions/deletions -> "+A/-D" hint.
+def test_neutral_view_edit_carries_structured_diff_counts():
+    # The runner supplies STRUCTURED counts (added/removed) + the diff text; it
+    # does NOT format "+A/-D" (that's the CLI's job).
     line = json.dumps(
-        {"part": {"type": "tool", "tool": "edit", "state": {"title": "Edit x.md", "metadata": {"filediff": {"additions": 12, "deletions": 3}}}}}
+        {
+            "part": {
+                "type": "tool",
+                "tool": "edit",
+                "state": {"title": "Edit x.md", "metadata": {"diff": "@@ -1 +1,2 @@\n-a\n+b\n+c", "filediff": {"additions": 12, "deletions": 3}}},
+            }
+        }
     )
     ev = OpenCodeRunner().parse_event(line)
-    assert ev.detail == "+12/-3"
+    assert ev.added == 12 and ev.removed == 3
+    assert "@@" in ev.diff  # the unified diff text is carried neutrally
+    assert ev.detail == ""  # no formatted diff stat baked into detail
+
+
+def test_render_event_formats_diff_stat_from_counts():
+    from agent_flow.cli import render_event
+    from agent_flow.runners import Event
+
+    out = render_event(Event(kind="tool", title="Edit x.md", status="completed", added=12, removed=3))
+    assert "+12/-3" in out
+
+
+def test_render_diff_renders_the_patch(capsys):
+    from rich.console import Console
+
+    from agent_flow.cli import render_diff
+    from agent_flow.runners import Event
+
+    console = Console(force_terminal=False)
+    render_diff(Event(kind="tool", diff="@@ -1 +1 @@\n-old\n+new"), console=console)
+    out = capsys.readouterr().out
+    assert "old" in out and "new" in out
+
+
+def test_render_diff_noop_without_diff(capsys):
+    from rich.console import Console
+
+    from agent_flow.cli import render_diff
+    from agent_flow.runners import Event
+
+    console = Console(force_terminal=False)
+    render_diff(Event(kind="tool", diff=""), console=console)
+    assert capsys.readouterr().out == ""
 
 
 def test_neutral_view_tool_metadata_hint_and_error_status():

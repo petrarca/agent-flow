@@ -109,6 +109,16 @@ class Event:
     title   primary human summary (tool title/target, the message text, …).
     detail  secondary hint (tool metadata: "12 matches", "exit 0", a diff stat).
     status  tool lifecycle for coloring: "running" | "completed" | "error" | "".
+    For a file-changing tool (edit/write), three neutral, structured fields carry
+    the change — the runner MAPS its runtime's native shape onto them (it does not
+    parse or compute): opencode `metadata.diff` + `filediff.{additions,deletions}`,
+    Claude Code `gitDiff.{patch,additions,deletions}`. The CLI is a dumb renderer:
+    it formats `+added/-removed` for the one-line detail and renders `diff` as a
+    syntax-highlighted block only under --show-diffs.
+
+    diff    unified-diff patch text (or "").
+    added   lines added (0 if none/unknown).
+    removed lines removed (0 if none/unknown).
     """
 
     tokens: int = 0
@@ -121,6 +131,9 @@ class Event:
     title: str = ""
     detail: str = ""
     status: str = ""
+    diff: str = ""
+    added: int = 0
+    removed: int = 0
 
     @staticmethod
     def none() -> Event:
@@ -211,8 +224,8 @@ class OpenCodeRunner:
             cost = float(part.get("cost") or 0.0)
             return Event(tokens=tokens, cost=cost, is_terminal=part.get("reason") == "stop", raw=stripped, kind="step_end")
         if ptype == "tool":
-            title, detail, status = _opencode_tool_view(part)
-            return Event(raw=stripped, kind="tool", title=title, detail=detail, status=status)
+            title, detail, status, diff, added, removed = _opencode_tool_view(part)
+            return Event(raw=stripped, kind="tool", title=title, detail=detail, status=status, diff=diff, added=added, removed=removed)
         if ptype == "text":
             text = " ".join((part.get("text") or "").split())
             return Event(raw=stripped, kind="text", title=text)
@@ -275,12 +288,17 @@ _OPENCODE_TOOL_META_KEYS = (("matches", "matches"), ("count", "matches"), ("exit
 
 
 def _opencode_tool_view(part: dict) -> tuple[str, str, str]:
-    """Normalize an opencode `tool` part to neutral (title, detail, status).
+    """Map an opencode `tool` part onto the neutral tool fields.
+
+    Returns (title, detail, status, diff, added, removed). This is pure field
+    EXTRACTION — it lifts opencode's shape onto the neutral one and never renders
+    or computes (no `+A/-D` formatting, no diff math; the CLI does that).
 
     title  = "<tool> <target>" — prefer opencode's own state.title; else the
              tool name plus the first present target input field.
-    detail = a compact metadata hint ("12 matches", "exit 0") when available.
+    detail = a compact non-diff hint ("12 matches", "exit 0") when available.
     status = "running" | "completed" | "error" | "" (from state.status/error).
+    diff/added/removed = the file change (from metadata.diff + filediff.*).
     """
     tool = part.get("tool", "tool")
     state = part.get("state") if isinstance(part.get("state"), dict) else {}
@@ -305,27 +323,37 @@ def _opencode_tool_view(part: dict) -> tuple[str, str, str]:
         title = f"{tool} {target}".rstrip()
 
     detail = _opencode_tool_detail(meta)
+    diff, added, removed = _opencode_tool_diff(meta)
 
     status = str(state.get("status") or "")
     if state.get("error"):
         status = "error"
-    return title, detail, status
+    return title, detail, status, diff, added, removed
+
+
+def _opencode_tool_diff(meta: dict) -> tuple[str, int, int]:
+    """Lift an opencode edit/write file change onto neutral (diff, added, removed).
+
+    Pure extraction: the patch text from metadata.diff, the counts from
+    metadata.filediff.{additions,deletions}. No parsing/computing.
+    """
+    diff = meta.get("diff") if isinstance(meta.get("diff"), str) else ""
+    filediff = meta.get("filediff") if isinstance(meta.get("filediff"), dict) else {}
+    if not diff and isinstance(filediff.get("patch"), str):
+        diff = filediff["patch"]
+    added = filediff.get("additions")
+    removed = filediff.get("deletions")
+    return diff, int(added) if isinstance(added, (int, float)) else 0, int(removed) if isinstance(removed, (int, float)) else 0
 
 
 def _opencode_tool_detail(meta: dict) -> str:
-    """A compact secondary hint from an opencode tool's state.metadata, or "".
+    """A compact NON-DIFF hint from an opencode tool's state.metadata, or "".
 
-    Covers the few metadata shapes worth one line: grep/glob match counts, bash
-    exit codes, and an edit's diff stat (+adds/-dels from metadata.filediff).
+    grep/glob match counts and bash exit codes. The diff stat is handled
+    separately (as structured added/removed) — this stays presentation-free.
     """
-    # edit: a "+A/-D" diff stat is the most useful hint for a write-shaped tool.
-    filediff = meta.get("filediff") if isinstance(meta.get("filediff"), dict) else None
-    if filediff:
-        adds = filediff.get("additions")
-        dels = filediff.get("deletions")
-        if isinstance(adds, (int, float)) or isinstance(dels, (int, float)):
-            return f"+{int(adds or 0)}/-{int(dels or 0)}"
-    # grep/glob match counts, bash exit codes.
+    # grep/glob match counts, bash exit codes. (Diff stats are structured
+    # added/removed fields, formatted by the CLI — not here.)
     for src_key, label in _OPENCODE_TOOL_META_KEYS:
         val = meta.get(src_key)
         if isinstance(val, (int, float)):

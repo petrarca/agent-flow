@@ -297,9 +297,21 @@ check tech-stack ok (tech-stack-analyst) 15.2s
 ```
 
 Pass `--show-events/-v` instead for the raw per-event firehose (one projected
-line per agent event — `tool write …`, text, `step done (N tokens)`) — useful
-for debugging. **Ctrl-C** stops cleanly: the running agent's process group is
-killed and the CLI exits 130 (no orphaned opencode, no raw traceback).
+line per agent event — `tool edit … (+12/-3)`, text, `step done (N tokens)`) —
+useful for debugging. **Ctrl-C** stops cleanly: the running agent's process group
+is killed and the CLI exits 130 (no orphaned opencode, no raw traceback).
+
+`--show-diffs` renders each edit/write as a syntax-highlighted diff block. It
+**composes** with the other views — use it alone to keep the compact node table
+and *also* see what each edit changed, or with `--show-events` to add diff blocks
+to the firehose:
+
+| flags | base view | diff blocks |
+|---|---|---|
+| (none) | node table | no |
+| `--show-diffs` | node table | yes |
+| `--show-events` | firehose | no |
+| `--show-events --show-diffs` | firehose | yes |
 
 It is line-based on purpose (no repainting TUI), so it interleaves cleanly with
 logs and works in non-TTY/CI. To build your own view (a Live table, a TUI),

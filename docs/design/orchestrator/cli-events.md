@@ -71,11 +71,18 @@ Besides supervision fields, it normalizes each event into a runner-**agnostic**
 display view on `Event`:
 
 ```
-kind    "step_start" | "step_end" | "tool" | "text" | "other"
-title   primary human summary (tool title/target, the message text, …)
-detail  secondary hint (tool metadata: "12 matches", "exit 0")
-status  tool lifecycle: "running" | "completed" | "error" | ""
+kind          "step_start" | "step_end" | "tool" | "text" | "other"
+title         primary human summary (tool title/target, the message text, …)
+detail        secondary NON-DIFF hint (tool metadata: "12 matches", "exit 0")
+status        tool lifecycle: "running" | "completed" | "error" | ""
+diff/added/removed  a file change (edit/write): the unified-diff text + counts
 ```
+
+For file-changing tools the runner MAPS its runtime's native change shape onto the
+neutral `diff`/`added`/`removed` (opencode `metadata.diff` + `filediff.additions/
+deletions`; Claude Code `gitDiff.patch/additions/deletions`) — it never parses or
+computes. The CLI formats `+added/-removed` for the one-line detail and, under
+`--show-diffs`, renders `diff` as a syntax-highlighted block.
 
 The **CLI** renders only these neutral fields — it never re-parses `raw`. `kind`
 drives the base style; for tools, `status` refines the color (running=cyan,
@@ -116,9 +123,12 @@ live firehose stays navigable), `NodeProgressPrinter` (the default line-based no
 progress, consuming `on_node_event`), `print_results_table(results, agents=)` (the
 end-of-run Node|Agent|Outcome|Duration table), and `print_preflight_results`.
 `run_cli` wires them: default = progress lines + results table; `--show-events` =
-the raw firehose + results table. `rich`/`typer` are core dependencies, but the
-engine core stays render-agnostic: it emits `Event`s and `on_node_event` data and
-returns `NodeOutcome`s, and only the `cli` module turns those into terminal output.
+the raw firehose + results table. `--show-diffs` composes with either — it layers
+syntax-highlighted edit/write diff blocks (via `render_diff`, reading the neutral
+`ev.diff`) onto the default table OR the firehose. `rich`/`typer` are core
+dependencies, but the engine core stays render-agnostic: it emits `Event`s and
+`on_node_event` data and returns `NodeOutcome`s, and only the `cli` module turns
+those into terminal output.
 
 ## Where it lives
 

@@ -49,30 +49,52 @@ def get_console():
         return _CONSOLE
 
 
-def event_printer(label: str, *, console=None) -> Callable[[Event], None]:
-    """Build an `on_event` callback that prints ONE readable line per live event.
+def event_printer(label: str, *, console=None, lines: bool = True, diffs: bool = False) -> Callable[[Event], None]:
+    """Build an `on_event` callback that renders live events.
 
     `label` is the prefix each line carries. The engine passes the NODE name (the
     DAG unit the reader navigates by), not the agent that implements it — in a
     firehose of live lines the node is what tells you where in the flow you are.
 
+    Two INDEPENDENT, composable outputs (from --show-events / --show-diffs):
+      - `lines`  : one styled progress line per event (the firehose).
+      - `diffs`  : for a file-changing event carrying a diff, a syntax-highlighted
+                   diff block AFTER its line. Works with or without `lines`, so
+                   `--show-diffs` alone layers diffs onto the default table view.
+
     Rendering is RUNNER-AGNOSTIC: the runner already normalized the event into
-    neutral fields (kind/title/detail/status) in `parse_event`; here we only map
-    those to this CLI's palette. The CLI never re-parses the runtime's wire
-    format — that knowledge lives in the runner. A new runtime that fills the
-    same neutral fields renders here with zero changes.
+    neutral fields (kind/title/detail/status/diff) in `parse_event`; here we only
+    map those to this CLI's palette. The CLI never re-parses the runtime's wire
+    format — that knowledge lives in the runner.
 
     Usage:
-        run_agent(..., on_event=event_printer("analyst"))
+        run_agent(..., on_event=event_printer("analyst", diffs=True))
     """
     console = console or get_console()
 
     def _print(ev: Event) -> None:
-        line = render_event(ev)
-        if line:
-            console.print(f"  [dim]{label}[/dim] {line}")
+        if lines:
+            line = render_event(ev)
+            if line:
+                console.print(f"  [dim]{label}[/dim] {line}")
+        if diffs and ev.diff:
+            render_diff(ev, console=console)
 
     return _print
+
+
+def render_diff(ev: Event, *, console=None) -> None:
+    """Render a file-change event's unified diff as a syntax-highlighted block.
+
+    Uses rich `Syntax` with the `diff` lexer (red removals / green additions).
+    Runtime-agnostic: reads only the neutral `ev.diff` string the runner filled.
+    """
+    if not ev.diff:
+        return
+    from rich.syntax import Syntax
+
+    console = console or get_console()
+    console.print(Syntax(ev.diff, "diff", theme="ansi_dark", background_color="default", word_wrap=True))
 
 
 def render_event(ev: Event) -> str:
@@ -101,7 +123,11 @@ def render_event(ev: Event) -> str:
         return f"[green]step done[/green] [dim]({ev.tokens:,} tokens)[/dim]" if ev.tokens else "[green]step done[/green]"
     if kind == "tool":
         style = {"error": "red", "completed": "green"}.get(ev.status, "cyan")
-        detail = f" [dim]({ev.detail})[/dim]" if ev.detail else ""
+        # Prefer a diff stat (+A/-D) built here from the neutral counts; else the
+        # runner's non-diff hint (matches / exit code). Formatting lives in the
+        # CLI — the runner only supplies numbers.
+        hint = f"+{ev.added}/-{ev.removed}" if (ev.added or ev.removed) else ev.detail
+        detail = f" [dim]({hint})[/dim]" if hint else ""
         # Color the keyword by status; leave the title bare for rich to highlight.
         return f"[{style}]tool[/{style}] {ev.title}{detail}".rstrip()
     if kind == "text":
@@ -287,6 +313,9 @@ def run_cli(
         instructions_file: str | None = typer.Option(None, "--instructions-file"),
         llm_concurrency: int | None = typer.Option(None, "--llm-concurrency"),
         show_events: bool = typer.Option(False, "--show-events", "-v", help="raw per-event firehose (instead of the live table)"),
+        show_diffs: bool = typer.Option(
+            False, "--show-diffs", help="render edit/write diffs as blocks (composes with --show-events and the live table)"
+        ),
         model: str | None = typer.Option(None, "--model", "-m", help="model for every node (provider/model); per-node model= still overrides"),
         idle_timeout: int | None = typer.Option(
             None, "--idle-timeout", help="liveness timeout (s): kill an agent only after this long with no event/sidecar"
@@ -304,6 +333,7 @@ def run_cli(
             instructions_file=instructions_file,
             llm_concurrency=llm_concurrency,
             show_events=True if show_events else None,
+            show_diffs=True if show_diffs else None,
             model=model,
             idle_timeout_s=idle_timeout,
         )
@@ -435,20 +465,30 @@ def _run_preflight(runtime: str, agent_dir: str, console) -> None:
 def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str) -> None:
     """Run the pipeline under the chosen view, then print the results table.
 
-    Default: line-based node progress (NodeProgressPrinter) — simple prints, no
-    TUI. With --show-events: the raw per-event firehose instead. Either way the
-    end-of-run results table is printed.
+    Two independent knobs compose (see the matrix):
+      - --show-events -> per-event firehose (replaces the node-progress table).
+      - --show-diffs  -> render edit/write diff blocks; layers onto EITHER the
+        firehose or the default table.
 
-    Ctrl-C is handled cleanly: run_agent kills the agent's process group and we
-    exit 130 (SIGINT) with a short message instead of a raw traceback.
+      | flags                       | base view      | diff blocks |
+      | (none)                      | progress table | no          |
+      | --show-diffs                | progress table | yes         |
+      | --show-events               | firehose       | no          |
+      | --show-events --show-diffs  | firehose       | yes         |
+
+    Either way the end-of-run results table is printed. Ctrl-C is handled cleanly:
+    run_agent kills the agent's process group and we exit 130 (SIGINT).
     """
 
-    def _raw_event_factory(label):
-        return event_printer(label, console=console)
+    def _event_factory(label):
+        # lines only in firehose mode; diffs whenever --show-diffs is on.
+        return event_printer(label, console=console, lines=cfg.show_events, diffs=cfg.show_diffs)
 
-    if cfg.show_events:
-        on_event_factory = _raw_event_factory
-        on_node_event = None
+    if cfg.show_events or cfg.show_diffs:
+        # An event callback is needed for the firehose and/or diff blocks. Keep
+        # the node-progress table UNLESS the firehose replaces it (--show-events).
+        on_event_factory = _event_factory
+        on_node_event = None if cfg.show_events else NodeProgressPrinter(console=console).on_node_event
     else:
         on_event_factory = None
         on_node_event = NodeProgressPrinter(console=console).on_node_event
