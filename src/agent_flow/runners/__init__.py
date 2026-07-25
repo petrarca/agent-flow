@@ -51,7 +51,11 @@ def get_executor(name: str) -> AgentExecutor:
     # subprocess machinery), which imports this package — avoid an import cycle.
     from agent_flow.core.agent_runtime import SubprocessExecutor
 
-    return SubprocessExecutor(get_runner(name))
+    try:
+        runner = get_runner(name)
+    except ValueError:
+        raise ValueError(f"unknown runtime {name!r} (available: {sorted(RUNNERS)})") from None
+    return SubprocessExecutor(runner)
 
 
 __all__ = [

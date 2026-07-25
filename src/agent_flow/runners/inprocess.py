@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import replace as dc_replace
 from typing import Any
 
 from agent_flow.core.schema import coerce_schema
@@ -45,6 +46,8 @@ class InProcessExecutor(AgentExecutor):
     """AgentExecutor that runs an agent as a direct in-process call."""
 
     def __init__(self, impl: AgentImpl, *, name: str = "inprocess") -> None:
+        if not callable(impl):
+            raise TypeError(f"InProcessExecutor: impl must be callable, got {type(impl).__name__!r}")
         self.impl = impl
         self.name = name
 
@@ -55,10 +58,10 @@ class InProcessExecutor(AgentExecutor):
         raw = self.impl(inv)
         duration = time.monotonic() - start
         result = adapt_result(raw, inv)
-        # Stamp duration if the impl did not set one (an AgentResult it built may
-        # already carry its own).
+        # Stamp duration if the impl did not set one (an AgentResult it returned
+        # may already carry its own). AgentResult is frozen; use replace().
         if not result.duration_s:
-            result.duration_s = duration
+            result = dc_replace(result, duration_s=duration)
         return result
 
 
@@ -76,7 +79,11 @@ def adapt_result(raw: Any, inv: AgentInvocation) -> AgentResult:
 
     schema = coerce_schema(inv.result_schema)
 
-    # A pydantic model instance: the typed result object directly.
+    # A pydantic model instance: serialize to a payload dict, validate via the
+    # declared result_schema (if any). result_obj is the SCHEMA-VALIDATED instance
+    # or None — same contract as the subprocess path, which only populates
+    # result_obj via schema.validate(). The model_dump() payload is always in
+    # control["result"] regardless, so the gate can read it either way.
     dump = getattr(raw, "model_dump", None)
     if callable(dump):
         payload = dump()
@@ -89,7 +96,7 @@ def adapt_result(raw: Any, inv: AgentInvocation) -> AgentResult:
             control=control,
             completion="completed",
             result_valid=outcome.valid if outcome is not None else True,
-            result_obj=outcome.obj if outcome is not None else raw,
+            result_obj=outcome.obj if outcome is not None else None,
             result_errors=outcome.errors if outcome is not None else (),
         )
 

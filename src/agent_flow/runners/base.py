@@ -1,26 +1,37 @@
-"""Runner seam — the neutral contract every agent runtime implements.
+"""Neutral data types and contracts shared by all execution paths.
 
-`run_agent` (agent_runtime.py) is runner-agnostic: it spawns a subprocess,
-supervises it by liveness, kills on stale, reads the status sidecar, and
-harvests telemetry. What DIFFERS between opencode / Claude Code / Codex is only:
+This module is the COMMON FOUNDATION for the two-level execution seam:
 
-  1. how you build the command to run one agent, and
-  2. how you parse the runner's stdout stream into liveness/telemetry events.
+  AgentInvocation  the complete, runtime-neutral request to run one agent.
+                   Input to AgentExecutor.run (see runners/executor.py).
+  AgentResult      the outcome — control envelope + telemetry + typed object.
+                   Output from AgentExecutor.run (defined in executor.py).
+  compose_prompt   assemble the runtime-neutral prompt (shared_context +
+                   shared_instructions + per-node prompt) in one place.
+  DEFAULT_IDLE_TIMEOUT_S  the liveness/timeout budget default.
 
-An `AgentRunner` owns exactly those two things. Everything else (supervision,
-kill, sidecar, the DAG, re-runs, injection) is written once and runner-agnostic.
+Two execution seams consume these types:
 
-The status SIDECAR is deliberately NOT part of the runner: it is written by the
-*agent* (via its Write tool) and read by the orchestrator, so it is identical
-across every runner. That keeps the reliability contract uniform.
+  AgentExecutor (ABC, executor.py)
+      The HIGH-LEVEL seam: "run one invocation, produce a result."
+      - SubprocessExecutor (core/agent_runtime.py) — spawns a CLI runtime,
+        supervises by liveness, reads a control SIDECAR. Delegates the two
+        subprocess wire details to an AgentRunner (this module).
+      - InProcessExecutor (runners/inprocess.py) — calls a Python function
+        directly; no subprocess, sidecar, or control preamble.
 
-This module holds the NEUTRAL contract only (the Protocol + the shared data
-types); each concrete runtime lives in its own sibling module (opencode.py,
-mock.py, claude_code.py). The seam is a `typing.Protocol` (structural): a runner
-matches by SHAPE and does not inherit — there is no shared implementation to
-hoist (build_command / parse_event are entirely runtime-specific), so a Protocol
-is the right tool. Contrast the backend seam, which DOES share logic and uses an
-ABC base.
+  AgentRunner (Protocol, this module)
+      The LOW-LEVEL seam: "how to talk to one subprocess runtime."
+      Owned by SubprocessExecutor; NOT the public seam.
+      - build_command(inv) -> argv
+      - parse_event(line)  -> Event (liveness + telemetry)
+      Each concrete runtime (opencode.py, mock.py, claude_code.py) implements
+      exactly these two methods. A Protocol (structural, not ABC) because there
+      is no shared implementation to hoist.
+
+The control sidecar is SubprocessExecutor's PRIVATE mechanism — it is written
+by CLI agents via their Write tool and read by SubprocessExecutor. It is not
+part of AgentRunner, AgentInvocation, or the AgentExecutor contract.
 """
 
 from __future__ import annotations

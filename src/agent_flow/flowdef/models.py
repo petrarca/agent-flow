@@ -63,6 +63,12 @@ class NodeDef(BaseModel):
 
     @model_validator(mode="after")
     def _one_run_source(self) -> NodeDef:
+        # impl_ref check first: gives a clear message before the XOR check fires.
+        if self.impl_ref is not None and not self.agent:
+            raise ValueError(
+                f"node {self.name!r}: `impl_ref` requires `agent` to be set — `impl_ref` selects HOW"
+                " the agent runs (in-process), `agent` is its name/label; they are not alternatives"
+            )
         if bool(self.agent) == bool(self.run_ref):
             raise ValueError(f"node {self.name!r}: set exactly one of `agent` or `run_ref`")
         if self.exports is not None and self.export_ref is not None:

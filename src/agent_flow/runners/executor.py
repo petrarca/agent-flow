@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from agent_flow.runners.base import AgentInvocation
 
 
-@dataclass
+@dataclass(frozen=True)
 class AgentResult:
     """Outcome of running one agent invocation — the executor seam's OUTPUT type.
 
@@ -83,5 +83,11 @@ class AgentExecutor(abc.ABC):
         the validated `result_obj` when the invocation carried a result_schema).
         Whether that comes from a supervised subprocess + sidecar or an
         in-process call is the implementation's concern.
+
+        Concrete subclasses MAY accept additional keyword-only arguments beyond
+        `inv` for their own mechanism (e.g. `SubprocessExecutor` accepts an
+        optional `control_file=` override). Such extra params are the subclass's
+        private concern and must never be used through the `AgentExecutor` ABC
+        type — callers that need them must hold the concrete type directly.
         """
         raise NotImplementedError
