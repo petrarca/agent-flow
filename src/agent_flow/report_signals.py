@@ -13,9 +13,9 @@ Signals:
      Restart() when the control says ok but no report landed).
 
   2. rerun_from_sidecar(control_file) -> does the agent's CONTROL SIDECAR name
-     any agents in its `rerun_required` field? This is the actual mechanism (a
+     any NODES in its `rerun_required` field? This is the actual mechanism (a
      JSON field in the envelope, not a markdown block in the report) — see
-     control_protocol.py and gates.rerun_on_signal.
+     control_protocol.py and gates.rerun_on_signal / rerun_on_named.
 """
 
 from __future__ import annotations
@@ -30,13 +30,16 @@ def produced(report_path: Path) -> bool:
 
 
 def rerun_from_sidecar(control_file: Path) -> list[str]:
-    """Return agents named in the sidecar ENVELOPE's `rerun_required` field.
+    """Return the NODE names in the sidecar ENVELOPE's `rerun_required` field.
 
     `rerun_required` is a flow-control signal, so it lives in the envelope
-    (alongside status/agent/reason), NOT in the free-form `result` payload:
+    (alongside status/agent/reason), NOT in the free-form `result` payload. It
+    names the NODE(s) to re-run — nodes are the unit of the DAG; the agent behind
+    a node is an implementation detail (for simplicity a node is often named after
+    its agent, but the SIGNAL is a node name):
 
         {"status": "verified", "agent": "domain-verifier",
-         "rerun_required": ["domain-analyst"], "result": {...}}
+         "rerun_required": ["domain"], "result": {...}}
 
     Returns the list (empty when no re-run needed or the file is absent/invalid).
     """

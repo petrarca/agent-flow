@@ -68,6 +68,7 @@ from agent_flow.gates import (
     Restart,
     Stop,
     require_file,
+    rerun_on_named,
     rerun_on_signal,
 )
 from agent_flow.preflight import Check, check, fatal_failures
@@ -153,6 +154,7 @@ __all__ = [
     # ready-made gates (optional conveniences)
     "require_file",
     "rerun_on_signal",
+    "rerun_on_named",
     # signals
     "produced",
     "rerun_from_sidecar",

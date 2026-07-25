@@ -144,14 +144,18 @@ def require_file(relpath: str, *, on_missing: Directive | None = None) -> Gate:
 
 
 def rerun_on_signal(*, target: str, control_file: str | None = None) -> Gate:
-    """Gate that re-runs `target` node when the just-run node's sidecar asks for it.
+    """Gate that re-runs a FIXED `target` node when the sidecar asks for a re-run.
 
     Reads the `rerun_required` field from the current node's control sidecar
-    (default `<node>.control.json`, overridable). If it names any agents ->
-    GoTo(target) (bounded by the walker). Otherwise -> Continue.
+    (default `<node>.control.json`, overridable). If it is non-empty (names any
+    node) -> GoTo(target) (bounded by the walker). Otherwise -> Continue. The
+    named values are only used as a truthy signal here; the destination is the
+    fixed `target`. For the common verifier case (always bounces to its one
+    subject node), this is the simplest gate.
 
-    This expresses "a verifier node decided an upstream node must re-run" without
-    any built-in analyst/verifier pairing: it is just a gate returning a GoTo.
+    For a node that may re-run DIFFERENT upstream nodes depending on what it flags
+    (e.g. a final coherence check), use `rerun_on_named` instead, which routes to
+    whichever node the sidecar names.
     """
     from agent_flow.report_signals import rerun_from_sidecar
 
@@ -159,6 +163,32 @@ def rerun_on_signal(*, target: str, control_file: str | None = None) -> Gate:
         node_name = getattr(ctx.node, "name", None) or str(ctx.node)
         cf = control_file or f"{node_name}.control.json"
         if rerun_from_sidecar(ctx.run_dir / cf):
+            return GoTo(node=target, note=f"{node_name} signalled re-run of {target}")
+        return Continue()
+
+    return gate
+
+
+def rerun_on_named(*, control_file: str | None = None) -> Gate:
+    """Gate that re-runs WHICHEVER node the sidecar's `rerun_required` names.
+
+    Unlike `rerun_on_signal` (fixed target), this routes to the node named in the
+    sidecar — for a final coherence check that may bounce a re-run to any upstream
+    stage (analyst / extractor / summary). `rerun_required` carries NODE names
+    (nodes are the unit of the DAG; the agent behind a node is an implementation
+    detail). The FIRST valid backward target is used; the walker bounds and
+    validates the jump (an unknown/forward/exhausted target is ignored there).
+
+    Empty `rerun_required` -> Continue.
+    """
+    from agent_flow.report_signals import rerun_from_sidecar
+
+    def gate(ctx: GateContext) -> Directive:
+        node_name = getattr(ctx.node, "name", None) or str(ctx.node)
+        cf = control_file or f"{node_name}.control.json"
+        named = rerun_from_sidecar(ctx.run_dir / cf)
+        if named:
+            target = named[0]
             return GoTo(node=target, note=f"{node_name} signalled re-run of {target}")
         return Continue()
 

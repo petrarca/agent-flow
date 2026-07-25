@@ -16,8 +16,8 @@ The control file shape:
       status  "ok" | "verified" | "error"   (required)
       agent   the agent's own name
       reason  short explanation, for error status
-      rerun_required  optional list of agents to re-run (a flow-control signal
-                      a gate consumes)
+      rerun_required  optional list of NODE names to re-run (a flow-control
+                      signal a gate consumes)
     PAYLOAD (only gates/callers read):
       result  free-form object with agent-specific structured data, or {}
 
