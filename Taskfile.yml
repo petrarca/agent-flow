@@ -62,6 +62,13 @@ tasks:
     cmds:
       - .venv/bin/python -m examples.custom_flow --topic "{{.TOPIC}}" --runtime mock --run-dir "{{.RUNDIR}}" {{.SHOW_EVENTS}}
 
+  example:inprocess:
+    desc: 'Run the IN-PROCESS example (two PydanticAI-style agents, no subprocess/sidecar). Override the ticket: TICKET="…"'
+    vars:
+      TICKET: '{{.TICKET | default "the app crashes on login, urgent"}}'
+    cmds:
+      - .venv/bin/python -m examples.inprocess "{{.TICKET}}"
+
   format:
     desc: Format with ruff (owns all layout)
     cmds:

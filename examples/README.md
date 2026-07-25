@@ -1,11 +1,11 @@
 # examples
 
 Runnable demonstrations of building pipelines on the `agent-flow` library. Each
-example is a single file; they share one simulated agent set in
-`.opencode/agent/` (so every example runs with `--runtime mock` — no tokens — or
-`--runtime opencode`).
+example is a single file. The subprocess-based examples share one simulated agent
+set in `.opencode/agent/` (so they run with `--runtime mock` — no tokens — or
+`--runtime opencode`); the in-process example needs neither.
 
-All three build the same shape where relevant:
+The subprocess examples build the same shape:
 
     tech-stack -> tech-stack-verify -> ( domain(+verify) | architecture(+verify) ) -> summary
 
@@ -43,4 +43,24 @@ own the flow shape yourself.
 ```bash
 task example:custom:mock TOPIC="Hexagonal architecture"
 task example:custom TOPIC="Hexagonal architecture"
+```
+
+## inprocess.py — in-process agents (no subprocess, no sidecar)
+
+A different shape: a 2-node `classify -> respond` flow where both "agents" are
+plain Python functions simulating PydanticAI-style agents (invocation in, typed
+pydantic model out). They run via `InProcessExecutor` — no subprocess, no control
+sidecar — while gates still read the typed object as `ctx.obj`, and `exports`
+still flows a value (`category`/`urgency`) from one node to the next. Attached by
+name (`NodeDef.impl_ref` + `registry.agent_impl`); the imperative form is
+`agent_node(impl=fn)`.
+
+It runs **programmatically via `run_flow`** (not `run_cli`): an all-in-process
+flow has no runtime/agent-dir, and the CLI pre-flight is still subprocess-oriented
+(issue #11). No `.opencode/` or `--runtime` needed.
+
+```bash
+task example:inprocess                                  # default ticket
+task example:inprocess TICKET="cannot log in, urgent"   # your ticket
+python -m examples.inprocess "minor typo on the about page"
 ```
