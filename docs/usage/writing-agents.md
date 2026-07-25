@@ -114,7 +114,7 @@ land somewhere unexpected.
 ## Simulated / demo agents
 
 If you're building a demo where the agent doesn't do real work (see
-`examples/tech_assessment/.opencode/agent/*.md`), say so explicitly and forbid
+`examples/.opencode/agent/*.md`), say so explicitly and forbid
 tool use beyond what the simulation needs — e.g. "This is a SIMULATION; do not
 read files or access repositories; invent plausible content based only on the
 inputs given."

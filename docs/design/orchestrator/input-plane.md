@@ -90,7 +90,7 @@ agent_node("tech-stack", "tech-stack-analyst",
 
 ```bash
 # run-wide brief from the CLI, injected into every agent:
-python -m examples.tech_assessment.tech_flow run -p product_key=acme --runtime opencode \
+python -m examples.declarative run -p product_key=acme --runtime opencode \
   -i "Experimental code-graph support is available; use it alongside RAG."
 ```
 

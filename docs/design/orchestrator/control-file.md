@@ -83,7 +83,7 @@ instructions say when/why), because a real agent has no other way to discover
 that field exists — it cannot see [`gates.rerun_on_signal`](gates.md). Mentioning
 it in the shared preamble is necessary but not sufficient: an agent still only
 knows to set it if its own `.md` says so for its specific task (naming which
-step to re-run). See `examples/tech_assessment/.opencode/agent/*-verifier.md`.
+step to re-run). See `examples/.opencode/agent/*-verifier.md`.
 
 ## Where it lives
 

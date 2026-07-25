@@ -140,5 +140,5 @@ build_flow(nodes, name="tech")(product_key="acme", runtime="opencode")  # no run
 Implemented and tested in this repo: Tiers 1–3, gates + ready gates, batteries,
 control-file contract + protocol injection, result-schema seam, live events +
 CLI, bounded re-runs and cross-node jump-back. Two runnable examples
-(`examples/toy_pipeline` = Tier 2, `examples/tech_assessment` = Tier 3), both
+(`examples/custom_flow.py` = Tier 2, `examples` = Tier 3), both
 green on the mock runner and on real opencode.

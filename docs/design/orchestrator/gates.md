@@ -87,7 +87,7 @@ ignore.
 **A real agent must be TOLD `rerun_required` exists to use it.** The injected
 [control-file protocol](control-file.md) mentions the field, but a specific
 agent only knows *when* to set it if its own `.md` says so explicitly — see
-`examples/tech_assessment/.opencode/agent/*-verifier.md` for the pattern.
+`examples/.opencode/agent/*-verifier.md` for the pattern.
 
 ## Why gates, not engine logic
 

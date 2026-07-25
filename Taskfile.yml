@@ -8,7 +8,7 @@ vars:
   RUNTIME: '{{.RUNTIME | default "opencode"}}'
   TOPIC: '{{.TOPIC | default "Hexagonal architecture in Java"}}'
   # Empty by default -> the pipeline creates a temp run dir under <temp>/agent-flow/.
-  # Override to keep output somewhere specific: task example:tech RUNDIR=/path/out
+  # Override to keep output somewhere specific: task example:declarative RUNDIR=/path/out
   RUNDIR: '{{.RUNDIR | default ""}}'
 
 env:
@@ -32,25 +32,35 @@ tasks:
     cmds:
       - uv pip install -e ".[dev]"
 
-  example:tech:
-    desc: 'Run the tech-assessment example DAG. Override: task example:tech PRODUCT=my-product RUNTIME=mock RUNDIR=/path SHOW_EVENTS=--show-events'
+  example:imperative:
+    desc: 'Run the assessment example flow, IMPERATIVE style (agent_node). Override: PRODUCT=… RUNTIME=mock RUNDIR=/path SHOW_EVENTS=--show-events'
     cmds:
-      - .venv/bin/python -m examples.tech_assessment.tech_flow run -p product_key="{{.PRODUCT}}" -p repos_root=/tmp/repos --run-dir "{{.RUNDIR}}" --runtime "{{.RUNTIME}}" {{.SHOW_EVENTS}}
+      - .venv/bin/python -m examples.imperative run -p product_key="{{.PRODUCT}}" --run-dir "{{.RUNDIR}}" --runtime "{{.RUNTIME}}" {{.SHOW_EVENTS}}
 
-  example:tech:mock:
-    desc: Run the tech-assessment example with the MOCK runtime (no tokens)
+  example:imperative:mock:
+    desc: Run the imperative assessment example with the MOCK runtime (no tokens)
     cmds:
-      - .venv/bin/python -m examples.tech_assessment.tech_flow run -p product_key="{{.PRODUCT}}" -p repos_root=/tmp/repos --run-dir "{{.RUNDIR}}" --runtime mock {{.SHOW_EVENTS}}
+      - .venv/bin/python -m examples.imperative run -p product_key="{{.PRODUCT}}" --run-dir "{{.RUNDIR}}" --runtime mock {{.SHOW_EVENTS}}
 
-  example:toy:
-    desc: Run the toy 3-stage pipeline (analyst -> verifier -> extractor). SHOW_EVENTS=--show-events for a live view
+  example:declarative:
+    desc: 'Run the SAME flow, DECLARATIVE style (FlowDef + custom gate/hook by name). Override: PRODUCT=… RUNTIME=mock …'
     cmds:
-      - .venv/bin/python -m examples.toy_pipeline.flow --topic "{{.TOPIC}}" --runtime "{{.RUNTIME}}" --run-dir "{{.RUNDIR}}" {{.SHOW_EVENTS}}
+      - .venv/bin/python -m examples.declarative run -p product_key="{{.PRODUCT}}" --run-dir "{{.RUNDIR}}" --runtime "{{.RUNTIME}}" {{.SHOW_EVENTS}}
 
-  example:toy:mock:
-    desc: Run the toy pipeline with the MOCK runtime (no tokens)
+  example:declarative:mock:
+    desc: Run the declarative assessment example with the MOCK runtime (no tokens)
     cmds:
-      - .venv/bin/python -m examples.toy_pipeline.flow --topic "{{.TOPIC}}" --runtime mock --run-dir "{{.RUNDIR}}" {{.SHOW_EVENTS}}
+      - .venv/bin/python -m examples.declarative run -p product_key="{{.PRODUCT}}" --run-dir "{{.RUNDIR}}" --runtime mock {{.SHOW_EVENTS}}
+
+  example:custom:
+    desc: 'Run the Tier-2 custom flow (your own flow calling run_agent; analyst -> verifier -> extractor). SHOW_EVENTS=--show-events'
+    cmds:
+      - .venv/bin/python -m examples.custom_flow --topic "{{.TOPIC}}" --runtime "{{.RUNTIME}}" --run-dir "{{.RUNDIR}}" {{.SHOW_EVENTS}}
+
+  example:custom:mock:
+    desc: Run the custom Tier-2 flow with the MOCK runtime (no tokens)
+    cmds:
+      - .venv/bin/python -m examples.custom_flow --topic "{{.TOPIC}}" --runtime mock --run-dir "{{.RUNDIR}}" {{.SHOW_EVENTS}}
 
   format:
     desc: Format with ruff (owns all layout)

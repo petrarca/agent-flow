@@ -166,7 +166,7 @@ python my_flow.py run --instructions "Experimental code-graph support is availab
 ```
 
 (Wire `--instructions`/`-i` yourself with Typer/argparse, as the tech-assessment
-example does — see `examples/tech_assessment/tech_flow.py`.) It's injected into
+example does — see `examples/declarative.py`.) It's injected into
 **every** agent's prompt, after the control protocol. See
 [input-plane.md](../design/orchestrator/input-plane.md).
 
@@ -487,6 +487,6 @@ Node("custom", run=run, depends_on=("hello",))
 
 This still plugs into `build_flow` — a hand-written `Node` and an `agent_node`
 mix freely in the same graph. Or skip the declarative engine entirely and call
-`run_agent` inside your own Prefect flow (Tier 2 — see `examples/toy_pipeline`),
+`run_agent` inside your own Prefect flow (Tier 2 — see `examples/custom_flow.py`),
 or outside Prefect altogether (Tier 1). See
 [index.md](../design/orchestrator/index.md) for the three tiers.

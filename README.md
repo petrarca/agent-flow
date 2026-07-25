@@ -95,77 +95,115 @@ Pick the tier that fits; each is usable on its own. Higher tiers are more
 declarative; lower tiers give more control.
 
 ```
-TIER 3  DECLARATIVE      declare Nodes -> build_flow() -> a runnable flow callable
-  (most declarative)     agent_node() = one call per agent            examples/tech_assessment
+TIER 3  DECLARATIVE      a FlowDef (data) or agent_node() -> build_flow()      examples/declarative
+  (most declarative)     a runnable flow; one node per agent                   examples/imperative
         │ composes
-TIER 2  PRIMITIVES       call run_agent() as the leaf of YOUR OWN flow
-        │ uses                                                        examples/toy_pipeline
+TIER 2  PRIMITIVES       call run_agent() as the leaf of YOUR OWN flow         examples/custom_flow
+        │ uses
 TIER 1  ENGINE CORE      run_agent(): spawn + liveness-supervise + kill + sidecar verdict
   (closest to the metal) runner-agnostic; backend-free
         │ invokes
         AGENT RUNTIME    opencode agents (.md) — external, unchanged
 ```
 
-- **Tier 3 — declare the graph** (`agent_node` + `build_flow`): one call per
-  agent; the library builds the prompt, sidecar path, and DAG.
+- **Tier 3 — declare the graph** (a `FlowDef`, or `agent_node` + `build_flow`):
+  one node per agent; the library builds the prompt, sidecar path, and flow.
 - **Tier 2 — your own flow**: call `run_agent` as the leaf of a
   hand-written flow.
 - **Tier 1 — one supervised agent** (`run_agent`): spawn + liveness-supervise +
   kill + read the sidecar verdict. Backend-free.
 
-### Example — a two-node flow (Tier 3)
+### Example — a two-node flow (Tier 3, declarative)
 
 A minimal analyst → verifier pipeline: the analyst writes a report; the verifier
-checks it and can bounce the flow back to re-run the analyst. This is the whole
-Tier-3 surface — declare nodes, hand them to `build_flow`, call the result.
+checks it and can bounce the flow back to re-run the analyst. This is the
+**declarative surface** — a `FlowDef` of `NodeDef`s: pure DATA (no callables),
+serializable to JSON/YAML, validated before it runs.
 
-A **node** is a declarative description of one step: which agent to run, what it
-depends on, and a gate. You describe the graph as data; the engine executes it —
-you never write the control flow. Each node's `inputs` (with any `{param}`
-placeholders resolved from the run params) are passed to the agent as additional
-context — the work order it acts on for that step.
-
-Beyond the work order, a node can also carry **dedicated context and
-instructions** for its agent: `context=[...]` injects the *content* of files or
-globs (markdown rules, standards, prior reports) directly into the prompt — the
-engine reads them so the agent physically has them, not a pointer to go fetch —
-and `instructions="..."` adds inline per-node guidance ("for this step, also do
-X"). Both may use `{param}` templating; run-wide equivalents
-(`build_flow(shared_context=, shared_instructions=)`) apply to every node. See
-[the input plane](docs/design/orchestrator/input-plane.md).
+A **node** describes one step: which agent to run, what it depends on, and a gate
+(referenced BY NAME — the built-ins `require_file` / `rerun_on_signal`, or your
+own registered on a `FlowRegistry`). You describe the graph as data; the engine
+executes it — you never write the control flow. Each node's `inputs` (with
+`{param}` placeholders resolved from the run params) become the agent's work
+order. Nodes can also carry per-node `context=[...]` (file content injected into
+the prompt) and `instructions="..."`; run-wide equivalents live on the FlowDef.
+See [the input plane](docs/design/orchestrator/input-plane.md).
 
 ```python
-from agent_flow import agent_node, build_flow
-from agent_flow.gates import require_file, rerun_on_signal
+from agent_flow import FlowDef, NodeDef, run_flow
 
-nodes = [
-    # Node 1 — run the "tech-stack-analyst" agent. `inputs` becomes the agent's
-    # work order; {product_key} / {run_dir} are filled from the run params at
-    # execution time (normally passed to cli). The gate asserts the agent actually wrote the report — if
-    # not, the node retries (bounded).
-    agent_node(
-        "tech-stack",
-        "tech-stack-analyst",
-        inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
-        gate=require_file("tech-stack.md"),
-    ),
-    # Node 2 — a "verifier" is just another node. It runs after node 1
-    # (depends_on), and its gate can JUMP THE FLOW BACK: if the verifier signals a
-    # re-run, the flow rewinds to "tech-stack" and re-flows forward from there.
-    # criticality="degrade" means a failed verification does not stop the run.
-    agent_node(
-        "tech-stack-verify",
-        "tech-stack-verifier",
-        depends_on=("tech-stack",),
-        criticality="degrade",
-        gate=rerun_on_signal(target="tech-stack"),
-    ),
-]
+flow = FlowDef(
+    name="tech",
+    nodes=[
+        # Node 1 — run the "tech-stack-analyst" agent. `inputs` is the work order;
+        # {product_key}/{run_dir} are filled from the run params at execution time.
+        # The gate (a built-in, by name) asserts the agent actually wrote the
+        # report — if not, the node retries (bounded).
+        NodeDef(
+            name="tech-stack",
+            agent="tech-stack-analyst",
+            inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
+            gate="require_file",
+            gate_args={"relpath": "tech-stack.md"},
+        ),
+        # Node 2 — a "verifier" is just another node. It runs after node 1, and its
+        # gate can JUMP THE FLOW BACK: on a re-run signal the flow rewinds to
+        # "tech-stack". criticality="degrade" means a failed check doesn't stop the run.
+        NodeDef(
+            name="tech-stack-verify",
+            agent="tech-stack-verifier",
+            depends_on=["tech-stack"],
+            criticality="degrade",
+            gate="rerun_on_signal",
+            gate_args={"target": "tech-stack"},
+        ),
+    ],
+)
 
-# build_flow compiles the nodes into a runnable flow callable; calling it starts
-# the run. Params (product_key, runtime, …) can be passed or overridden here.
-build_flow(nodes, name="tech")(product_key="acme", runtime="opencode")
+# Run it — one call. (Or hand `flow` to the reusable CLI: run_cli(flow), which
+# also gives you `run` / `nodes list`.)
+run_flow(flow, product_key="acme", runtime="opencode")
 ```
+
+The same pipeline can be written imperatively with `agent_node(...)` (the
+lower-level Tier-3 form) — see `examples/imperative.py` vs `examples/declarative.py`.
+
+### Hooking your own logic
+
+The built-in gates cover the common cases. To plug in **your own** logic, write a
+function, register it on a `FlowRegistry`, and reference it from a node BY NAME —
+the node stays pure data, your code lives in the registry:
+
+```python
+from agent_flow import FlowDef, NodeDef, FlowRegistry, run_flow
+from agent_flow.gates import Continue, Stop
+
+registry = FlowRegistry()  # built-in gates already seeded
+
+@registry.gate("stack_usable")            # a custom DECIDING gate: (ctx) -> Directive
+def stack_usable(ctx):
+    if (ctx.result or {}).get("status") == "error":
+        return Stop(reason="tech-stack could not be determined")
+    return Continue()
+
+@registry.on("after_node")                # an OBSERVING hook (telemetry; never steers flow)
+def _log(node, outcome):
+    print(f"{node.name}: {outcome.status} ({outcome.duration_s:.1f}s)")
+
+flow = FlowDef(name="tech", nodes=[
+    NodeDef(name="tech-stack", agent="tech-stack-analyst", gate="stack_usable"),  # referenced by name
+])
+
+run_flow(flow, registry=registry, product_key="acme", runtime="opencode")
+```
+
+A gate that needs per-node config just takes extra keyword params — a gate is
+`(ctx, **config) -> Directive`, and the node's `gate_args` supply the config
+(bound for you). E.g. the built-in `rerun_on_signal(ctx, *, target)` used as
+`gate="rerun_on_signal", gate_args={"target": "tech-stack"}`. Other registrable
+kinds: a result→params export (`@registry.export`) and a custom run
+(`@registry.run` + `NodeDef(run_ref="…")`) for a node that runs your own code
+instead of an agent.
 
 **Orchestration backend.** `build_flow` compiles your graph into a runnable flow
 callable that dispatches execution to the selected backend. The default
@@ -230,9 +268,11 @@ src/agent_flow/     the library
   backends/         the execution seam (FlowBackend) — inprocess (default), prefect (opt-in)
   cli/              run_cli + neutral event rendering + tables (the [cli] extra)
   engine, gates, batteries, run_config, run_context, preflight, utils
-                    the DAG engine, flow-control gates, the one-call node, and
+                    the flow engine, flow-control gates, the one-call node, and
                     the run-time plumbing that ties the seams together
-examples/           toy_pipeline (Tier 2) and tech_assessment (Tier 3) demos
+  flowdef/          the declarative FlowDef/NodeDef surface + compile_flow
+examples/           imperative.py & declarative.py (Tier 3) + custom_flow.py (Tier 2)
+docs/design/orchestrator/   the design (start at index.md)
 docs/design/orchestrator/   the design (start at index.md)
 ```
 
