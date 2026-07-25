@@ -73,7 +73,7 @@ def _print_nodes_table(nodes, name: str, *, details: bool, console) -> None:
                 row += [
                     n.criticality,
                     str(n.max_cycles),
-                    "yes" if n.gate is not None else "-",
+                    (n.gate_ref if n.gate_ref else "yes") if (n.gate_ref or n.gate is not None) else "-",
                     "yes" if n.result_schema is not None else "-",
                     "yes" if n.exports is not None else "-",
                 ]

@@ -34,6 +34,7 @@ def run_cli(
     default_agent_dir: str = "",
     default_run_dir: str = "",
     params_model: type | None = None,
+    registry: object = None,
 ) -> None:
     """Run a pipeline from a UNIFIED CLI: subcommands over generic flags + params.
 
@@ -81,6 +82,7 @@ def run_cli(
         default_agent_dir=default_agent_dir,
         default_run_dir=default_run_dir,
         params_model=params_model,
+        registry=registry,
     )
 
     # Multi-command app. no_args_is_help shows the command list on bare

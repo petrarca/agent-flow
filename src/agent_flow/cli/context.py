@@ -25,3 +25,4 @@ class RunCliContext:
     default_agent_dir: str  # fallback agent-definitions dir when unset by CLI/env
     default_run_dir: str  # fallback run_dir ({param} templating allowed)
     params_model: type | None  # optional pydantic-settings model for -p validation
+    registry: object = None  # optional FlowRegistry (named gates/exports/hooks); None -> engine default

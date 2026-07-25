@@ -47,7 +47,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict  # noqa: E402
 
 from agent_flow import agent_node  # noqa: E402
 from agent_flow.engine import Node  # noqa: E402
-from agent_flow.gates import require_file, rerun_on_signal  # noqa: E402
 from examples.tech_assessment.tech_stages import STAGES, Stage  # noqa: E402
 
 # This example's own opencode project dir (holds .opencode/agent/*.md).
@@ -111,7 +110,10 @@ def _nodes_for(stage: Stage) -> list[Node]:
         criticality=stage.criticality,
         result_schema=_SCHEMAS.get(stage.name),
         # If the agent reports ok but wrote no report, give it one more try.
-        gate=require_file(stage.report),
+        # Named, registry-resolved gate (built-in) + its args as DATA — no
+        # callable on the node, so the definition stays serializable.
+        gate_ref="require_file",
+        gate_args={"relpath": stage.report},
     )
     if not stage.verifier:
         return [analyst]
@@ -123,7 +125,9 @@ def _nodes_for(stage: Stage) -> list[Node]:
         depends_on=(stage.name,),
         criticality="degrade",  # a failed verification should not stop the pipeline
         # If the verifier signals a re-run, jump the flow back to the analyst node.
-        gate=rerun_on_signal(target=stage.name),
+        # Named, registry-resolved gate (built-in) + its args as DATA.
+        gate_ref="rerun_on_signal",
+        gate_args={"target": stage.name},
     )
     return [analyst, verifier]
 

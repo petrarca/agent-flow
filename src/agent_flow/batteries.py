@@ -74,12 +74,15 @@ def agent_node(
     instructions: str = "",
     context: tuple[str, ...] = (),
     gate: Gate | None = None,
+    gate_ref: str | None = None,
+    gate_args: dict[str, Any] | None = None,
     result_schema: object = None,
     max_cycles: int = 1,
     model: str | None = None,
     idle_timeout_s: int | None = None,
     agent_dir: str | None = None,
     exports: Callable[[dict], Any] | dict[str, str] | None = None,
+    export_ref: str | None = None,
 ) -> Node:
     """Build a `Node` that runs ONE runtime agent as a supervised subprocess.
 
@@ -225,6 +228,8 @@ def agent_node(
         name=name,
         run=run,
         gate=gate,
+        gate_ref=gate_ref,
+        gate_args=dict(gate_args or {}),
         depends_on=depends_on,
         parallel_group=parallel_group,
         criticality=criticality,
@@ -232,4 +237,5 @@ def agent_node(
         result_schema=result_schema,
         agent=agent,
         exports=exports,
+        export_ref=export_ref,
     )

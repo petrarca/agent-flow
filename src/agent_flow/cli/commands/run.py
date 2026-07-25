@@ -94,7 +94,17 @@ def register(app, ctx: RunCliContext) -> None:
                 "[red]--only and --start-from are mutually exclusive[/red] (--only runs a single group; --start-from runs from a group to the end)."
             )
             raise typer.Exit(2)
-        _run_with_view(ctx.build_nodes(), params, cfg, console, name=ctx.name, llm_tag=ctx.llm_tag, start_from=start_from or "", only=only or "")
+        _run_with_view(
+            ctx.build_nodes(),
+            params,
+            cfg,
+            console,
+            name=ctx.name,
+            llm_tag=ctx.llm_tag,
+            start_from=start_from or "",
+            only=only or "",
+            registry=ctx.registry,
+        )
 
 
 def _print_run_summary(name: str, cfg, params: dict, console, *, hide: set[str] | None = None) -> None:
@@ -164,7 +174,7 @@ def _run_preflight(runtime: str, agent_dir: str, backend: str, console) -> None:
         sys.exit(2)
 
 
-def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str, start_from: str = "", only: str = "") -> None:
+def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str, start_from: str = "", only: str = "", registry=None) -> None:
     """Run the pipeline under the chosen view, then print the results table.
 
       | flags                       | base view      | diff blocks |
@@ -200,13 +210,16 @@ def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str, star
             render_results=True,
             start_from=start_from,
             only=only,
+            registry=registry,
         )
     except KeyboardInterrupt:
         console.print("[yellow]Interrupted[/yellow] — stopped by user (Ctrl-C).")
         sys.exit(130)
 
 
-def _build_and_run(nodes, params, cfg, console, *, name, llm_tag, on_event_factory, on_node_event, render_results, start_from="", only=""):
+def _build_and_run(
+    nodes, params, cfg, console, *, name, llm_tag, on_event_factory, on_node_event, render_results, start_from="", only="", registry=None
+):
     """Compile the flow with the given hooks and run it; optionally print results."""
     from agent_flow.engine import build_flow
 
@@ -221,6 +234,7 @@ def _build_and_run(nodes, params, cfg, console, *, name, llm_tag, on_event_facto
         agent_dir=cfg.agent_dir,
         node_instructions=cfg.node_instructions,
         backend=cfg.backend,
+        registry=registry,
     )
     # start_from / only are per-INVOCATION forward-entry knobs (not persisted).
     call_kwargs = {"run_dir": cfg.run_dir, "runtime": cfg.runtime, **params}
