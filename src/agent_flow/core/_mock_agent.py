@@ -40,6 +40,24 @@ def _kv(prompt: str, key: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+def _report_path(prompt: str, default_name: str, *, key: str = "REPORT") -> Path:
+    """Resolve where the mock writes its output file.
+
+    An explicit path (from `key`, default REPORT) wins. Otherwise the fallback is
+    anchored to the run_dir — the directory of the CONTROL_FILE (the sidecar
+    always lives under run_dir) — NOT a bare relative name. A relative name would
+    resolve against the subprocess cwd (= agent_dir), littering the
+    agent-definitions tree; anchoring to the sidecar keeps artifacts with the run
+    where they belong.
+    """
+    explicit = _kv(prompt, key)
+    if explicit:
+        return Path(explicit)
+    control = _kv(prompt, "CONTROL_FILE")
+    base = Path(control).parent if control else Path.cwd()
+    return base / default_name
+
+
 def _maybe_fault(agent: str, prompt: str) -> None:
     if os.environ.get("MOCK_HANG") == agent:
         time.sleep(100000)  # simulate a hang; the orchestrator must kill us
@@ -48,14 +66,14 @@ def _maybe_fault(agent: str, prompt: str) -> None:
     if os.environ.get("MOCK_FAIL") == agent:  # elif would also be correct; explicit return above is clearer
         # Signal a CONTENT failure the way a real agent does: write an error
         # STATUS SIDECAR (not a stdout line), then exit non-zero.
-        report = Path(_kv(prompt, "REPORT") or f"{agent}.md")
+        report = _report_path(prompt, f"{agent}.md")
         _write_sidecar(prompt, {"status": "error", "agent": agent, "reason": "injected failure"}, report)
         raise SystemExit(1)
 
 
 def run_analyst(prompt: str) -> None:
     topic = _kv(prompt, "TOPIC") or "unknown topic"
-    output = Path(_kv(prompt, "OUTPUT") or "analysis.md")
+    output = _report_path(prompt, "analysis.md", key="OUTPUT")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         f"# Analysis: {topic}\n\n"
@@ -73,7 +91,7 @@ def run_analyst(prompt: str) -> None:
 
 
 def run_verifier(prompt: str) -> None:
-    report = Path(_kv(prompt, "REPORT") or "analysis.md")
+    report = _report_path(prompt, "analysis.md")
     text = report.read_text() if report.exists() else ""
     issues_found = 0
     if "## Verification" not in text:
@@ -83,8 +101,8 @@ def run_verifier(prompt: str) -> None:
 
 
 def run_extractor(prompt: str) -> None:
-    report = Path(_kv(prompt, "REPORT") or "analysis.md")
-    output = Path(_kv(prompt, "OUTPUT") or "analysis.json")
+    report = _report_path(prompt, "analysis.md")
+    output = _report_path(prompt, "analysis.json", key="OUTPUT")
     text = report.read_text() if report.exists() else ""
     topic_m = re.search(r"^# Analysis:\s*(.+)$", text, re.MULTILINE)
     key_points_section = text.split("## Key Points")[-1].split("##")[0] if "## Key Points" in text else ""
@@ -138,7 +156,7 @@ def _write_sidecar(prompt: str, payload: dict, fallback_report: Path) -> None:
 
 def run_tech_analyst(agent: str, prompt: str) -> None:
     product = _kv(prompt, "PRODUCT_KEY") or "unknown-product"
-    report = Path(_kv(prompt, "REPORT") or f"{agent}.md")
+    report = _report_path(prompt, f"{agent}.md")
     # A one-time instruction (from a gate's Restart/GoTo `instruction`) is injected
     # VERBATIM into the prompt by the engine — there is no fixed key/heading (the
     # caller owns the framing). For test/demo visibility, echo it into the report
@@ -164,7 +182,7 @@ def run_tech_analyst(agent: str, prompt: str) -> None:
 
 
 def run_tech_verifier(agent: str, prompt: str) -> None:
-    report = Path(_kv(prompt, "REPORT") or "report.md")
+    report = _report_path(prompt, "report.md")
     text = report.read_text() if report.exists() else ""
     if "## Verification" not in text:
         report.write_text(text + "\n## Verification\n- Status: verified\n- Issues found: 0\n")

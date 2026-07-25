@@ -19,9 +19,3 @@ examples/*/*.control.json
 
 # JS deps accidentally created under an example's .opencode/
 node_modules/
-
-# Test RUN ARTIFACTS — reports/sidecars the opencode integration test writes
-# into the fixture dir as a side effect (the agent DEFINITIONS under
-# tests/fixtures/opencode/agent/ are tracked and NOT ignored).
-tests/fixtures/opencode/*.md
-tests/fixtures/opencode/*.control.json
