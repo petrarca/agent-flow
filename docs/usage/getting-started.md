@@ -2,7 +2,7 @@
 type: Guide
 title: Getting started with agent-flow
 description: Install agent-flow and write your first pipeline, from a trivial mock run to real opencode agents.
-tags: [agent-flow, getting-started, tutorial, agent_node, build_flow]
+tags: [agent-flow, getting-started, tutorial, flowdef, run_flow]
 timestamp: 2026-07-23T08:54:40Z
 ---
 
@@ -70,31 +70,44 @@ injects it. See [writing-agents.md](writing-agents.md) for the full contract.
 
 ## 3. Declare and run the pipeline
 
+You declare the pipeline as **data** — a `FlowDef` of `NodeDef`s — and run it.
+This is the recommended surface: no callables, serializable, validated before it
+runs. (There's also a lower-level imperative form, `agent_node`; see the note at
+the end.)
+
 ```python
 # flow.py
 from agent_flow import load_env
 load_env()
 
-from agent_flow import agent_node, build_flow
-from agent_flow.gates import require_file
+from agent_flow import FlowDef, NodeDef, run_flow
 
-nodes = [
-    agent_node(
-        "hello",
-        "hello-analyst",
-        inputs={"REPORT": "{run_dir}/hello.md"},
-        gate=require_file("hello.md"),  # re-try if the report didn't land
-    ),
-]
+flow = FlowDef(
+    name="hello",
+    nodes=[
+        NodeDef(
+            name="hello",
+            agent="hello-analyst",
+            inputs={"REPORT": "{run_dir}/hello.md"},
+            gate="require_file",              # a built-in gate, by name
+            gate_args={"relpath": "hello.md"},  # re-try if the report didn't land
+        ),
+    ],
+)
 
-pipeline = build_flow(nodes, name="hello")
-result = pipeline(runtime="mock")   # no run_dir -> a temp dir under <temp>/agent-flow/ (logged)
-print(result)  # {'hello': 'ok'}
+result = run_flow(flow, runtime="mock")   # no run_dir -> a temp dir under <temp>/agent-flow/ (logged)
+print(result)  # {'hello': NodeOutcome(status='ok', ...)}
 ```
 
 `load_env()` loads a `.env` file into the process environment so every agent
-subprocess inherits it. Call it first, before building the flow, exactly as
-shown. The default **in-process backend** needs no further setup.
+subprocess inherits it. Call it first. `run_flow` compiles the FlowDef and runs
+it in one call; the default **in-process backend** needs no further setup.
+
+A gate is referenced **by name** (`gate="require_file"`) with its config as data
+(`gate_args`). `require_file` / `rerun_on_signal` / `rerun_on_named` are built in;
+to plug in your own logic you register a function on a `FlowRegistry` and
+reference it by name — see [recipes.md](recipes.md) and
+[the FlowDef design doc](../design/orchestrator/flowdef.md).
 
 ### Where does `run_dir` come from, and how does the gate find the file?
 
@@ -109,11 +122,11 @@ shown. The default **in-process backend** needs no further setup.
   substituted before the value is handed to the agent — so the agent receives an
   absolute `REPORT` path and writes exactly there. (Absolute matters — see the
   gotcha in [writing-agents.md](writing-agents.md).)
-- The **gate** `require_file("hello.md")` looks under the same `run_dir`
-  automatically: a bare relative path is joined onto `run_dir`. You can also
-  write `require_file("{run_dir}/hello.md")` — both forms resolve to the same
-  file, and both may use run params (`require_file("{product_key}.md")`). Use
-  whichever reads best; they are equivalent.
+- The **gate** `require_file` (via `gate_args={"relpath": "hello.md"}`) looks
+  under the same `run_dir` automatically: a bare relative path is joined onto
+  `run_dir`. You can also give `"{run_dir}/hello.md"` — both resolve to the same
+  file, and both may use run params (`"{product_key}.md"`). Equivalent; use
+  whichever reads best.
 
 ### Two directories: `run_dir` vs `agent_dir`
 
@@ -123,20 +136,20 @@ where outputs go:
 - **`run_dir`** — where THIS RUN reads/writes: control sidecars, and the base
   for relative artifact paths. It is not a cwd and not where agents are defined.
 - **`agent_dir`** — where the runtime finds AGENT DEFINITIONS (opencode's
-  `.opencode/agent/*.md`). Passed to opencode as `--dir`. Set a default with
-  `build_flow(agent_dir="…")` and override per node with
-  `agent_node(..., agent_dir="…")`. Both are templated (`{repo}/…`).
+  `.opencode/agent/*.md`). Passed to opencode as `--dir`. Set it on the FlowDef
+  (`FlowDef(agent_dir="…")`) and override per node with `NodeDef(agent_dir="…")`.
+  Both are templated (`{repo}/…`).
 
 In the toy example these happen to be the same tree; in a real pipeline they
 usually differ — e.g. agents in your pipeline repo, outputs in a product folder:
 
 ```python
-build_flow(nodes, agent_dir="{repo}/pipelines/tech-assessment")   # agents here
-pipeline(run_dir="{repos_root}/{product_key}/output",             # outputs here
+flow = FlowDef(name="hello", agent_dir="{repo}/pipelines/tech-assessment", nodes=[...])  # agents here
+run_flow(flow, run_dir="{repos_root}/{product_key}/output",                              # outputs here
          repos_root="/data/products", product_key="acme", repo="/work/pipeline", runtime="opencode")
 ```
 
-Run it: `python flow.py`. You should see `{'hello': 'ok'}` and a `hello.md`
+Run it: `python flow.py`. You should see `{'hello': ...ok...}` and a `hello.md`
 file under the temp `run_dir` logged at flow start (pass an explicit `run_dir`
 to keep it). This ran the packaged **mock agent** — no opencode process, no
 tokens — so you can develop your graph shape before spending anything on real
@@ -147,7 +160,7 @@ agents.
 Change one argument:
 
 ```python
-result = pipeline(runtime="opencode")   # or pipeline(run_dir="out", ...)
+result = run_flow(flow, runtime="opencode")   # or run_flow(flow, run_dir="out", ...)
 ```
 
 Now `hello-analyst.md` (the real one you wrote in step 2) runs as a supervised
@@ -163,16 +176,21 @@ A "verifier" is not a special concept — it's just another node that depends on
 the first:
 
 ```python
-nodes = [
-    agent_node("hello", "hello-analyst", inputs={"REPORT": "{run_dir}/hello.md"}, gate=require_file("hello.md")),
-    agent_node(
-        "hello-verify", "hello-verifier",
-        depends_on=("hello",),
+flow = FlowDef(name="hello", nodes=[
+    NodeDef(name="hello", agent="hello-analyst", inputs={"REPORT": "{run_dir}/hello.md"},
+            gate="require_file", gate_args={"relpath": "hello.md"}),
+    NodeDef(
+        name="hello-verify", agent="hello-verifier",
+        depends_on=["hello"],
         inputs={"REPORT": "{run_dir}/hello.md"},
         criticality="degrade",  # a failed check shouldn't stop the whole run
     ),
-]
+])
 ```
+
+(The same pipeline can be written imperatively with `agent_node(...)` if you
+prefer building runtime nodes directly — see `examples/imperative.py`. FlowDef is
+the recommended surface.)
 
 `hello-verifier` reads `hello.md` (via its own `.md` instructions) and reports
 its own status. If it should be able to ask for `hello` to be redone, see

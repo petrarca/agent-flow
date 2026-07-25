@@ -128,6 +128,7 @@ build_flow(nodes, name="tech")(product_key="acme", runtime="opencode")  # no run
 | Supervision core | [supervision.md](supervision.md) | `run_agent`: liveness (not wall-clock), kill, sidecar verdict; the `AgentRunner` seam; why `--format json` |
 | Control file | [control-file.md](control-file.md) | The sidecar contract: envelope (`status`/`agent`/`reason`/`rerun_required`) + opaque `result{}`; protocol injection |
 | Engine | [engine.md](engine.md) | `Node`, `plan_groups`, `build_flow`; DAG + parallel groups; bounded re-runs; cross-node jump-back |
+| FlowDef | [flowdef.md](flowdef.md) | the declarative surface: `FlowDef`/`NodeDef` (serializable data), the `FlowRegistry` (gates/exports/runs/schemas by name; `(ctx, **config)` gates), `compile_flow`/`run_flow` |
 | Gates | [gates.md](gates.md) | `Directive` (Continue/Restart/GoTo/Stop), `GateContext`, ready-made gates — the consumer's flow-control hook |
 | Batteries | [batteries.md](batteries.md) | `agent_node` — the one-call node; the Tier-3 developer experience |
 | Input plane | [input-plane.md](input-plane.md) | The prompt channels (ingested context + inline instructions, global & per-node) + persona; templating; the CLI brief; run-context + `exports` (result->params) |

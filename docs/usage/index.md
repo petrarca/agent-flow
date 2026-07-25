@@ -25,7 +25,8 @@ where the "why" genuinely helps.
 |---|---|
 | [getting-started.md](getting-started.md) | You're starting from zero: install, write your first pipeline, run it. |
 | [writing-agents.md](writing-agents.md) | You're writing the opencode agent `.md` files agent-flow will supervise. |
-| [recipes.md](recipes.md) | You need a specific thing: a re-run loop, parallel steps, typed output, live events, dropping to a lower tier. |
+| [recipes.md](recipes.md) | You need a specific thing on the FlowDef surface: a re-run loop, parallel steps, custom logic, typed output. |
+| [advanced-recipes.md](advanced-recipes.md) | You're working at the lower level: `agent_node`/`build_flow`, gate callables, your own flow, dropping a tier. |
 
 ## The 30-second orientation
 
