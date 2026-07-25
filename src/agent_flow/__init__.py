@@ -6,7 +6,7 @@ each agent as a subprocess (liveness, kill, sidecar status), with parallelism,
 bounded re-runs, criticality, and telemetry. The execution backend (Prefect) and
 the agent runtime (opencode, Claude Code, …) are both pluggable.
 
-Public API:
+Public API (the authoritative list is `__all__` below):
 
     from agent_flow import (
         # Tier 1: one supervised agent (the primitive)
@@ -15,27 +15,38 @@ Public API:
         # runners (swappable agent runtimes)
         AgentRunner, AgentInvocation, Event,
         OpenCodeRunner, MockRunner, get_runner,
-        # Tier 3: declare Nodes -> build_flow (the batteries)
+        # Tier 3: declare Nodes -> build_flow (the DAG engine)
         Node, NodeOutcome, RunContext, build_flow, NodeBlocked,
+        plan_groups, interpret,
+        # batteries: one-call node for the common "run one agent" case
         agent_node, control_path,
         # flow-control gates — the consumer's optional hook
         Gate, GateContext, Directive,
         Continue, Restart, GoTo, Stop,
-        require_file, rerun_on_signal,
-        # typed agent output (opt-in, Pydantic optional)
-        ResultSchema, JsonSchema, ValidationOutcome, coerce_schema,
-        # the injected control-file protocol
-        build_control_preamble,
-        # CLI rendering helpers (optional; needs the `cli` extra)
-        event_printer, get_console, print_results_table,
+        require_file, rerun_on_signal, rerun_on_named,
         # file-based signals (gate building blocks)
         produced, rerun_from_sidecar,
+        # typed agent output (opt-in)
+        ResultSchema, JsonSchema, PydanticSchema, ValidationOutcome, coerce_schema,
+        # the injected control-file protocol
+        build_control_preamble,
+        # context ingestion (read files -> prompt content)
+        read_context_blocks,
+        # CLI: the reusable runner + rendering helpers
+        run_cli, NodeProgressPrinter,
+        event_printer, get_console, print_results_table, print_preflight_results,
+        # run configuration / settings
+        RunConfig, build_run_config, get_settings, init_settings, clear_settings,
+        parse_params, resolve_run_dir, default_temp_base,
+        # runtime pre-flight checks
+        Check, check, fatal_failures,
         # environment
         load_env,
     )
 
-See examples/ for how to build a pipeline on top of this library, and
-docs/design/orchestrator/ for the full design.
+All runtime dependencies ship by default (no optional extras). See examples/
+for how to build a pipeline on this library, and docs/design/orchestrator/ for
+the full design.
 """
 
 from agent_flow.agent_runtime import (
@@ -109,7 +120,7 @@ __all__ = [
     "get_runner",
     # control-file protocol (injected into agent prompts)
     "build_control_preamble",
-    # CLI (optional; needs the `cli` extra)
+    # CLI: the reusable runner + rendering helpers
     "event_printer",
     "get_console",
     "print_results_table",
@@ -124,7 +135,7 @@ __all__ = [
     "parse_params",
     "resolve_run_dir",
     "default_temp_base",
-    # result-schema seam (typed agent output; Pydantic optional)
+    # result-schema seam (typed agent output)
     "ResultSchema",
     "JsonSchema",
     "PydanticSchema",
