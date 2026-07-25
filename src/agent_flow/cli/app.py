@@ -184,8 +184,8 @@ def run_cli(
 def _print_run_summary(name: str, cfg, params: dict, console, *, hide: set[str] | None = None) -> None:
     """Print the resolved run settings + domain params before the run starts.
 
-    Gives traceability: you see exactly what runtime/agent_dir/run_dir and each
-    domain param resolved to (from CLI/env/.env/defaults) before any agent runs.
+    Gives traceability: you see exactly what runtime/backend/agent_dir/run_dir and
+    each domain param resolved to (from CLI/env/.env/defaults) before any agent runs.
     run_dir is shown resolved against params (it templates at run time), so the
     actual target path is visible here too. `hide` names params to omit (fields
     the model marked runtime-populated — placeholders, not user inputs).
@@ -202,6 +202,7 @@ def _print_run_summary(name: str, cfg, params: dict, console, *, hide: set[str] 
     console.print(f"[bold]Resolved parameters[/bold] [dim]({name})[/dim]")
     settings = {
         "runtime": cfg.runtime,
+        "backend": cfg.backend,
         "agent_dir": cfg.agent_dir or "(none)",
         "run_dir": shown_run_dir,
         "model": cfg.model or "(runtime default)",  # empty -> opencode resolves it
