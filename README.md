@@ -12,9 +12,11 @@ Chaining coding agents (opencode, Claude Code, …) into a reliable pipeline run
 into four recurring problems. agent-flow addresses each directly:
 
 1. **Deterministic orchestration.** The control flow is **plain Python the engine
-   executes** — a real DAG (or State Mahcine) with dependencies, parallel fan-out, bounded re-runs,
-   and cross-node jump-back. No model decides what runs next, so the orchestrator
-   cannot hang or improvise the sequence. Given the same inputs, the same stages
+   executes** — a directed graph with dependencies and parallel fan-out, plus
+   bounded backward jump-backs (so a flow/state machine, not a pure DAG): a gate
+   can rewind the flow to an earlier node, re-running it and everything
+   downstream, bounded by `max_cycles`. No model decides what runs next, so the
+   orchestrator cannot hang or improvise the sequence. Given the same inputs, the same stages
    run in the same order.
 
 2. **Reliable execution of agentic runners.** Each agent runs as a supervised
@@ -36,18 +38,26 @@ into four recurring problems. agent-flow addresses each directly:
 
 4. **Runner-agnostic.** The agent runtime (opencode today; Claude Code, Codex, …
    next) is a swappable `AgentRunner` strategy — only "how to build the command"
-   and "how to parse the event stream" differ; supervision, the DAG, re-runs, the
+   and "how to parse the event stream" differ; supervision, the flow, re-runs, the
    sidecar, and the display layer are written once and stay runtime-neutral. The
    execution backend is likewise a swappable seam: a Prefect-free **InProcessBackend**
    (default) or an opt-in **PrefectBackend** (`--backend prefect`).
 
 ## Feature shortlist
 
-- **DAG engine** — `depends_on` dependencies, `parallel_group` fan-out, a
-  fail-fast plan (cycles/unknown deps caught at build time).
-- **Gates** — a post-node hook returns a directive: `Continue` / `Stop` /
-  `Restart` / `GoTo`. Ready-made gates: `require_file`, `rerun_on_signal`,
-  `rerun_on_named`.
+- **Declarative FlowDef surface** — author a pipeline as DATA: a `FlowDef` of
+  `NodeDef`s (pydantic, serializable to JSON/YAML, validated before it runs).
+  Gates/exports/runs/schemas are referenced BY NAME and resolved via a
+  `FlowRegistry`; `run_flow(flow, …)` runs it, `run_cli(flow)` gives a CLI. It
+  compiles to the same runtime nodes as the lower-level `agent_node` form.
+- **Flow engine** — `depends_on` dependencies, `parallel_group` fan-out, a
+  fail-fast plan (cycles/unknown deps caught at build time); with gates it is a
+  flow (not a pure DAG — see jump-back below).
+- **Gates** — a post-node decision returning `Continue` / `Stop` / `Restart` /
+  `GoTo`. A gate is `(ctx, **config) -> Directive`, referenced by name with its
+  config as data; built-ins `require_file`, `rerun_on_signal`, `rerun_on_named`
+  are seeded, or register your own on a `FlowRegistry` (plus observing lifecycle
+  hooks: `before_node`/`after_node`/`on_error`/`before_group`/`after_group`).
 - **Re-runs as jump-back** — a re-run rewinds to the named node and re-flows
   *forward* from there (re-running it + everything downstream), backward-only,
   bounded by `max_cycles`.
@@ -56,6 +66,9 @@ into four recurring problems. agent-flow addresses each directly:
 - **Run one node** — `--only NODE` (or a parallel-group) runs exactly that one
   node and stops (skips everything else); the surgical complement to
   `--start-from`. Mutually exclusive with it.
+- **Multi-command CLI** — the reusable `run_cli` is a subcommand app: `run`
+  executes the pipeline; `nodes list` prints it in execution order (node → agent,
+  deps, parallel group, gate) to discover `--only`/`--start-from` targets.
 - **Liveness supervision** — idle-timeout (not wall-clock) kill, process-group
   termination.
 - **Control sidecar** — a per-node JSON envelope the agent writes; the engine
@@ -86,7 +99,7 @@ into four recurring problems. agent-flow addresses each directly:
   **InProcessBackend** (default; threadpool + semaphore + stdlib logging, no temp
   server) or an opt-in **PrefectBackend** (`--backend prefect` / `build_flow(...,
   backend="prefect")`) for the run UI, scheduling, and scale. The core
-  primitives + DAG logic stay Prefect-free (import-isolation-guarded).
+  primitives + flow logic stay Prefect-free (import-isolation-guarded).
 - **Three usage tiers** — from one supervised agent up to a declared graph (below).
 
 ## Three usage tiers (high level → low level)
