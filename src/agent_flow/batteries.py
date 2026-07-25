@@ -145,8 +145,11 @@ def agent_node(
 
         runtime = ctx.params.get("runtime", "opencode")
         eff_model = model or ctx.params.get("model") or DEFAULT_MODEL
+        # A run-time idle_timeout_s (from the CLI/env) overrides the per-node
+        # build-time default; the per-node value is the fallback.
+        eff_idle = int(ctx.params.get("idle_timeout_s") or idle_timeout_s)
         log = _node_logger()
-        log("node %s: agent=%s runtime=%s model=%s", name, agent, runtime, eff_model)
+        log("node %s: agent=%s runtime=%s model=%s idle_timeout_s=%s", name, agent, runtime, eff_model, eff_idle)
         # on_event_factory is a typed RunContext field (engine plumbing), NOT a
         # params key — see RunContext.on_event_factory. Calling it with this
         # node's agent name yields the actual per-event callback run_agent wants.
@@ -157,7 +160,7 @@ def agent_node(
             run_dir=ctx.run_dir,
             agent_dir=Path(eff_agent_dir) if eff_agent_dir else None,
             runner=get_runner(runtime),
-            idle_timeout_s=idle_timeout_s,
+            idle_timeout_s=eff_idle,
             model=eff_model,
             control_file=control_abs,
             result_schema=result_schema,

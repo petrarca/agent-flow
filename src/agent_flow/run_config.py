@@ -92,6 +92,13 @@ class RunConfig(BaseSettings):
     instructions_file: str = Field(default="", description="Path to a file whose content is the run-wide brief (wins over `instructions`).")
     llm_concurrency: int | None = Field(default=None, description="Max concurrent LLM agents; None -> engine default.")
     show_events: bool = Field(default=False, description="Stream live agent events to the console.")
+    model: str = Field(
+        default="", description="Model for every node (provider/model); empty -> each node's own default. Per-node model= still overrides."
+    )
+    idle_timeout_s: int | None = Field(
+        default=None,
+        description="Liveness timeout: kill an agent only after this many seconds with NO event AND NO sidecar. None -> per-node default.",
+    )
 
     # The YAML --config path for the current construction. Stashed on the class
     # by __init__ so the settings_customise_sources CLASSMETHOD (which sees only

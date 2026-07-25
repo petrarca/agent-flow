@@ -256,6 +256,10 @@ def run_cli(
         instructions_file: str | None = typer.Option(None, "--instructions-file"),
         llm_concurrency: int | None = typer.Option(None, "--llm-concurrency"),
         show_events: bool = typer.Option(False, "--show-events", "-v", help="raw per-event firehose (instead of the live table)"),
+        model: str | None = typer.Option(None, "--model", "-m", help="model for every node (provider/model); per-node model= still overrides"),
+        idle_timeout: int | None = typer.Option(
+            None, "--idle-timeout", help="liveness timeout (s): kill an agent only after this long with no event/sidecar"
+        ),
     ) -> None:
         console = get_console()
         # 1) Generic run settings (RunConfig). --agent-dir default falls back to
@@ -269,9 +273,19 @@ def run_cli(
             instructions_file=instructions_file,
             llm_concurrency=llm_concurrency,
             show_events=True if show_events else None,
+            model=model,
+            idle_timeout_s=idle_timeout,
         )
         # 2) Domain params (validated against params_model, or untyped passthrough).
         params = _resolve_params(params_model, parse_params(param), console)
+        # model / idle_timeout_s are run-wide knobs the batteries node reads from
+        # params; inject the resolved values so a node uses them (a per-node
+        # model=/idle_timeout_s= and an explicit -p still win, so only set if the
+        # user didn't already pass them via -p).
+        if cfg.model:
+            params.setdefault("model", cfg.model)
+        if cfg.idle_timeout_s is not None:
+            params.setdefault("idle_timeout_s", str(cfg.idle_timeout_s))
         # 2b) Show the resolved settings + params (traceability before any work).
         _print_run_summary(name, cfg, params, console)
         # 3) Runtime pre-flight — abort (exit 2) on any fatal failure.
