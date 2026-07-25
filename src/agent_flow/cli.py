@@ -412,6 +412,11 @@ def run_cli(
         start_from: str | None = typer.Option(
             None, "--start-from", help="begin at this node or parallel-group, skipping upstream (assumes their outputs already exist)"
         ),
+        only: str | None = typer.Option(
+            None,
+            "--only",
+            help="run ONLY this node/parallel-group and stop (skips everything else; assumes other outputs exist). Excludes --start-from",
+        ),
         llm_concurrency: int | None = typer.Option(None, "--llm-concurrency"),
         show_events: bool = typer.Option(False, "--show-events", "-v", help="raw per-event firehose (instead of the live table)"),
         show_diffs: bool = typer.Option(
@@ -469,7 +474,12 @@ def run_cli(
         # 3) Runtime pre-flight — abort (exit 2) on any fatal failure.
         _run_preflight(cfg.runtime, cfg.agent_dir, console)
         # 4) Run, with the chosen view (live table by default, or raw firehose).
-        _run_with_view(build_nodes(), params, cfg, console, name=name, llm_tag=llm_tag, start_from=start_from or "")
+        if start_from and only:
+            console.print(
+                "[red]--only and --start-from are mutually exclusive[/red] (--only runs a single group; --start-from runs from a group to the end)."
+            )
+            raise typer.Exit(2)
+        _run_with_view(build_nodes(), params, cfg, console, name=name, llm_tag=llm_tag, start_from=start_from or "", only=only or "")
 
     app()
 
@@ -552,7 +562,7 @@ def _run_preflight(runtime: str, agent_dir: str, console) -> None:
         sys.exit(2)
 
 
-def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str, start_from: str = "") -> None:
+def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str, start_from: str = "", only: str = "") -> None:
     """Run the pipeline under the chosen view, then print the results table.
 
     Two independent knobs compose (see the matrix):
@@ -595,13 +605,14 @@ def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str, star
             on_node_event=on_node_event,
             render_results=True,
             start_from=start_from,
+            only=only,
         )
     except KeyboardInterrupt:
         console.print("[yellow]Interrupted[/yellow] — stopped by user (Ctrl-C).")
         sys.exit(130)
 
 
-def _build_and_run(nodes, params, cfg, console, *, name, llm_tag, on_event_factory, on_node_event, render_results, start_from=""):
+def _build_and_run(nodes, params, cfg, console, *, name, llm_tag, on_event_factory, on_node_event, render_results, start_from="", only=""):
     """Compile the flow with the given hooks and run it; optionally print results."""
     from agent_flow.engine import build_flow
 
@@ -616,11 +627,14 @@ def _build_and_run(nodes, params, cfg, console, *, name, llm_tag, on_event_facto
         agent_dir=cfg.agent_dir,
         node_instructions=cfg.node_instructions,
     )
-    # start_from is a per-INVOCATION forward entry point (not persisted config):
-    # begin at that node, skipping upstream. Passed straight to the pipeline call.
+    # start_from / only are per-INVOCATION forward-entry knobs (not persisted
+    # config): start_from begins at a group and runs forward; only runs a single
+    # group and stops. Mutually exclusive (validated at the CLI and in _pipeline).
     call_kwargs = {"run_dir": cfg.run_dir, "runtime": cfg.runtime, **params}
     if start_from:
         call_kwargs["start_from"] = start_from
+    if only:
+        call_kwargs["only"] = only
     result = pipeline(**call_kwargs)
     if render_results:
         agents = {n.name: n.agent for n in nodes}

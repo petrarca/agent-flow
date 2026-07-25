@@ -239,6 +239,35 @@ point set once; it is distinct from re-run jump-back (a gate can still send the
 flow back to a skipped node, and it will run then). CLI/programmatic only — not a
 persisted config setting.
 
+## Run a single node and stop (`--only`)
+
+The surgical complement to `--start-from`: run **exactly one** node (or
+parallel-group) and stop — for iterating on one stage without running anything
+after it either. `--start-from` runs *from* a group *to the end*; `--only` runs
+*just* that group.
+
+```bash
+# re-run ONLY the extractor, nothing before or after it:
+python my_flow.py -p product_key=acme \
+  --only extractor \
+  --instruct extractor="re-derive the RAG counts; the na bucket looked off"
+```
+
+```python
+build_flow(nodes, name="my-pipeline")(product_key="acme", only="extractor")
+```
+
+Same **group granularity** as `start_from`: a group name runs the whole fan-out;
+a member node resolves to its group (you can't run half a parallel group). In
+`--only` mode the walk runs that one group and stops — **gate jump-backs are
+ignored** (there is nothing downstream to resume into).
+
+The same upstream caveat applies, and now downstream too: everything else is
+skipped, so any output files or exported params the chosen node depends on must
+already exist (runtime-populated params fall back to their defaults). `--only`
+and `--start-from` are **mutually exclusive** — setting both is an error.
+CLI/programmatic only — not a persisted config setting.
+
 ## Make agents actually read rules/standards (ingest context)
 
 Telling an agent to "read the security rules" is unreliable; injecting the

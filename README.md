@@ -52,6 +52,9 @@ into four recurring problems. agent-flow addresses each directly:
   bounded by `max_cycles`.
 - **Start partway** — `--start-from NODE` (or a parallel-group) enters the flow
   at a chosen node, skipping upstream, to iterate on a late stage.
+- **Run one node** — `--only NODE` (or a parallel-group) runs exactly that one
+  node and stops (skips everything else); the surgical complement to
+  `--start-from`. Mutually exclusive with it.
 - **Liveness supervision** — idle-timeout (not wall-clock) kill, process-group
   termination.
 - **Control sidecar** — a per-node JSON envelope the agent writes; the engine

@@ -465,7 +465,7 @@ def build_flow(
         return out
 
     @flow(name=name)
-    def _pipeline(run_dir: str = "", start_from: str = "", **params: Any) -> dict:
+    def _pipeline(run_dir: str = "", start_from: str = "", only: str = "", **params: Any) -> dict:
         from agent_flow.run_context import init_run_context
         from agent_flow.utils import resolve_run_dir
 
@@ -490,7 +490,7 @@ def build_flow(
         logger.info("run_dir: %s", wd)
         if llm_concurrency is not None:
             _apply_concurrency_limit(llm_tag, llm_concurrency, logger.info, logger.warning)
-        start_index = _resolve_start_index(start_from, by_name, group_index, node_group, logger)
+        start_index, single_group = _resolve_entry(start_from, only, by_name, group_index, node_group, logger)
         results = _walk(
             planned,
             run_group=lambda group: _run_group(group, wd, params, logger),
@@ -499,12 +499,42 @@ def build_flow(
             by_name=by_name,
             logger=logger,
             start_index=start_index,
+            single_group=single_group,
         )
         # Log a compact {node: status} summary — not the verbose NodeOutcome reprs.
         logger.info("%s done: %s", name, {n: oc.status for n, oc in results.items()})
         return results
 
     return _pipeline
+
+
+def _resolve_entry(start_from: str, only: str, by_name, group_index, node_group, logger) -> tuple[int, bool]:
+    """Resolve the walk's forward entry from the two mutually exclusive knobs.
+
+    Returns (start_index, single_group): `only` -> (that group, True) so the walk
+    runs exactly one group; `start_from` -> (that group, False) so it runs forward
+    to the end; neither -> (0, False). Setting both is an error (they conflict).
+    """
+    if only and start_from:
+        raise ValueError("only and start_from are mutually exclusive (only runs a single group; start_from runs from a group to the end)")
+    if only:
+        return _resolve_only_index(only, by_name, group_index, node_group, logger), True
+    return _resolve_start_index(start_from, by_name, group_index, node_group, logger), False
+
+
+def _name_to_group_index(target: str, by_name, group_index, node_group, kind: str) -> int:
+    """Translate a NODE or parallel-GROUP name to its GROUP index.
+
+    Shared by start_from and only: a name is either a node (resolved to its
+    containing group) or a parallel-group name (used directly). `kind` labels the
+    error/log so the two callers read distinctly. Unknown name -> ValueError.
+    """
+    if target in by_name:
+        return group_index[node_group[target]]
+    if target in group_index:  # a parallel-group name
+        return group_index[target]
+    known = sorted(set(by_name) | set(group_index))
+    raise ValueError(f"{kind}={target!r} is not a known node or group (known: {known})")
 
 
 def _resolve_start_index(start_from: str, by_name, group_index, node_group, logger) -> int:
@@ -527,15 +557,7 @@ def _resolve_start_index(start_from: str, by_name, group_index, node_group, logg
     """
     if not start_from:
         return 0
-    # Accept a node name OR a group name (node_group values are the group keys).
-    if start_from in by_name:
-        group_key = node_group[start_from]
-    elif start_from in group_index:  # a parallel-group name
-        group_key = start_from
-    else:
-        known = sorted(set(by_name) | set(group_index))
-        raise ValueError(f"start_from={start_from!r} is not a known node or group (known: {known})")
-    start_index = group_index[group_key]
+    start_index = _name_to_group_index(start_from, by_name, group_index, node_group, "start_from")
     entry = sorted(n for n in by_name if group_index[node_group[n]] == start_index)
     skipped = sorted(n for n in by_name if group_index[node_group[n]] < start_index)
     if len(entry) > 1:
@@ -545,7 +567,28 @@ def _resolve_start_index(start_from: str, by_name, group_index, node_group, logg
     return start_index
 
 
-def _walk(planned, *, run_group, group_index, node_group, by_name, logger, start_index: int = 0) -> dict[str, NodeOutcome]:
+def _resolve_only_index(only: str, by_name, group_index, node_group, logger) -> int:
+    """Translate an `only` NODE/GROUP name to the single GROUP index to run.
+
+    Complement to start_from: run EXACTLY that one group and stop (see _walk's
+    single_group). Same GROUP granularity as start_from — if `only` names a member
+    of a parallel group, the WHOLE group runs (a fan-out is indivisible), so we log
+    the group's members. Everything else (upstream AND downstream) is skipped;
+    their outputs/exported params are assumed to already exist (caller's contract,
+    same as start_from). Unknown name -> error.
+    """
+    idx = _name_to_group_index(only, by_name, group_index, node_group, "only")
+    members = sorted(n for n in by_name if group_index[node_group[n]] == idx)
+    if len(members) > 1:
+        logger.info("only=%s: running PARALLEL group %s (all run), skipping everything else", only, members)
+    else:
+        logger.info("only=%s: running %s, skipping everything else", only, members)
+    return idx
+
+
+def _walk(
+    planned, *, run_group, group_index, node_group, by_name, logger, start_index: int = 0, single_group: bool = False
+) -> dict[str, NodeOutcome]:
     """Walk the planned groups, honoring bounded cross-node jump-backs (GoTo).
 
     Returns per-node NodeOutcome (status + duration_s), so callers can render
@@ -555,6 +598,11 @@ def _walk(planned, *, run_group, group_index, node_group, by_name, logger, start
     walk begins at that group, skipping earlier ones. This is orthogonal to
     jump-back — it sets where the walk STARTS; jump-back mutates position DURING
     the run. Node->index translation is the caller's job (this stays mechanical).
+
+    `single_group` (the `only` mode) runs EXACTLY the group at start_index and
+    stops: no forward advance to later groups, and gate GoTo jump-backs are
+    ignored (there is nothing downstream to resume into). It is the surgical
+    complement to start_from's "from here to the end".
     """
     results: dict[str, NodeOutcome] = {}
     jumps: dict[str, int] = {}
@@ -564,6 +612,8 @@ def _walk(planned, *, run_group, group_index, node_group, by_name, logger, start
         outcomes = run_group(group)
         for n_name, oc in outcomes.items():
             results[n_name] = oc
+        if single_group:
+            break  # `only` mode: run one group, ignore jump-backs and forward advance
         target = _pick_jump_back(outcomes, node_group, group_index, i, jumps, by_name, logger)
         if target is not None:
             jumps[target] = jumps.get(target, 0) + 1
