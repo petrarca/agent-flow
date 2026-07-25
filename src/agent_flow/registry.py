@@ -31,8 +31,6 @@ from typing import Any
 
 from agent_flow.gates import Gate, require_file, rerun_on_named, rerun_on_signal
 
-# A gate FACTORY: named, takes data kwargs, returns a Gate closure.
-GateFactory = Callable[..., Gate]
 # An export impl: maps a node's result payload to params for downstream nodes.
 ExportImpl = Callable[[Any], Mapping[str, Any]]
 # An observing hook: fired at a lifecycle event; the return value is IGNORED
@@ -56,8 +54,14 @@ class FlowRegistry:
     """Per-flow registry of gate factories, export impls, and observing hooks."""
 
     def __init__(self, *, seed_builtins: bool = True) -> None:
-        self._gates: dict[str, GateFactory] = {}
+        # A gate is `(ctx, **config) -> Directive`. A node's gate_args are the
+        # config, bound with functools.partial at resolve time; the engine then
+        # calls the bound gate with just ctx. One shape for plain and configurable
+        # gates alike.
+        self._gates: dict[str, Callable[..., Any]] = {}
         self._exports: dict[str, ExportImpl] = {}
+        self._runs: dict[str, Callable[..., Any]] = {}  # custom run impls (NodeDef.run_ref)
+        self._schemas: dict[str, Any] = {}  # result-schema impls (NodeDef.result_schema by name)
         # event -> list of (node_scope, hook). node_scope is None (all nodes) or a
         # frozenset of node names; ignored for group events.
         self._hooks: dict[str, list[tuple[frozenset[str] | None, Hook]]] = {e: [] for e in _EVENTS}
@@ -65,30 +69,36 @@ class FlowRegistry:
             self._seed_builtin_gates()
 
     def _seed_builtin_gates(self) -> None:
-        # The shipped gate factories are already data-parameterized (they take
-        # kwargs and return a Gate), so they register as-is; gate_args on a node
-        # become these factories' kwargs.
+        # The shipped gates are `(ctx, **config) -> Directive`; a node's gate_args
+        # supply the config (e.g. rerun_on_signal(ctx, target=…)).
         self._gates["require_file"] = require_file
         self._gates["rerun_on_signal"] = rerun_on_signal
         self._gates["rerun_on_named"] = rerun_on_named
 
     # --- registration (decorator or direct) --------------------------------
 
-    def gate(self, name: str) -> Callable[[GateFactory], GateFactory]:
-        """Register a DECIDING gate factory under `name` (decorator).
+    def gate(self, name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Register a DECIDING gate `(ctx, **config) -> Directive` under `name`.
 
-            @registry.gate("readiness_ok")
-            def _factory(**kwargs) -> Gate:
-                def gate(ctx): return Stop(...) if ... else Continue()
-                return gate
+            # no per-node config — the common case:
+            @registry.gate("stack_usable")
+            def stack_usable(ctx):
+                return Stop(...) if ... else Continue()
 
-        A node references it via gate_ref="readiness_ok" (+ gate_args passed to
-        the factory). Re-registering a name overrides it.
+            # configured per node — extra keyword params are the config; the
+            # node's gate_args supply them (bound at resolve time):
+            @registry.gate("rerun_to")
+            def rerun_to(ctx, *, target):
+                return GoTo(target) if ... else Continue()
+
+        A node references it via gate="<name>" (+ gate_args for the config). One
+        function either way — no factory, no inner function. Re-registering a
+        name overrides it.
         """
 
-        def deco(factory: GateFactory) -> GateFactory:
-            self._gates[name] = factory
-            return factory
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self._gates[name] = fn
+            return fn
 
         return deco
 
@@ -98,6 +108,39 @@ class FlowRegistry:
         def deco(fn: ExportImpl) -> ExportImpl:
             self._exports[name] = fn
             return fn
+
+        return deco
+
+    def run(self, name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Register a custom RUN impl `(RunContext) -> dict` (decorator).
+
+        A NodeDef references it via `run_ref` for a node whose work is NOT the
+        standard 'run one agent' (which a NodeDef expresses via `agent`). The
+        code lives here; the definition stays serializable data.
+        """
+
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self._runs[name] = fn
+            return fn
+
+        return deco
+
+    def schema(self, name: str) -> Callable[[Any], Any]:
+        """Register a named result-schema (decorator or direct call).
+
+        A NodeDef references it via `result_schema="name"`. The value is any
+        ResultSchema / JSON-schema dict / pydantic BaseModel subclass that
+        run_agent accepts (coerce_schema handles the shapes).
+
+            @reg.schema("TechStack")
+            class TechStack(BaseModel): ...
+
+            reg.schema("Ready")(ReadyModel)  # direct
+        """
+
+        def deco(obj: Any) -> Any:
+            self._schemas[name] = obj
+            return obj
 
         return deco
 
@@ -121,28 +164,27 @@ class FlowRegistry:
 
         return deco
 
-    def register_gate_callable(self, gate: Gate) -> str:
-        """Auto-register an already-built Gate CALLABLE under a generated name.
-
-        Back-compat path: agent_node(gate=<callable>) / a hand-written gate is
-        stored as a zero-arg factory so it resolves through the same machinery as
-        a named gate. Returns the generated ref.
-        """
-        ref = f"_callable_{id(gate):x}"
-        self._gates[ref] = lambda **_: gate
-        return ref
-
     # --- resolution (used by the engine) -----------------------------------
 
     def build_gate(self, gate_ref: str | None, gate_args: dict[str, Any] | None) -> Gate | None:
-        """Resolve a gate_ref (+args) to a Gate, or None when no gate is set."""
+        """Resolve a gate_ref (+args) to a Gate `(ctx) -> Directive`, or None.
+
+        A registered gate is `(ctx, **config) -> Directive`. The node's gate_args
+        are the config: bound now via functools.partial so the returned gate
+        takes just ctx (the engine's calling convention). No gate_args -> the
+        gate is used as-is.
+        """
         if not gate_ref:
             return None
         try:
-            factory = self._gates[gate_ref]
+            fn = self._gates[gate_ref]
         except KeyError:
             raise ValueError(f"unknown gate {gate_ref!r} (registered: {sorted(self._gates)})") from None
-        return factory(**(gate_args or {}))
+        if not gate_args:
+            return fn
+        import functools
+
+        return functools.partial(fn, **gate_args)
 
     def get_export(self, export_ref: str) -> ExportImpl:
         """Resolve a named export impl."""
@@ -150,6 +192,26 @@ class FlowRegistry:
             return self._exports[export_ref]
         except KeyError:
             raise ValueError(f"unknown export {export_ref!r} (registered: {sorted(self._exports)})") from None
+
+    def get_run(self, run_ref: str) -> Callable[..., Any]:
+        """Resolve a named custom run impl."""
+        try:
+            return self._runs[run_ref]
+        except KeyError:
+            raise ValueError(f"unknown run {run_ref!r} (registered: {sorted(self._runs)})") from None
+
+    def get_schema(self, name: str) -> Any:
+        """Resolve a named result-schema."""
+        try:
+            return self._schemas[name]
+        except KeyError:
+            raise ValueError(f"unknown result_schema {name!r} (registered: {sorted(self._schemas)})") from None
+
+    def has_gate(self, name: str) -> bool:
+        return name in self._gates
+
+    def has_schema(self, name: str) -> bool:
+        return name in self._schemas
 
     def fire(self, event: str, /, *args: Any, _node_name: str | None = None, **kwargs: Any) -> None:
         """Fire the observing hooks registered for `event`.

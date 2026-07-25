@@ -27,31 +27,31 @@ def _sidecar(run_dir, node_name, rerun):
 
 def test_rerun_on_signal_fixed_target_when_signalled(tmp_path):
     _sidecar(tmp_path, "verify", ["analyst"])
-    d = rerun_on_signal(target="analyst")(_ctx(tmp_path, "verify"))
+    d = rerun_on_signal(_ctx(tmp_path, "verify"), target="analyst")
     assert isinstance(d, GoTo) and d.node == "analyst"
 
 
 def test_rerun_on_signal_continue_when_no_signal(tmp_path):
     _sidecar(tmp_path, "verify", None)
-    assert isinstance(rerun_on_signal(target="analyst")(_ctx(tmp_path, "verify")), Continue)
+    assert isinstance(rerun_on_signal(_ctx(tmp_path, "verify"), target="analyst"), Continue)
 
 
 def test_rerun_on_named_routes_to_named_node(tmp_path):
     # A coherence check names WHICH node to re-run; the gate GoTo's exactly that.
     _sidecar(tmp_path, "consistency", ["extractor"])
-    d = rerun_on_named()(_ctx(tmp_path, "consistency"))
+    d = rerun_on_named(_ctx(tmp_path, "consistency"))
     assert isinstance(d, GoTo) and d.node == "extractor"
 
 
 def test_rerun_on_named_first_of_multiple(tmp_path):
     _sidecar(tmp_path, "consistency", ["summary", "analyst"])
-    d = rerun_on_named()(_ctx(tmp_path, "consistency"))
+    d = rerun_on_named(_ctx(tmp_path, "consistency"))
     assert isinstance(d, GoTo) and d.node == "summary"
 
 
 def test_rerun_on_named_continue_when_no_signal(tmp_path):
     _sidecar(tmp_path, "consistency", None)
-    assert isinstance(rerun_on_named()(_ctx(tmp_path, "consistency")), Continue)
+    assert isinstance(rerun_on_named(_ctx(tmp_path, "consistency")), Continue)
 
 
 def test_produced_true_for_nonempty(tmp_path):

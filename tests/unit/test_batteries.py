@@ -83,13 +83,13 @@ def test_gate_receives_validated_result_obj(tmp_path, monkeypatch):
 def test_require_file_continue_when_present(tmp_path):
     (tmp_path / "r.md").write_text("x")
     node = Node("n", run=lambda c: None)
-    d = require_file("r.md")(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0))
+    d = require_file(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0), relpath="r.md")
     assert isinstance(d, Continue)
 
 
 def test_require_file_restart_when_missing(tmp_path):
     node = Node("n", run=lambda c: None)
-    d = require_file("r.md")(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0))
+    d = require_file(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0), relpath="r.md")
     assert isinstance(d, Restart)
 
 
@@ -99,7 +99,7 @@ def test_require_file_templates_against_run_params(tmp_path):
     (tmp_path / "acme-report.md").write_text("x")
     node = Node("n", run=lambda c: None)
     ctx = GateContext(result={}, node=node, run_dir=tmp_path, cycles=0, params={"product_key": "acme"})
-    d = require_file("{product_key}-report.md")(ctx)
+    d = require_file(ctx, relpath="{product_key}-report.md")
     assert isinstance(d, Continue)
 
 
@@ -107,7 +107,7 @@ def test_require_file_missing_placeholder_is_left_literal(tmp_path):
     # A template referencing an unknown param must not raise — it degrades to
     # the literal string, which then correctly reports as missing.
     node = Node("n", run=lambda c: None)
-    d = require_file("{unknown}-report.md")(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0))
+    d = require_file(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0), relpath="{unknown}-report.md")
     assert isinstance(d, Restart)
 
 
@@ -117,8 +117,8 @@ def test_require_file_run_dir_template_matches_bare_relpath(tmp_path):
     # already absolute). Both must Continue when the file exists.
     (tmp_path / "hello.md").write_text("x")
     node = Node("n", run=lambda c: None)
-    bare = require_file("hello.md")(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0))
-    prefixed = require_file("{run_dir}/hello.md")(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0))
+    bare = require_file(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0), relpath="hello.md")
+    prefixed = require_file(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0), relpath="{run_dir}/hello.md")
     assert isinstance(bare, Continue)
     assert isinstance(prefixed, Continue)
 
@@ -126,7 +126,7 @@ def test_require_file_run_dir_template_matches_bare_relpath(tmp_path):
 def test_rerun_on_signal_goto_when_flagged(tmp_path):
     (tmp_path / "verify.control.json").write_text('{"status":"verified","rerun_required":["analyst"]}')
     node = Node("verify", run=lambda c: None)
-    d = rerun_on_signal(target="analyst")(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0))
+    d = rerun_on_signal(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0), target="analyst")
     assert isinstance(d, GoTo)
     assert d.node == "analyst"
 
@@ -134,7 +134,7 @@ def test_rerun_on_signal_goto_when_flagged(tmp_path):
 def test_rerun_on_signal_continue_when_clean(tmp_path):
     (tmp_path / "verify.control.json").write_text('{"status":"verified"}')
     node = Node("verify", run=lambda c: None)
-    d = rerun_on_signal(target="analyst")(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0))
+    d = rerun_on_signal(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0), target="analyst")
     assert isinstance(d, Continue)
 
 

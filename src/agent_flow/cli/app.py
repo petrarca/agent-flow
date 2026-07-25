@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 
 def run_cli(
-    build_nodes: Callable[[], list[Node]],
+    flow: Callable[[], list[Node]] | object,
     *,
     name: str = "agent-flow",
     llm_tag: str = "llm",
@@ -74,6 +74,31 @@ def run_cli(
     from agent_flow.cli.commands import nodes as nodes_cmd
     from agent_flow.cli.commands import run as run_cmd
     from agent_flow.cli.context import RunCliContext
+
+    # `flow` is either a FlowDef (the declarative surface) or a build_nodes()
+    # callable (the lower-level form). A FlowDef supplies build_nodes (compile it
+    # against the registry) and default name/backend; the registry defaults to a
+    # built-ins-only FlowRegistry when none was passed.
+    from agent_flow.flowdef import FlowDef, compile_flow
+
+    if isinstance(flow, FlowDef):
+        if registry is None:
+            from agent_flow.registry import FlowRegistry
+
+            registry = FlowRegistry()
+        flow_def = flow
+        reg = registry
+        build_nodes = lambda: compile_flow(flow_def, reg)  # noqa: E731
+        if name == "agent-flow":
+            name = flow_def.name
+        # The FlowDef's flow-level agent_dir is the pipeline's own default (used
+        # unless the CLI/env/config sets --agent-dir). Other flow-level fields
+        # (backend, shared_*, llm_concurrency) are honored via the CLI flags/env
+        # on the run command; the FlowDef values act as documentation there.
+        if not default_agent_dir and flow_def.agent_dir:
+            default_agent_dir = flow_def.agent_dir
+    else:
+        build_nodes = flow
 
     ctx = RunCliContext(
         build_nodes=build_nodes,

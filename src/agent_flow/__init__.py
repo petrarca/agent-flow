@@ -81,6 +81,7 @@ from agent_flow.engine import (
     interpret,
     plan_groups,
 )
+from agent_flow.flowdef import FlowDef, NodeDef, compile_flow, run_flow
 from agent_flow.gates import (
     Continue,
     Directive,
@@ -180,6 +181,10 @@ __all__ = [
     "InProcessBackend",
     "get_backend",
     "FlowRegistry",
+    "FlowDef",
+    "NodeDef",
+    "compile_flow",
+    "run_flow",
     # batteries: one-call node for the common "run one agent" case
     "agent_node",
     "control_path",

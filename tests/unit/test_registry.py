@@ -13,6 +13,7 @@ from agent_flow.run_context import clear_run_context, init_run_context
 def test_builtin_gates_seeded():
     r = FlowRegistry()
     assert {"require_file", "rerun_on_signal", "rerun_on_named"} <= set(r._gates)
+    assert all(r.has_gate(g) for g in ("require_file", "rerun_on_signal", "rerun_on_named"))
 
 
 def test_no_seed_when_disabled():
@@ -35,24 +36,40 @@ def test_unknown_gate_raises():
         FlowRegistry().build_gate("nope", {})
 
 
-def test_custom_gate_decorator():
+def test_plain_gate_registered_and_used_directly():
+    # A plain (ctx)->Directive gate needs NO inner function/factory.
     r = FlowRegistry()
 
-    @r.gate("always_stop")
-    def _factory(reason="x"):
-        def gate(ctx):
-            return Stop(reason=reason)
+    @r.gate("plain_stop")
+    def plain_stop(ctx):
+        return Stop(reason="halt")
 
-        return gate
-
-    gate = r.build_gate("always_stop", {"reason": "boom"})
+    gate = r.build_gate("plain_stop", {})
     assert isinstance(gate(None), Stop)
 
 
-def test_register_gate_callable_backcompat():
+def test_factory_gate_still_works_with_args():
+    # A keyword-only-arg gate is a factory; built with gate_args.
     r = FlowRegistry()
-    ref = r.register_gate_callable(lambda ctx: Continue())
-    assert callable(r.build_gate(ref, {}))
+
+    @r.gate("goto_target")
+    def goto_target(ctx, *, target):
+        return Continue()
+
+    # gate_args are bound via partial; the result is callable with just ctx.
+    bound = r.build_gate("goto_target", {"target": "a"})
+    assert callable(bound) and isinstance(bound(None), Continue)
+
+
+def test_configurable_gate_binds_args():
+    r = FlowRegistry()
+
+    @r.gate("always_stop")
+    def always_stop(ctx, *, reason="x"):
+        return Stop(reason=reason)
+
+    gate = r.build_gate("always_stop", {"reason": "boom"})
+    assert isinstance(gate(None), Stop) and gate(None).reason == "boom"
 
 
 def test_export_registration_and_resolution():
@@ -103,11 +120,8 @@ def test_interpret_resolves_gate_ref():
     r = FlowRegistry()
 
     @r.gate("stopper")
-    def _f():
-        def g(ctx):
-            return Stop(reason="halt")
-
-        return g
+    def _f(ctx):
+        return Stop(reason="halt")
 
     node = Node(name="a", run=lambda ctx: {"ok": True}, gate_ref="stopper")
     from agent_flow.engine import NodeBlocked
