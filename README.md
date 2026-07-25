@@ -178,13 +178,30 @@ without touching your pipeline. See
 
 Requires Python 3.14+, [`uv`](https://docs.astral.sh/uv/), and
 [`task`](https://taskfile.dev/). For real runs, `opencode` must be on `PATH` and
-configured with model access. All runtime deps (Prefect, pydantic,
-pydantic-settings, typer, rich, pyyaml, jsonschema) install by default; only
-`agent-flow[dev]` adds the toolchain.
+configured with model access.
+
+**Lean core, optional extras.** The default install is small — enough to declare
+a pipeline and run it in-process on the default local backend, with typed
+params/results and config (pydantic, pydantic-settings, pyyaml, jsonschema,
+python-dotenv). The heavy pieces are opt-in extras that match the runtime seams:
+
+| Install | Adds | Use when |
+|---|---|---|
+| `agent-flow` | core only | programmatic `build_flow` on the local backend |
+| `agent-flow[cli]` | typer, rich | the `run_cli` command + live display |
+| `agent-flow[prefect]` | prefect | `--backend prefect` (run UI / scale) |
+| `agent-flow[all]` | cli + prefect | a full interactive install |
+| `agent-flow[dev]` | all + toolchain | development (implies `[all]`) |
 
 ```bash
-task install            # editable install with dev tools
+pip install "agent-flow[cli]"          # typical interactive use
+pip install "agent-flow[cli,prefect]"  # + the Prefect backend
+task install                           # editable dev install (implies [all])
 ```
+
+Using a feature without its extra raises a clear message telling you which
+extra to install (e.g. `run_cli` without `[cli]`, or `--backend prefect`
+without `[prefect]`).
 
 Then walk through your first pipeline, the two runnable examples (toy Tier-2 and
 tech-assessment Tier-3, each with a token-free `mock` mode), the `run_cli`

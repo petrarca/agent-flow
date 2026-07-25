@@ -81,8 +81,12 @@ def run_cli(
     Backend lifecycle (bootstrap/teardown) is owned by the selected backend and
     runs inside build_flow's pipeline; the caller does not bootstrap Prefect.
     The default backend is local (no Prefect); pass --backend prefect to opt in.
+
+    Requires the `cli` extra (typer + rich): pip install 'agent-flow[cli]'.
     """
-    import typer
+    from agent_flow.utils import require_extra
+
+    typer = require_extra("typer", "cli", "the run_cli command")
 
     from agent_flow.run_config import build_run_config, parse_params, runtime_param_fields
 

@@ -87,8 +87,13 @@ class PrefectBackend(FlowBackend):
 
         Owns what was `_prefect_env.bootstrap()` — called only when the Prefect
         backend is actually selected, so LocalBackend runs never touch Prefect's
-        env or spin a temporary server.
+        env or spin a temporary server. Prefect is an optional dependency (the
+        `prefect` extra); this is the first place a --backend prefect run touches
+        it, so a missing install fails here with a clear, actionable message.
         """
+        from agent_flow.utils import require_extra
+
+        require_extra("prefect", "prefect", "the Prefect execution backend (--backend prefect)")
         from agent_flow.backends._prefect_env import bootstrap
 
         bootstrap()

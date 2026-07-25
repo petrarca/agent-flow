@@ -1,13 +1,33 @@
 """Small general-purpose utilities (no library-domain concepts).
 
-Currently: `{param}` template expansion, and resolving the run directory
-(including a per-platform temp default when the consumer specifies none).
+Currently: `{param}` template expansion, resolving the run directory (including a
+per-platform temp default when the consumer specifies none), and a friendly
+optional-dependency guard.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+
+
+def require_extra(module: str, extra: str, feature: str):
+    """Import `module`, or raise a clear 'install agent-flow[extra]' error.
+
+    Optional dependencies (prefect, typer, rich) are grouped into install extras.
+    A consumer who uses a feature without its extra should get an actionable
+    message, not a bare ModuleNotFoundError. Usage:
+
+        typer = require_extra("typer", "cli", "the run_cli command")
+
+    Returns the imported module.
+    """
+    import importlib
+
+    try:
+        return importlib.import_module(module)
+    except ImportError as exc:
+        raise ImportError(f"{feature} requires the optional '{module}' dependency. Install it with: pip install 'agent-flow[{extra}]'") from exc
 
 
 def resolve_template(value: str, params: dict[str, Any], *, strict: bool = False) -> str:

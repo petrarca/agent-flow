@@ -18,29 +18,41 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 dynamic = ["version"]
-# One dependency set. The core already hard-depends on Prefect (which dominates
-# the install footprint by an order of magnitude), so keeping pydantic / typer /
-# rich / pyyaml / jsonschema as separate extras earned nothing but optional-import
-# branching. They are all first-class now:
-#   - pydantic + pydantic-settings: typed agent `result` payloads AND the CLI's
-#     typed run-parameters model (declared, required-checked, path-validated).
-#   - typer + rich + pyyaml: the reusable run_cli (flags, --config, --param) and
-#     human-facing output (live events, status tables).
-#   - jsonschema: validation of plain-dict result schemas.
+# LEAN CORE. The default install is what you need to declare a pipeline and run
+# it in-process on the default LocalBackend, with typed params/results and config
+# (incl. YAML) — no execution-backend or display dependency:
+#   - pydantic + pydantic-settings: typed agent `result` payloads AND the typed
+#     run-parameters / RunConfig model (declared, required-checked, validated).
+#     pydantic-settings also provides the YAML config source.
+#   - pyyaml: parse a --config / build_run_config(config_file=...) YAML file — a
+#     public (non-CLI) capability, so it stays core.
+#   - python-dotenv: .env loading. jsonschema: plain-dict result-schema validation.
+#
+# The heavy/optional pieces are EXTRAS, matching the runtime seams:
+#   - [prefect]: the opt-in PrefectBackend (the default LocalBackend needs none).
+#   - [cli]:     rich + typer for run_cli and the human-facing display helpers.
+# A programmatic consumer of build_flow (LocalBackend) needs neither.
 dependencies = [
-    "prefect>=3.0.0",
     "python-dotenv>=1.0.0",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
-    "typer>=0.12",
-    "rich>=13.0",
     "pyyaml>=6.0",
     "jsonschema>=4.0",
 ]
 
 [project.optional-dependencies]
-# Only development tooling is optional now.
-dev = ["ruff", "pytest", "pytest-cov", "pre-commit", "setuptools-scm"]
+# Execution backend: the opt-in Prefect backend (--backend prefect). The default
+# local backend is Prefect-free, so this is only needed for the run UI / scale.
+prefect = ["prefect>=3.0.0"]
+# CLI + human-facing display: the reusable run_cli and the rich-rendered live
+# events / status tables. Not needed to drive build_flow programmatically.
+cli = ["typer>=0.12", "rich>=13.0"]
+# Convenience: everything a full interactive install wants.
+all = ["prefect>=3.0.0", "typer>=0.12", "rich>=13.0"]
+# Development tooling. Includes the runtime extras (prefect + cli) so `task
+# install` yields a full dev env able to run the entire test suite (the
+# integration suite exercises the Prefect backend; CLI tests need rich/typer).
+dev = ["agent-flow[all]", "ruff", "pytest", "pytest-cov", "pre-commit", "setuptools-scm"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
