@@ -46,6 +46,8 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
+from agent_flow.runners import DEFAULT_MODEL
+
 # The generic run settings the library knows. Anything else at a YAML config's
 # top level (that is not one of these and not `params`) is a typo -> rejected.
 _GENERIC_KEYS = ("runtime", "run_dir", "agent_dir", "instructions", "instructions_file", "llm_concurrency", "show_events")
@@ -93,7 +95,8 @@ class RunConfig(BaseSettings):
     llm_concurrency: int | None = Field(default=None, description="Max concurrent LLM agents; None -> engine default.")
     show_events: bool = Field(default=False, description="Stream live agent events to the console.")
     model: str = Field(
-        default="", description="Model for every node (provider/model); empty -> each node's own default. Per-node model= still overrides."
+        default=DEFAULT_MODEL,
+        description="Model for every node (provider/model). Defaults to the library default; per-node agent_node(model=) still overrides.",
     )
     idle_timeout_s: int | None = Field(
         default=None,

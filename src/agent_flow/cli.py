@@ -287,8 +287,9 @@ def run_cli(
         # params; inject the resolved values so a node uses them (a per-node
         # model=/idle_timeout_s= and an explicit -p still win, so only set if the
         # user didn't already pass them via -p).
-        if cfg.model:
-            params.setdefault("model", cfg.model)
+        # model is always concrete (RunConfig defaults it to DEFAULT_MODEL); inject
+        # it so every node uses it. An explicit -p model= (already in params) wins.
+        params.setdefault("model", cfg.model)
         if cfg.idle_timeout_s is not None:
             params.setdefault("idle_timeout_s", str(cfg.idle_timeout_s))
         # 2b) Show the resolved settings + params (traceability before any work).
@@ -322,7 +323,7 @@ def _print_run_summary(name: str, cfg, params: dict, console) -> None:
         "runtime": cfg.runtime,
         "agent_dir": cfg.agent_dir or "(none)",
         "run_dir": shown_run_dir,
-        "model": cfg.model or "(per-node default)",
+        "model": cfg.model,  # always concrete: RunConfig defaults it to DEFAULT_MODEL
         "idle_timeout_s": cfg.idle_timeout_s if cfg.idle_timeout_s is not None else "(per-node default)",
     }
     rows = {**settings, **params}
