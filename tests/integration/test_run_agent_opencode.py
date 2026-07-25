@@ -21,7 +21,7 @@ import shutil
 
 import pytest
 
-from agent_flow.agent_runtime import run_agent
+from agent_flow.core.agent_runtime import run_agent
 from agent_flow.runners import OpenCodeRunner
 
 pytestmark = pytest.mark.skipif(

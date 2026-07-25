@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from agent_flow.schema import ValidationOutcome
+from agent_flow.core.schema import ValidationOutcome
 
 
 class PydanticSchema:

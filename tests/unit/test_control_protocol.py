@@ -1,6 +1,6 @@
 """Unit tests for the injected control-file protocol preamble."""
 
-from agent_flow.control_protocol import build_control_preamble
+from agent_flow.core.control_protocol import build_control_preamble
 
 
 def test_preamble_contains_control_file_kv_line():

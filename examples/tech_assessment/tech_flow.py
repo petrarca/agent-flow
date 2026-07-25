@@ -32,7 +32,7 @@ from __future__ import annotations
 
 # Load .env into os.environ FIRST — before bootstrap() (so the file may set
 # PREFECT_API_URL / PREFECT_PERSIST) and before any subprocess is spawned.
-from agent_flow.env import load_env
+from agent_flow.core.env import load_env
 
 load_env()
 

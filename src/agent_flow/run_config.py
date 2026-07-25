@@ -46,7 +46,7 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
-from agent_flow.agent_runtime import DEFAULT_IDLE_TIMEOUT_S
+from agent_flow.core import DEFAULT_IDLE_TIMEOUT_S
 
 # The json_schema_extra KEY that marks a params_model field as runtime-populated
 # (set at run time — e.g. by a node's exports — not a user input). Named here so

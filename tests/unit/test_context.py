@@ -1,6 +1,6 @@
 """Unit tests for context ingestion (read files -> injected prompt content)."""
 
-from agent_flow.context import read_context_blocks
+from agent_flow.core.context import read_context_blocks
 
 
 def test_reads_file_content_with_header(tmp_path):

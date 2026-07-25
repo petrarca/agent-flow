@@ -1,6 +1,6 @@
 """Unit test: the supervision layer forwards real events to on_event."""
 
-from agent_flow.agent_runtime import _apply_event
+from agent_flow.core.agent_runtime import _apply_event
 from agent_flow.runners import Event
 
 

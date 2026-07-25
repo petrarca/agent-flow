@@ -18,8 +18,8 @@ class MockRunner:
     name = "mock"
 
     def __init__(self, stub: Path | None = None) -> None:
-        # _mock_agent.py ships inside the package (top-level agent_flow module).
-        self._stub = stub or (Path(__file__).resolve().parents[1] / "_mock_agent.py")
+        # _mock_agent.py ships inside the core package (agent_flow/core/).
+        self._stub = stub or (Path(__file__).resolve().parents[1] / "core" / "_mock_agent.py")
 
     def build_command(self, inv: AgentInvocation) -> list[str]:
         cmd = ["python3", str(self._stub), "--agent", inv.agent, "--prompt", inv.prompt]

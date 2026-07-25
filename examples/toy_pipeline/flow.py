@@ -43,7 +43,7 @@ from prefect import flow, get_run_logger, task  # noqa: E402
 from prefect.tasks import exponential_backoff  # noqa: E402
 from prefect.transactions import transaction  # noqa: E402
 
-from agent_flow.agent_runtime import (  # noqa: E402
+from agent_flow.core.agent_runtime import (  # noqa: E402
     AgentContentFailedError,
     AgentResult,
     run_agent,
@@ -296,7 +296,7 @@ def pipeline(
     Returns:
         The final extractor control record.
     """
-    from agent_flow.utils import resolve_run_dir
+    from agent_flow.core.utils import resolve_run_dir
 
     logger = get_run_logger()
     wd = resolve_run_dir(run_dir, name="toy-pipeline")

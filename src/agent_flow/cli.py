@@ -494,7 +494,7 @@ def _print_run_summary(name: str, cfg, params: dict, console, *, hide: set[str] 
     the model marked runtime-populated — placeholders, not user inputs).
     """
     hide = hide or set()
-    from agent_flow.utils import resolve_template
+    from agent_flow.core import resolve_template
 
     try:
         shown_run_dir = resolve_template(cfg.run_dir, params, strict=True) if cfg.run_dir else "(temp)"

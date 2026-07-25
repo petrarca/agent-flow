@@ -106,7 +106,7 @@ def coerce_schema(schema: ResultSchema | dict | type | None) -> ResultSchema | N
     if isinstance(schema, ResultSchema):
         return schema
     if isinstance(schema, type) and issubclass(schema, BaseModel):
-        from agent_flow.schema_pydantic import PydanticSchema
+        from agent_flow.core.schema_pydantic import PydanticSchema
 
         return PydanticSchema(schema)
     raise TypeError(f"result_schema must be a ResultSchema, a dict, a pydantic BaseModel subclass, or None — got {type(schema).__name__}")

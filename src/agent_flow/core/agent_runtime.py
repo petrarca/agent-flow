@@ -36,9 +36,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from agent_flow.control_protocol import build_control_preamble
+from agent_flow.core.control_protocol import build_control_preamble
+from agent_flow.core.schema import ResultSchema, coerce_schema
 from agent_flow.runners import AgentInvocation, AgentRunner, Event
-from agent_flow.schema import ResultSchema, coerce_schema
 
 # Liveness supervision.
 #   IDLE = max silence (no runner event) before the agent is deemed STALE.

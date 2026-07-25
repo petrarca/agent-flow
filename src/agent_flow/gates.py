@@ -138,7 +138,7 @@ def require_file(relpath: str, *, on_missing: Directive | None = None) -> Gate:
     This is the canonical "did the agent actually produce its artifact?" check —
     a CONSUMER concern the library merely makes convenient.
     """
-    from agent_flow.report_signals import produced
+    from agent_flow.core import produced
 
     def gate(ctx: GateContext) -> Directive:
         rel = _resolve_relpath(relpath, ctx)
@@ -163,7 +163,7 @@ def rerun_on_signal(*, target: str, control_file: str | None = None) -> Gate:
     (e.g. a final coherence check), use `rerun_on_named` instead, which routes to
     whichever node the sidecar names.
     """
-    from agent_flow.report_signals import rerun_from_sidecar
+    from agent_flow.core import rerun_from_sidecar
 
     def gate(ctx: GateContext) -> Directive:
         node_name = getattr(ctx.node, "name", None) or str(ctx.node)
@@ -187,7 +187,7 @@ def rerun_on_named(*, control_file: str | None = None) -> Gate:
 
     Empty `rerun_required` -> Continue.
     """
-    from agent_flow.report_signals import rerun_from_sidecar
+    from agent_flow.core import rerun_from_sidecar
 
     def gate(ctx: GateContext) -> Directive:
         node_name = getattr(ctx.node, "name", None) or str(ctx.node)

@@ -466,8 +466,8 @@ def build_flow(
 
     @flow(name=name)
     def _pipeline(run_dir: str = "", start_from: str = "", only: str = "", **params: Any) -> dict:
+        from agent_flow.core import resolve_run_dir
         from agent_flow.run_context import init_run_context
-        from agent_flow.utils import resolve_run_dir
 
         # Install the run-scoped domain-param store from the initial params. Nodes
         # read a snapshot of it (so upstream exports are visible) and export hooks
@@ -478,7 +478,7 @@ def build_flow(
         # run_dir supports the same `{param}` templating as node inputs, but
         # STRICT: a path is never valid half-substituted, so a missing placeholder
         # is a hard error (not a dir literally named "{product_key}").
-        from agent_flow.utils import resolve_template
+        from agent_flow.core import resolve_template
 
         try:
             run_dir = resolve_template(run_dir, params, strict=True)

@@ -46,8 +46,8 @@ def test_gate_receives_validated_result_obj(tmp_path, monkeypatch):
 
     from pydantic import BaseModel
 
+    from agent_flow.core.schema_pydantic import PydanticSchema
     from agent_flow.engine import interpret
-    from agent_flow.schema_pydantic import PydanticSchema
 
     class R(BaseModel):
         summary: str

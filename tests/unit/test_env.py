@@ -2,7 +2,7 @@
 
 import os
 
-from agent_flow.env import load_env
+from agent_flow.core.env import load_env
 
 
 def test_load_env_missing_file_is_noop(tmp_path):

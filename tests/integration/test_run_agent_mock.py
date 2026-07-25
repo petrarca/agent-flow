@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from agent_flow.agent_runtime import AgentContentFailedError, AgentTimeoutError, run_agent
+from agent_flow.core.agent_runtime import AgentContentFailedError, AgentTimeoutError, run_agent
 from agent_flow.runners import MockRunner
 
 
