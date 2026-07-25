@@ -11,7 +11,7 @@ timestamp: 2026-07-23T07:51:35Z
 Three complementary observability channels, layered:
 
 - **Logs (backend logger, INFO)** — the always-on diagnostics: node start/finish,
-  jump-backs, concurrency setup, errors. The default local backend uses stdlib
+  jump-backs, concurrency setup, errors. The default in-process backend uses stdlib
   logging; the opt-in Prefect backend uses Prefect's logger. Default level; for
   debugging and the essential record.
 - **Node progress (default)** — a line per node transition (running →

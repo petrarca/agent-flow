@@ -126,7 +126,8 @@ class RunConfig(BaseSettings):
 
     runtime: str = Field(default="opencode", description="Agent runtime: 'opencode' (real) or 'mock' (no-token stub).")
     backend: str = Field(
-        default="local", description="Execution backend: 'local' (in-process, no Prefect; default) or 'prefect' (opt-in run UI/scale)."
+        default="inprocess",
+        description="Execution backend: 'inprocess' (default; runs the DAG in this process, no Prefect) or 'prefect' (opt-in run UI/scale).",
     )
     run_dir: str = Field(
         default="",

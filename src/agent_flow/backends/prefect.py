@@ -5,7 +5,7 @@ parallel groups fan out via `.submit()` + `futures.wait()`, logs go to the
 run-tagged `get_run_logger()`, and the LLM concurrency limit is a global,
 server-side limit on the task tag. Choose it (`--backend prefect` /
 AGENT_FLOW_BACKEND=prefect) when you want the Prefect UI, run history,
-scheduling, or scale. The lightweight default is LocalBackend.
+scheduling, or scale. The lightweight default is InProcessBackend.
 
 Prefect is imported lazily INSIDE the methods so that importing this module (or
 `agent_flow.backends`) never pulls Prefect — the core primitives stay
@@ -86,7 +86,7 @@ class PrefectBackend(FlowBackend):
         """Set Prefect env defaults for a robust, self-contained local run.
 
         Owns what was `_prefect_env.bootstrap()` — called only when the Prefect
-        backend is actually selected, so LocalBackend runs never touch Prefect's
+        backend is actually selected, so in-process runs never touch Prefect's
         env or spin a temporary server. Prefect is an optional dependency (the
         `prefect` extra); this is the first place a --backend prefect run touches
         it, so a missing install fails here with a clear, actionable message.

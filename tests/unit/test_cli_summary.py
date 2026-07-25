@@ -16,7 +16,7 @@ class _Params(BaseSettings):
 
 class _Cfg:
     runtime = "mock"
-    backend = "local"
+    backend = "inprocess"
     agent_dir = ""
     run_dir = ""
     model = ""

@@ -1,8 +1,8 @@
 ---
 type: Concept
-title: Execution backend — local default, Prefect opt-in, swappable by design
+title: Execution backend — in-process default, Prefect opt-in, swappable by design
 description: The FlowBackend seam, the local default and Prefect opt-in backends, the candidates considered, and deployment modes.
-tags: [agent-flow, backend, local, prefect, swappable, deployment]
+tags: [agent-flow, backend, inprocess, prefect, swappable, deployment]
 timestamp: 2026-07-23T07:51:35Z
 ---
 
@@ -39,7 +39,7 @@ mapping, identical for every backend) and backend-specific primitives:
 
 Two backends ship:
 
-- **LocalBackend (default)** — in-process: a `ThreadPoolExecutor` for parallel
+- **InProcessBackend (default)** — in-process: a `ThreadPoolExecutor` for parallel
   groups, a `threading.Semaphore` for the LLM concurrency limit, stdlib logging.
   No Prefect, no temporary server, fast startup, one fewer heavy dependency at
   run time. This is what an everyday single run uses.
@@ -48,12 +48,12 @@ Two backends ship:
   limit, the run UI). Prefect is imported lazily inside the backend, so nothing
   is loaded unless you select it.
 
-Select with `build_flow(nodes, backend="local"|"prefect")`, the CLI
-`--backend local|prefect`, or `AGENT_FLOW_BACKEND`. The **engine owns all flow
+Select with `build_flow(nodes, backend="inprocess"|"prefect")`, the CLI
+`--backend inprocess|prefect`, or `AGENT_FLOW_BACKEND`. The **engine owns all flow
 logic** (plan, walk, jump-back, `start_from`/`only`, run-context); the backend
 only executes. The core primitives (`run_agent`, runners) and the pure DAG
 helpers (`plan_groups`/`interpret`/`_walk`) stay Prefect-free — guarded by an
-import-isolation test that runs them (and a LocalBackend flow) with `prefect`
+import-isolation test that runs them (and a InProcessBackend flow) with `prefect`
 blocked.
 
 ## Decision: Prefect 3, kept as ONE backend among the swappable set
@@ -81,7 +81,7 @@ maturity outweighs Hatchet's edge today — but not enough to accept lock-in.
 **Swappability is first-class — and now realized.** All domain logic
 (supervision, gates, re-run loops, injection, telemetry, the declared graph) is
 backend-agnostic. A backend is a `FlowBackend` subclass; Prefect is one of two
-shipped implementations (LocalBackend being the other, default). Adding Hatchet
+shipped implementations (InProcessBackend being the other, default). Adding Hatchet
 later = write one `HatchetBackend(FlowBackend)` and register it; the graphs, the
 engine, and all primitives do not move.
 
@@ -93,7 +93,7 @@ workload becomes long-lived / human-gated (not this pipeline).
 
 ## Deployment modes
 
-These modes apply to the **PrefectBackend** only; the LocalBackend runs in-process
+These modes apply to the **PrefectBackend** only; the InProcessBackend runs in-process
 with no server and no SQLite.
 
 - **Embedded (dev):** the PrefectBackend runs an in-process temporary server + an
@@ -110,7 +110,7 @@ with no server and no SQLite.
 ## Where it lives
 
 - `src/agent_flow/backends/` — the seam: `base.py` (`FlowBackend` ABC),
-  `local.py` (`LocalBackend`, default), `prefect.py` (`PrefectBackend`,
+  `local.py` (`InProcessBackend`, default), `prefect.py` (`PrefectBackend`,
   lazy-import), `_prefect_env.py` (`bootstrap`, the three Prefect modes, owned by
   PrefectBackend), and `__init__.py` (`get_backend` factory + registry).
 - `src/agent_flow/engine.py` (`build_flow`) — dispatches execution through the

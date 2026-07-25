@@ -4,8 +4,8 @@ This is the library's Layer-3 API: declare a pipeline as a list of `Node`s and
 `build_flow` returns a runnable flow callable that walks the DAG, fans out
 parallel groups, invokes each node's gate, and interprets the returned directive
 (Continue / Restart / GoTo / Stop) with bounded re-run cycles and per-node
-criticality. Execution is dispatched to a `FlowBackend` (the local backend by
-default, Prefect opt-in); the engine itself owns the flow logic and is
+criticality. Execution is dispatched to a `FlowBackend` (the in-process backend
+by default, Prefect opt-in); the engine itself owns the flow logic and is
 backend-free.
 
 The engine is deliberately AGNOSTIC to what a node does. It knows nothing about
@@ -359,7 +359,7 @@ def build_flow(
     shared_context: Iterable[str] | None = None,
     agent_dir: str = "",
     node_instructions: dict[str, str] | None = None,
-    backend: str = "local",
+    backend: str = "inprocess",
 ):
     """Compile a Node graph into a runnable flow callable.
 
@@ -379,9 +379,10 @@ def build_flow(
         name: flow name (used by the Prefect backend's @flow).
         llm_tag: concurrency tag applied to each node task (for a shared limit).
         llm_concurrency: if set, a concurrency limit on `llm_tag` (global on the
-            Prefect backend; a process-local semaphore on the local backend).
-        backend: execution backend name — "local" (default; in-process
-            threadpool, no Prefect) or "prefect" (opt-in; @task/@flow, run UI).
+            Prefect backend; a per-process semaphore on the in-process backend).
+        backend: execution backend name — "inprocess" (default; runs the DAG in
+            this process via a threadpool, no Prefect) or "prefect" (opt-in;
+            @task/@flow, run UI).
         on_event_factory: optional per-node event-printer factory (display label
             -> a per-event callback); the batteries node passes the NODE name as
             the label. Reaches each node via RunContext.on_event_factory. Kept

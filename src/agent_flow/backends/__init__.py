@@ -6,11 +6,14 @@ groups EXECUTE (parallel fan-out), how to bound concurrency, which logger to use
 and its bootstrap/teardown lifecycle.
 
 Two backends ship:
-  - LocalBackend (default) — in-process threadpool + semaphore + stdlib logging.
-    No Prefect, no temp server, fast startup.
-  - PrefectBackend (opt-in) — Prefect 3 (@task/@flow, submit/wait, run UI,
-    server-side concurrency limit). Prefect is imported lazily so importing this
-    package stays Prefect-free.
+  - InProcessBackend (default, "inprocess") — runs the DAG in this process:
+    threadpool + semaphore + stdlib logging. No Prefect, no server, fast startup.
+  - PrefectBackend (opt-in, "prefect") — Prefect 3 (@task/@flow, submit/wait, run
+    UI, server-side concurrency limit). Prefect is imported lazily so importing
+    this package stays Prefect-free.
+
+("inprocess" names the mechanism, not a location — Prefect can also run on the
+local machine, so "local" would be ambiguous.)
 
 The seam is an ABC (`FlowBackend`): a concrete template-method `run_group`
 carries the shared solo-vs-parallel + degraded-mapping logic, and abstract
@@ -22,12 +25,12 @@ group executes, the concurrency limit, the logger, and the run lifecycle.
 from __future__ import annotations
 
 from agent_flow.backends.base import FlowBackend, RunNode
-from agent_flow.backends.local import LocalBackend
+from agent_flow.backends.inprocess import InProcessBackend
 
 # Registry maps name -> a zero-arg (or default-arg) factory. PrefectBackend is
 # imported lazily inside its factory so `import agent_flow.backends` never pulls
-# Prefect (the core-Prefect-free guarantee). LocalBackend is the default.
-DEFAULT_BACKEND = "local"
+# Prefect (the core-Prefect-free guarantee). InProcessBackend is the default.
+DEFAULT_BACKEND = "inprocess"
 
 
 def _make_prefect(llm_tag: str = "llm") -> FlowBackend:
@@ -37,7 +40,7 @@ def _make_prefect(llm_tag: str = "llm") -> FlowBackend:
 
 
 _BACKENDS: dict[str, object] = {
-    "local": lambda llm_tag="llm": LocalBackend(),
+    "inprocess": lambda llm_tag="llm": InProcessBackend(),
     "prefect": _make_prefect,
 }
 
@@ -45,9 +48,9 @@ _BACKENDS: dict[str, object] = {
 def get_backend(name: str, *, llm_tag: str = "llm") -> FlowBackend:
     """Resolve a fresh backend instance by name (e.g. the --backend flag value).
 
-    A fresh instance per call keeps per-run state (LocalBackend's semaphore)
+    A fresh instance per call keeps per-run state (InProcessBackend's semaphore)
     isolated. `llm_tag` is threaded to backends that tag node execution for a
-    concurrency limit (Prefect); LocalBackend ignores it.
+    concurrency limit (Prefect); InProcessBackend ignores it.
     """
     try:
         factory = _BACKENDS[name]
@@ -59,7 +62,7 @@ def get_backend(name: str, *, llm_tag: str = "llm") -> FlowBackend:
 __all__ = [
     "FlowBackend",
     "RunNode",
-    "LocalBackend",
+    "InProcessBackend",
     "get_backend",
     "DEFAULT_BACKEND",
 ]

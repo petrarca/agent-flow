@@ -53,7 +53,7 @@ Example: `feat/claude-code-runner`
   `prefect` only inside `backends/prefect.py`, `rich`/`typer` only inside `cli/`.
   Guard the entry-point import with `utils.require_extra(...)` so a missing extra
   fails with an actionable "install agent-flow[...]" message. The
-  `test_prefect_isolation` guard proves core + runners + LocalBackend import and
+  `test_prefect_isolation` guard proves core + runners + InProcessBackend import and
   run with `prefect` blocked.
 - Respect the layering: the engine (Tier 3) must not import the runtime core
   (Tier 1); they meet only through a node's `run` callable (`batteries` is the

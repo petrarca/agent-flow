@@ -378,7 +378,7 @@ concurrency limit, stdlib logging. No temporary server, fast startup, one fewer
 heavy dependency. It is the right choice for everyday single runs.
 
 ```bash
-# default: local backend (nothing to pass)
+# default: in-process backend (nothing to pass)
 python my_flow.py -p product_key=acme
 
 # opt into Prefect for the run UI / history / scheduling / scale
@@ -388,7 +388,7 @@ export AGENT_FLOW_BACKEND=prefect
 ```
 
 ```python
-build_flow(nodes, name="p", backend="local")     # default
+build_flow(nodes, name="p", backend="inprocess")     # default
 build_flow(nodes, name="p", backend="prefect")   # opt-in
 ```
 

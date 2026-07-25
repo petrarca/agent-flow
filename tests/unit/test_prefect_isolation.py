@@ -1,4 +1,4 @@
-"""Guard: the core primitives + pure DAG logic + LocalBackend stay Prefect-free.
+"""Guard: the core primitives + pure DAG logic + InProcessBackend stay Prefect-free.
 
 This is the HIGH-value guarantee behind the FlowBackend seam (#4): a consumer on
 a different orchestrator (Airflow, Temporal, a bespoke loop) must be able to use
@@ -22,7 +22,7 @@ _CORE_MODULES = [
     "agent_flow.core.agent_runtime",
     "agent_flow.runners",
     "agent_flow.backends",
-    "agent_flow.backends.local",
+    "agent_flow.backends.inprocess",
     "agent_flow.engine",
 ]
 
@@ -68,7 +68,7 @@ def test_local_backend_runs_a_flow_without_prefect(prefect_blocked, monkeypatch,
         Node(name="p1", run=mk("p1"), parallel_group="workers", depends_on=["a"]),
         Node(name="p2", run=mk("p2"), parallel_group="workers", depends_on=["a"]),
     ]
-    result = build_flow(nodes, name="iso", backend="local")(run_dir=str(tmp_path))
+    result = build_flow(nodes, name="iso", backend="inprocess")(run_dir=str(tmp_path))
     assert {n: oc.status for n, oc in result.items()} == {"a": "ok", "p1": "ok", "p2": "ok"}
 
 

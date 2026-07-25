@@ -64,7 +64,7 @@ def test_check_mock_skips_opencode_specific_checks(agent_dir, monkeypatch):
 
 
 def test_check_local_backend_omits_prefect(agent_dir):
-    # Default (local) backend: no prefect-importable check — a local run must not
+    # Default (inprocess) backend: no prefect-importable check — an in-process run must not
     # fail merely because Prefect is absent.
     names = {c.name for c in preflight.check("mock", agent_dir)}
     assert "prefect-importable" not in names

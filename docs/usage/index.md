@@ -57,7 +57,7 @@ TIER 1  ENGINE CORE      run_agent(): spawn + liveness-supervise + kill + sideca
 
 **The engine owns the flow logic and dispatches execution to a swappable
 backend.** At Tier 3, `build_flow` compiles your graph into a runnable flow
-callable that runs on the selected backend: the in-process `LocalBackend`
+callable that runs on the selected backend: the in-process `InProcessBackend`
 (default) or the opt-in [Prefect](https://www.prefect.io/) backend (parallel
 fan-out, concurrency limits, a run UI). The backend is a seam — Prefect is
 imported only when you choose it, and Tiers 1–2 don't require it. Details and the

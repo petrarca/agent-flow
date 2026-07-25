@@ -9,8 +9,8 @@ agent-flow is a Python library for **deterministic orchestration of coding-agent
 pipelines**. It replaces the fragile "LLM orchestrator agent" pattern with a
 deterministic engine that supervises coding-agent subprocesses (opencode today)
 and runs them as a graph — with parallelism, bounded re-runs, cross-node
-jump-back, telemetry, and optional typed output. The execution backend (local
-in-process default / opt-in Prefect) and the agent runtime (opencode / Claude
+jump-back, telemetry, and optional typed output. The execution backend
+(in-process default / opt-in Prefect) and the agent runtime (opencode / Claude
 Code / …) are both pluggable.
 
 ### The three usage tiers (high level → low level)
@@ -45,7 +45,7 @@ src/agent_flow/
                          #   control protocol, result-schema, context ingestion, env)
   runners/               # agent-runtime seam (AgentRunner Protocol) + get_runner registry
   backends/              # execution seam (FlowBackend ABC) + get_backend;
-                         #   local default, prefect opt-in (DEFAULT_BACKEND="local")
+                         #   inprocess default, prefect opt-in (DEFAULT_BACKEND="inprocess")
   cli/                   # run_cli + display helpers (typer/rich, opt-in [cli] extra)
 examples/
   toy_pipeline/          # Tier-2 demo (hand-written flow) + its .opencode/agent/*.md
@@ -160,7 +160,7 @@ inputs/context/paths. To hand a value TO the agent, put it in `inputs`.
   valid Python 3.14 (PEP 758) — do not flag it.
 - Dependencies are a lean core plus opt-in extras. Core (always installed):
   pydantic, pydantic-settings, pyyaml, jsonschema, python-dotenv — enough to
-  declare a pipeline and run it on the default LocalBackend. The heavy pieces are
+  declare a pipeline and run it on the default InProcessBackend. The heavy pieces are
   extras matching the runtime seams: `[prefect]` (the opt-in PrefectBackend) and
   `[cli]` (typer + rich for `run_cli` / display); `[all]` is both, `[dev]` adds
   the tooling. An optional dep is lazy-imported at its entry point only — prefect

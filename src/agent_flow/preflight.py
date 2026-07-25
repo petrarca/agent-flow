@@ -64,13 +64,13 @@ def check_prefect_importable() -> Check:
     return Check("prefect-importable", True, True, "prefect importable")
 
 
-def check(runtime: str, agent_dir: str | Path | None, backend: str = "local") -> list[Check]:
+def check(runtime: str, agent_dir: str | Path | None, backend: str = "inprocess") -> list[Check]:
     """Run the pre-flight checks relevant to `runtime`/`backend` and return them.
 
     Layers, so no runtime/backend specifics live here:
     - GENERIC (always): agent_dir configured/exists.
     - BACKEND-SPECIFIC: the Prefect backend additionally requires prefect to
-      import; the local backend needs nothing (no check added). So a
+      import; the in-process backend needs nothing (no check added). So a
       dependency-light local run does not fail merely because Prefect is absent.
     - RUNTIME-SPECIFIC: whatever the selected runner contributes via its optional
       `preflight_checks(agent_dir)` — e.g. OpenCodeRunner checks opencode is on

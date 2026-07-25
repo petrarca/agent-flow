@@ -43,7 +43,7 @@ class FlowBackend(abc.ABC):
     it.
     """
 
-    #: Backend id used by the registry / --backend flag (e.g. "local", "prefect").
+    #: Backend id used by the registry / --backend flag (e.g. "inprocess", "prefect").
     name: str = ""
 
     # --- template method (shared; do not override) -------------------------
@@ -75,7 +75,7 @@ class FlowBackend(abc.ABC):
         `work` performs the DAG walk (calling back into run_group). A backend that
         needs an ambient execution context establishes it here: PrefectBackend
         runs `work` inside a `@flow` (so `.submit()` / `get_run_logger()` work);
-        LocalBackend just calls `work()` directly. `name` labels the session (the
+        InProcessBackend just calls `work()` directly. `name` labels the session (the
         Prefect flow name). Returns `work`'s result unchanged.
         """
 

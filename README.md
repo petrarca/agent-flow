@@ -38,7 +38,7 @@ into four recurring problems. agent-flow addresses each directly:
    next) is a swappable `AgentRunner` strategy — only "how to build the command"
    and "how to parse the event stream" differ; supervision, the DAG, re-runs, the
    sidecar, and the display layer are written once and stay runtime-neutral. The
-   execution backend is likewise a swappable seam: a Prefect-free **LocalBackend**
+   execution backend is likewise a swappable seam: a Prefect-free **InProcessBackend**
    (default) or an opt-in **PrefectBackend** (`--backend prefect`).
 
 ## Feature shortlist
@@ -83,7 +83,7 @@ into four recurring problems. agent-flow addresses each directly:
   precedence chain; domain params typed via a `params_model` (missing required →
   fail fast, exit 2).
 - **Pluggable execution backend** — `FlowBackend` (ABC): a Prefect-free
-  **LocalBackend** (default; threadpool + semaphore + stdlib logging, no temp
+  **InProcessBackend** (default; threadpool + semaphore + stdlib logging, no temp
   server) or an opt-in **PrefectBackend** (`--backend prefect` / `build_flow(...,
   backend="prefect")`) for the run UI, scheduling, and scale. The core
   primitives + DAG logic stay Prefect-free (import-isolation-guarded).
@@ -169,7 +169,7 @@ build_flow(nodes, name="tech")(product_key="acme", runtime="opencode")
 
 **Orchestration backend.** `build_flow` compiles your graph into a runnable flow
 callable that dispatches execution to the selected backend. The default
-`LocalBackend` runs in-process (threadpool + semaphore + stdlib logging, no
+`InProcessBackend` runs in-process (threadpool + semaphore + stdlib logging, no
 Prefect); the opt-in `PrefectBackend` (`build_flow(..., backend="prefect")`)
 routes execution through [**Prefect**](https://www.prefect.io/) for parallel
 fan-out, concurrency limits, and a run UI. The backend is a swappable seam — the
@@ -184,13 +184,13 @@ Requires Python 3.14+, [`uv`](https://docs.astral.sh/uv/), and
 configured with model access.
 
 **Lean core, optional extras.** The default install is small — enough to declare
-a pipeline and run it in-process on the default local backend, with typed
+a pipeline and run it on the default in-process backend, with typed
 params/results and config (pydantic, pydantic-settings, pyyaml, jsonschema,
 python-dotenv). The heavy pieces are opt-in extras that match the runtime seams:
 
 | Install | Adds | Use when |
 |---|---|---|
-| `agent-flow` | core only | programmatic `build_flow` on the local backend |
+| `agent-flow` | core only | programmatic `build_flow` on the in-process backend |
 | `agent-flow[cli]` | typer, rich | the `run_cli` command + live display |
 | `agent-flow[prefect]` | prefect | `--backend prefect` (run UI / scale) |
 | `agent-flow[all]` | cli + prefect | a full interactive install |
@@ -227,7 +227,7 @@ src/agent_flow/     the library
   core/             backend-free Tier-1 primitives (run_agent, control protocol,
                     result-schema, context ingestion, env)
   runners/          the agent-runtime seam (AgentRunner) — opencode, mock, …
-  backends/         the execution seam (FlowBackend) — local (default), prefect (opt-in)
+  backends/         the execution seam (FlowBackend) — inprocess (default), prefect (opt-in)
   cli/              run_cli + neutral event rendering + tables (the [cli] extra)
   engine, gates, batteries, run_config, run_context, preflight, utils
                     the DAG engine, flow-control gates, the one-call node, and

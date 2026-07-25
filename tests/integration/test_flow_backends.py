@@ -36,7 +36,7 @@ def backend(request):
     return name
 
 
-_ALL_BACKENDS = ["local", "prefect"]
+_ALL_BACKENDS = ["inprocess", "prefect"]
 
 
 def _mk(nm):

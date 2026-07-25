@@ -80,7 +80,7 @@ def run_cli(
 
     Backend lifecycle (bootstrap/teardown) is owned by the selected backend and
     runs inside build_flow's pipeline; the caller does not bootstrap Prefect.
-    The default backend is local (no Prefect); pass --backend prefect to opt in.
+    The default backend is inprocess (no Prefect); pass --backend prefect to opt in.
 
     Requires the `cli` extra (typer + rich): pip install 'agent-flow[cli]'.
     """
@@ -97,7 +97,9 @@ def run_cli(
         config: str = typer.Option("", "--config", "-c", help="YAML run config (generic settings)"),
         param: list[str] | None = typer.Option(None, "--param", "-p", help="domain param KEY=VALUE (repeatable)"),  # noqa: B008 - Typer idiom
         runtime: str | None = typer.Option(None, help="opencode | mock"),
-        backend: str | None = typer.Option(None, "--backend", help="execution backend: local (default, no Prefect) | prefect (opt-in run UI/scale)"),
+        backend: str | None = typer.Option(
+            None, "--backend", help="execution backend: inprocess (default, no Prefect) | prefect (opt-in run UI/scale)"
+        ),
         run_dir: str | None = typer.Option(None, "--run-dir"),
         agent_dir: str | None = typer.Option(None, "--agent-dir", help="where agent definitions live (opencode --dir)"),
         instructions: str | None = typer.Option(None, "--instructions", "-i", help="run-wide brief for every agent"),

@@ -17,7 +17,7 @@ bounded re-runs, and cross-node jump-back. Domain knowledge lives in `run` and
 
 The engine is backend-agnostic: it owns all flow logic (`plan_groups`,
 `interpret`, `_walk`, jump-back, `start_from`, `only`, run-context) and hands the
-backend a `run_node` closure. The backend (LocalBackend by default, PrefectBackend
+backend a `run_node` closure. The backend (InProcessBackend by default, PrefectBackend
 opt-in) supplies only execution mechanics — parallel fan-out, concurrency limit,
 logger, and bootstrap/teardown.
 
@@ -75,18 +75,18 @@ callback: `blocking` → `NodeBlocked`; `degrade` → status `degraded`.
 
 ## `build_flow` — compile to a runnable flow callable
 
-`build_flow(nodes, *, name, llm_tag, llm_concurrency, on_event_factory, on_node_event, shared_instructions, shared_context, agent_dir, node_instructions, backend="local")`
+`build_flow(nodes, *, name, llm_tag, llm_concurrency, on_event_factory, on_node_event, shared_instructions, shared_context, agent_dir, node_instructions, backend="inprocess")`
 returns a plain callable `f(run_dir="", start_from="", only="", **params) -> dict[str, NodeOutcome]`.
 It:
 
 - fails fast at build time on cycles/unknown deps (`plan_groups`),
-- resolves the selected `backend` (default `"local"`) and dispatches each
+- resolves the selected `backend` (default `"inprocess"`) and dispatches each
   group's execution to it (solo inline; parallel fan-out via the backend),
 - honors bounded **cross-node jump-back**,
 - honors `start_from` (enter at a group, run forward) and `only` (run exactly
   one group, stop),
 - applies an optional LLM concurrency limit on `llm_tag` (a process-local
-  semaphore on the local backend; a server-side limit on the Prefect backend).
+  semaphore on the in-process backend; a server-side limit on the Prefect backend).
 
 The backend is resolved **lazily inside `build_flow`** (via
 `agent_flow.backends.get_backend`) so the engine module imports without pulling

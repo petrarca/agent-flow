@@ -18,7 +18,7 @@ Requires Python 3.14+ and [`uv`](https://docs.astral.sh/uv/). For real (not
 mock) runs, `opencode` must be on `PATH` and configured with model access.
 
 ```bash
-# core only (programmatic build_flow on the local backend):
+# core only (programmatic build_flow on the in-process backend):
 uv add "agent-flow @ git+https://github.com/petrarca/agent-flow"
 # with the CLI (run_cli + live display) — the typical interactive install:
 uv add "agent-flow[cli] @ git+https://github.com/petrarca/agent-flow"
@@ -28,14 +28,14 @@ uv add "agent-flow[cli,prefect] @ git+https://github.com/petrarca/agent-flow"
 
 **Lean core, optional extras.** The default install is small: pydantic,
 pydantic-settings, pyyaml, jsonschema, python-dotenv — enough to declare a
-pipeline and run it in-process on the default **local backend**, with typed
+pipeline and run it in-process on the default **in-process backend**, with typed
 result output, typed run-parameter models, and YAML/`--config` support. The
 heavy pieces are opt-in extras that mirror the runtime seams:
 
 - `agent-flow[cli]` — typer + rich, for the reusable `run_cli` command and the
   live event / status-table display.
 - `agent-flow[prefect]` — Prefect, for the opt-in `--backend prefect` (run UI,
-  scheduling, scale). The default local backend needs none of it.
+  scheduling, scale). The default in-process backend needs none of it.
 - `agent-flow[all]` — both. `agent-flow[dev]` implies `[all]` plus the toolchain.
 
 Using a feature without its extra raises a clear message naming the extra to
@@ -94,7 +94,7 @@ print(result)  # {'hello': 'ok'}
 
 `load_env()` loads a `.env` file into the process environment so every agent
 subprocess inherits it. Call it first, before building the flow, exactly as
-shown. The default **local backend** needs no further setup.
+shown. The default **in-process backend** needs no further setup.
 
 ### Where does `run_dir` come from, and how does the gate find the file?
 
