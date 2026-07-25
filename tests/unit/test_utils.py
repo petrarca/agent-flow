@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_flow.core.utils import default_temp_base, resolve_run_dir, resolve_template
+from agent_flow.utils import default_temp_base, resolve_run_dir, resolve_template
 
 
 def test_resolve_template_substitutes_params():

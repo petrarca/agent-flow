@@ -465,8 +465,8 @@ def build_flow(
         return run_node
 
     def _pipeline(run_dir: str = "", start_from: str = "", only: str = "", **params: Any) -> dict:
-        from agent_flow.core import resolve_run_dir, resolve_template
         from agent_flow.run_context import init_run_context
+        from agent_flow.utils import resolve_run_dir, resolve_template
 
         # Install the run-scoped domain-param store from the initial params.
         # Nodes read a snapshot (so upstream exports are visible) and export hooks

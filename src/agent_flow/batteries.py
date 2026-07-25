@@ -23,10 +23,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from agent_flow.core import DEFAULT_IDLE_TIMEOUT_S, resolve_template, run_agent
+from agent_flow.core import DEFAULT_IDLE_TIMEOUT_S, run_agent
 from agent_flow.engine import Criticality, Node, RunContext
 from agent_flow.gates import Gate
 from agent_flow.runners import get_runner
+from agent_flow.utils import resolve_template
 
 
 def control_path(node_name: str) -> str:

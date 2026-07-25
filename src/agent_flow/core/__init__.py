@@ -8,12 +8,16 @@ engine or any flow backend.
 
 Layer order (who may depend on whom):
 
-    runners  (pure strategy: build_command / parse_event; no agent_flow deps
-              beyond runners.base)
+    utils  (pure, dependency-free helpers: template/run-dir; usable by ANYONE,
+            including runners — the bottom leaf)
+        <  runners  (pure strategy: build_command / parse_event)
         <  core  (run_agent uses a runner; validates output; reads context)
         <  engine / gates / batteries
         <  backends  (the execution seam)
         <  cli
+
+`utils` deliberately lives at the top level, not inside core, so lower layers
+(e.g. runners) can use its pure helpers without depending on core.
 
 So `core` depends on `runners` (run_agent needs a runner) and on nothing above
 it. It never imports engine, backends, or cli — that one-directional rule keeps
@@ -41,7 +45,6 @@ from agent_flow.core.env import load_env
 from agent_flow.core.report_signals import produced, rerun_from_sidecar
 from agent_flow.core.schema import JsonSchema, ResultSchema, ValidationOutcome, coerce_schema
 from agent_flow.core.schema_pydantic import PydanticSchema
-from agent_flow.core.utils import default_temp_base, resolve_run_dir, resolve_template
 
 __all__ = [
     # one supervised agent
@@ -64,10 +67,6 @@ __all__ = [
     # file-based signals (gate building blocks)
     "produced",
     "rerun_from_sidecar",
-    # path / template helpers
-    "resolve_template",
-    "resolve_run_dir",
-    "default_temp_base",
     # environment
     "load_env",
 ]
