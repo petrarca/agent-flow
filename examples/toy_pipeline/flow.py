@@ -43,7 +43,7 @@ from prefect import flow, get_run_logger, task  # noqa: E402
 from prefect.tasks import exponential_backoff  # noqa: E402
 from prefect.transactions import transaction  # noqa: E402
 
-from agent_flow.core.agent_runtime import (  # noqa: E402
+from agent_flow import (  # noqa: E402
     AgentContentFailedError,
     AgentResult,
     run_agent,

@@ -45,7 +45,7 @@ def test_non_json_is_not_an_event():
 
 
 def test_project_tool_event_shows_tool_and_target():
-    from agent_flow.cli import _project_event
+    from agent_flow.cli.events import _project_event
 
     raw = json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "write", "state": {"input": {"filePath": "/x/out.md"}}}})
     line = _project_event(raw)
@@ -53,21 +53,21 @@ def test_project_tool_event_shows_tool_and_target():
 
 
 def test_project_step_finish_shows_tokens():
-    from agent_flow.cli import _project_event
+    from agent_flow.cli.events import _project_event
 
     raw = json.dumps({"type": "step_finish", "part": {"type": "step-finish", "tokens": {"total": 12793}}})
     assert "12,793" in _project_event(raw)
 
 
 def test_project_text_event_shows_message():
-    from agent_flow.cli import _project_event
+    from agent_flow.cli.events import _project_event
 
     raw = json.dumps({"type": "text", "part": {"type": "text", "text": "  hello   world  "}})
     assert "hello world" in _project_event(raw)
 
 
 def test_project_non_json_is_trimmed_passthrough():
-    from agent_flow.cli import _project_event
+    from agent_flow.cli.events import _project_event
 
     assert _project_event("plain log line") == "plain log line"
 
@@ -165,7 +165,7 @@ def test_render_diff_noop_without_diff(capsys):
 
 
 def test_diff_rows_strips_header_and_pairs_changes():
-    from agent_flow.cli import _diff_rows
+    from agent_flow.cli.events import _diff_rows
 
     diff = "Index: x\n===\n--- /a/x\n+++ /a/x\n@@ -1,2 +1,2 @@\n context\n-old line\n+new line"
     rows = _diff_rows(diff)
@@ -178,7 +178,7 @@ def test_diff_rows_strips_header_and_pairs_changes():
 
 
 def test_diff_rows_unbalanced_change_pads():
-    from agent_flow.cli import _diff_rows
+    from agent_flow.cli.events import _diff_rows
 
     # two removals, one addition -> the extra removal pairs with an empty right
     diff = "@@ -1,2 +1,1 @@\n-a\n-b\n+c"

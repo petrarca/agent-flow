@@ -4,7 +4,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 from agent_flow import runtime_param, runtime_param_fields
-from agent_flow.cli import _print_run_summary
+from agent_flow.cli.app import _print_run_summary
 
 
 class _Params(BaseSettings):
