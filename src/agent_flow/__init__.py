@@ -12,8 +12,9 @@ Public API (the authoritative list is `__all__` below):
         # Tier 1: one supervised agent (the primitive)
         run_agent, AgentResult,
         AgentTimeoutError, AgentContentFailedError, AgentCrashError,
-        # runners (swappable agent runtimes)
+        # runners (subprocess wire adapters) + the execution seam
         AgentRunner, AgentInvocation, Event,
+        AgentExecutor, get_executor, compose_prompt,
         OpenCodeRunner, MockRunner, get_runner,
         # Tier 3: declare Nodes -> build_flow (the DAG engine)
         Node, NodeOutcome, RunContext, build_flow, NodeBlocked,
@@ -113,12 +114,15 @@ from agent_flow.run_context import (
     init_run_context,
 )
 from agent_flow.runners import (
+    AgentExecutor,
     AgentInvocation,
     AgentRunner,
     AgentRunnerInfo,
     Event,
     MockRunner,
     OpenCodeRunner,
+    compose_prompt,
+    get_executor,
     get_runner,
 )
 from agent_flow.utils import default_temp_base, resolve_run_dir
@@ -130,14 +134,17 @@ __all__ = [
     "AgentTimeoutError",
     "AgentContentFailedError",
     "AgentCrashError",
-    # runners
+    # runners + execution seam
     "AgentRunner",
     "AgentRunnerInfo",
     "AgentInvocation",
+    "AgentExecutor",
     "Event",
     "OpenCodeRunner",
     "MockRunner",
     "get_runner",
+    "get_executor",
+    "compose_prompt",
     # run-context service (open domain params + exports)
     "RunContextService",
     "get_run_context",

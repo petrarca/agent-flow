@@ -25,10 +25,18 @@ ABC base.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
+
+# Liveness / timeout budget default (seconds). Owned here (the neutral runner
+# contract) because it is a field default on AgentInvocation. The subprocess
+# executor treats it as an idle deadline; an in-process executor may use it as a
+# wall-clock cap hint. agent_runtime re-exports it for backward compatibility.
+DEFAULT_IDLE_TIMEOUT_S = 120
 
 # Model contract. The library NEVER hardcodes a model. When no model is
 # configured (param/env/CLI/programmatic), the runner omits --model so the
@@ -69,23 +77,65 @@ class AgentRunnerInfo(BaseModel):
 
 @dataclass(frozen=True)
 class AgentInvocation:
-    """Everything a runner needs to launch ONE agent.
+    """The complete, runtime-NEUTRAL request to run ONE agent — the seam's input.
 
-    Carries the agent NAME and its resolved INSTRUCTIONS/PROMPT separately, so a
-    runner can materialise agent identity its own way: opencode uses the named
-    agent (`--agent <name>`) and passes the work-order as the prompt; a runner
-    without named agents (Claude Code, Codex) can instead inject the agent's
-    instructions as a system prompt and pass only the work-order. `prompt` is the
-    per-run work order (PRODUCT_KEY, REPORT, CONTROL_FILE, ...); `instructions`
-    is the agent's resolved standing context (may be empty for opencode, whose
-    identity lives in its .md).
+    This is the single input to an `AgentExecutor.run(inv) -> AgentResult`. It
+    carries EVERYTHING an executor needs, and NOTHING that is specific to one
+    execution mechanism: a subprocess executor and an in-process executor receive
+    the exact same invocation. (The subprocess control sidecar is deliberately
+    NOT here — it is a SubprocessExecutor-private detail derived from run_dir +
+    agent, along with the control preamble it injects.)
+
+    Prompt layering. `prompt` is the fully-composed PER-NODE prompt (per-node
+    context + instructions + the one-time instruction + the work order — already
+    joined by agent_node). `shared_context` / `shared_instructions` are the
+    RUN-WIDE blocks, kept separate so a single composer (`compose_prompt`) lays
+    the final order in ONE place: [shared_context][shared_instructions][prompt].
+    A subprocess executor additionally prepends the control preamble (its own
+    mechanism); an in-process executor uses the composed prompt as-is.
+
+    Agent identity. `agent` is the logical name/ref; `instructions` is the
+    resolved standing context for runtimes WITHOUT named agents (opencode ignores
+    it — its identity lives in its .md; Claude Code injects it as a system
+    prompt). Executors materialise identity their own way from these fields.
     """
 
-    agent: str  # logical agent name (opencode --agent)
-    prompt: str  # per-run work order
+    agent: str  # logical agent name / ref
+    prompt: str  # fully-composed per-node prompt (context+instructions+one-time+work order)
+    run_dir: Path  # the run's directory (artifact/sidecar root; base for relative paths)
+    node: str = ""  # the NODE this invocation runs (neutral identity; unique per run).
+    # Used e.g. by SubprocessExecutor to key its per-node control sidecar
+    # ("<node>.control.json"). Falls back to `agent` when empty.
+    result_schema: object = None  # ResultSchema | JSON-schema dict | pydantic model; typed output contract
     model: str | None = None
-    instructions: str = ""  # resolved standing instructions (for runners without named agents)
     agent_dir: str = ""  # absolute dir where agent DEFINITIONS live (opencode: --dir); "" = runtime default
+    instructions: str = ""  # resolved standing instructions (for runners without named agents)
+    shared_instructions: str = ""  # run-wide brief injected into every agent
+    shared_context: str = ""  # run-wide context CONTENT (already read from files)
+    idle_timeout_s: int = DEFAULT_IDLE_TIMEOUT_S  # liveness budget (subprocess) / cap hint (in-process)
+    on_event: Callable[[Event], None] | None = None  # live progress callback (both kinds may emit)
+
+
+def compose_prompt(inv: AgentInvocation) -> str:
+    """Assemble the runtime-neutral prompt for an invocation, in ONE place.
+
+    Order: [run-wide context][run-wide instructions][per-node prompt]. The
+    per-node `prompt` already contains, in order, the node's context +
+    instructions + the one-time instruction + the work order (composed by
+    agent_node). This helper only prepends the RUN-WIDE blocks, so the full
+    top-to-bottom prompt order lives here rather than being split across layers.
+
+    The subprocess control preamble is NOT added here — it is subprocess-specific
+    (it instructs a CLI agent to write a control sidecar) and is prepended by
+    SubprocessExecutor. An in-process executor uses this composed prompt as-is.
+    """
+    blocks: list[str] = []
+    if inv.shared_context and inv.shared_context.strip():
+        blocks.append(f"## Run-wide context\n\n{inv.shared_context.strip()}")
+    if inv.shared_instructions and inv.shared_instructions.strip():
+        blocks.append(f"## Run-wide instructions\n\n{inv.shared_instructions.strip()}")
+    blocks.append(inv.prompt)
+    return "\n\n".join(blocks)
 
 
 @dataclass(frozen=True)

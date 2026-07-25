@@ -33,12 +33,14 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from agent_flow.core.control_protocol import build_control_preamble
 from agent_flow.core.schema import ResultSchema, coerce_schema
 from agent_flow.runners import AgentInvocation, AgentRunner, Event
+from agent_flow.runners.base import DEFAULT_IDLE_TIMEOUT_S, compose_prompt
+from agent_flow.runners.executor import AgentExecutor
 
 # Liveness supervision.
 #   IDLE = max silence (no runner event) before the agent is deemed STALE.
@@ -48,7 +50,9 @@ from agent_flow.runners import AgentInvocation, AgentRunner, Event
 # time, decides liveness. The default is generous because real LLM agents can
 # pause 60-90s between tool calls (thinking, long writes); tune per run via the
 # CLI --idle-timeout / AGENT_FLOW_IDLE_TIMEOUT_S, or per node via agent_node.
-DEFAULT_IDLE_TIMEOUT_S = 120
+# The constant is defined in runners.base (it is a field default on
+# AgentInvocation) and re-imported here so existing `from ...agent_runtime import
+# DEFAULT_IDLE_TIMEOUT_S` references keep working.
 
 
 class AgentTimeoutError(RuntimeError):
@@ -250,6 +254,126 @@ def _read_sidecar(control_file: Path | None) -> dict | None:
         return None
 
 
+class SubprocessExecutor(AgentExecutor):
+    """AgentExecutor that runs an agent as a supervised OS subprocess.
+
+    This is the execution model the library shipped with: spawn a CLI runtime,
+    supervise it by LIVENESS (kill only when stale), and read the agent's verdict
+    from a control SIDECAR it writes. The two runtime-specific wire details (build
+    the argv, parse a stdout line into an Event) are delegated to an `AgentRunner`
+    — this executor's PRIVATE strategy, not the public seam.
+
+    The control sidecar and the control preamble are this executor's OWN
+    mechanism (an in-process executor has neither): the sidecar path is derived
+    per node from run_dir + the node name, cleared before the run, and read back
+    as the sole completion verdict.
+
+    Supervision:
+      - killed ONLY when STALE: no runner event AND no sidecar for
+        `inv.idle_timeout_s`. An actively-emitting agent runs as long as it makes
+        progress — no absolute wall-clock cap.
+      - completion detected the moment the sidecar appears (a done-but-lingering
+        process is finished immediately).
+
+    `env_extra` (constructor) adds process env vars for every run on this
+    executor.
+    """
+
+    def __init__(self, runner: AgentRunner, *, env_extra: dict[str, str] | None = None) -> None:
+        self.runner = runner
+        self.name = getattr(runner, "name", "subprocess")
+        self._env_extra = env_extra
+
+    def run(self, inv: AgentInvocation, *, control_file: Path | None = None) -> AgentResult:
+        """Run one invocation as a supervised subprocess -> AgentResult.
+
+        `control_file` overrides the per-node sidecar path; by default it is
+        `inv.run_dir / "<node-or-agent>.control.json"`. It is a subprocess-private
+        argument (not part of the neutral AgentInvocation).
+
+        Raises:
+            AgentTimeoutError: the agent went stale (idle) with no valid sidecar.
+            AgentContentFailedError: sidecar reports a non-ok status (do not retry).
+        """
+        agent = inv.agent
+        run_dir = inv.run_dir
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        # Per-node control sidecar (node name is unique per run; falls back to the
+        # agent name). Derived here — the sidecar is this executor's mechanism.
+        if control_file is None:
+            base = inv.node or agent
+            control_file = run_dir / f"{base}.control.json"
+        # Defensive: clear a stale sidecar so completion keys only on THIS run's write.
+        control_file.unlink(missing_ok=True)
+
+        # Compose the final prompt. Order:
+        #   [control preamble] [compose_prompt: run-wide context+instructions + prompt]
+        # The preamble is subprocess-specific (it tells the agent to write the
+        # sidecar) so it is prepended HERE; everything else comes from the neutral
+        # compose_prompt helper. A result schema, if supplied, is embedded in the
+        # preamble block.
+        schema = coerce_schema(inv.result_schema)
+        schema_dict = schema.to_json_schema() if schema is not None else None
+        preamble = build_control_preamble(agent, str(control_file), schema_dict)
+        full_prompt = preamble + "\n\n" + compose_prompt(inv)
+
+        agent_dir = inv.agent_dir or ""
+        cmd = self.runner.build_command(replace(inv, prompt=full_prompt))
+
+        env = os.environ.copy()
+        if self._env_extra:
+            env.update(self._env_extra)
+
+        # cwd = agent_dir when set (the runtime's project dir, e.g. where opencode
+        # finds .opencode/agent). Not run_dir — that is the artifact/sidecar root.
+        start = time.monotonic()
+        proc = subprocess.Popen(
+            cmd,
+            cwd=agent_dir or None,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+        )
+
+        sup = _supervise(proc, runner=self.runner, idle_timeout_s=inv.idle_timeout_s, control_file=control_file, on_event=inv.on_event)
+        duration = time.monotonic() - start
+
+        # The control sidecar is the SOLE verdict. No sidecar => error; the engine
+        # never inspects artifacts to guess success (that is the gate's job).
+        sidecar = _read_sidecar(control_file)
+        if sidecar is None:
+            sidecar = {"status": "error", "agent": agent, "reason": f"no control sidecar written (completion={sup.completion})"}
+
+        # Validate the result payload against the schema, if one was supplied. The
+        # outcome is ATTACHED (never raised) — a schema violation is a flow-control
+        # decision for the gate, not an engine failure.
+        outcome = schema.validate(sidecar.get("result", {})) if schema is not None else None
+
+        result = AgentResult(
+            agent=agent,
+            exit_code=proc.returncode,
+            duration_s=duration,
+            control=sidecar,
+            tokens=sup.tokens,
+            cost=sup.cost,
+            events=sup.events,
+            completion=sup.completion,
+            result_valid=outcome.valid if outcome is not None else True,
+            result_obj=outcome.obj if outcome is not None else None,
+            result_errors=outcome.errors if outcome is not None else (),
+        )
+
+        status = sidecar.get("status")
+        if sup.completion == "stale" and status not in ("ok", "verified"):
+            raise AgentTimeoutError(f"agent {agent!r} went stale after {duration:.1f}s (no event/sidecar for {inv.idle_timeout_s}s)")
+        if status not in ("ok", "verified"):
+            raise AgentContentFailedError(f"agent {agent!r} reported status={status!r}: {sidecar.get('reason')}")
+        return result
+
+
 def run_agent(
     *,
     agent: str,
@@ -266,153 +390,32 @@ def run_agent(
     on_event: Callable[[Event], None] | None = None,
     shared_instructions: str = "",
     shared_context: str = "",
+    node: str = "",
 ) -> AgentResult:
-    """Run one agent as a supervised subprocess with a LIVENESS-based timeout.
+    """Run one agent as a supervised subprocess (backward-compatible shim).
 
-    Supervision (all inside this function — the caller stays ignorant of it):
-      - The agent is killed ONLY when STALE: no opencode event AND no sidecar
-        for `idle_timeout_s`. An actively-working agent runs as long as it keeps
-        emitting events — there is no absolute wall-clock cap.
-      - Completion is detected by the CONTROL SIDECAR appearing on disk (or a
-        terminal event), so a done-but-lingering process is finished immediately
-        rather than waited on.
+    This is a thin wrapper that builds a neutral `AgentInvocation` from the
+    keyword arguments and delegates to `SubprocessExecutor`. It preserves the
+    long-standing keyword API (callers and tests use it directly); new code
+    should prefer building an `AgentInvocation` and calling an `AgentExecutor`.
 
-    Status is read from the agent-written sidecar (`control_file`) — the sole
-    verdict. If the sidecar is absent, the run is an error (the engine does not
-    inspect artifacts). Domain checks and flow routing live in the orchestration
-    layer's per-stage gate, not here.
-    Token/cost telemetry is harvested from the event stream into the result.
-
-    Args:
-        agent: agent name to dispatch.
-        prompt: per-run work-order prompt.
-        run_dir: the run's directory — where the control sidecar is written and
-            the base for relative artifact paths. NOT a cwd concept and NOT where
-            agent definitions live (that is `agent_dir`).
-        runner: the AgentRunner strategy (opencode / mock / …) — owns command
-            construction and stdout event parsing. This is the swappable seam.
-        agent_dir: optional absolute directory where the runtime finds agent
-            DEFINITIONS (opencode's `.opencode/agent/*.md`). Passed to the runner
-            (opencode: `--dir <agent_dir>`), and used as the subprocess cwd. When
-            None, the subprocess inherits the current cwd. Independent of run_dir.
-        idle_timeout_s: max silence (no event, no sidecar) before "stale" -> kill.
-        model: optional model override.
-        instructions: resolved standing instructions (for runners without named
-            agents; opencode ignores this — identity is in its .md).
-        env_extra: extra env vars.
-        control_file: path to the agent's status sidecar JSON — the verdict.
-        result_schema: optional ResultSchema | JSON-schema dict | pydantic
-            BaseModel subclass for the agent's `result` payload; injected into the
-            prompt and validated (attached, never raised).
-        on_event: optional callback invoked with each live runner Event, for
-            display. The engine ignores it for supervision; display errors are
-            swallowed so they can never disrupt the run.
-        shared_instructions: optional run-wide instruction/brief injected into
-            EVERY agent's prompt (after the control protocol, before the work
-            order) — e.g. a global directive passed at orchestrator start.
-        shared_context: optional run-wide context CONTENT (already read from
-            files by the caller) injected into every agent's prompt, before
-            shared_instructions — e.g. security rules / coding standards the
-            agent must actually have, not merely be told to read.
-
-    Raises:
-        AgentTimeoutError: the agent went stale (idle) with no valid sidecar.
-        AgentContentFailedError: sidecar reports status:error (do not retry).
+    See `SubprocessExecutor` for the supervision/sidecar semantics.
     """
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    # Defensive: clear a stale sidecar so completion keys only on THIS run's
-    # write. (Each agent already has its own per-agent sidecar path, so this
-    # only matters across re-runs of the same agent.)
-    if control_file is not None:
-        control_file.unlink(missing_ok=True)
-
-    # Compose the final prompt from string blocks. Order:
-    #   [completion protocol] [run-wide context] [run-wide instructions] [prompt]
-    # The protocol lives in ONE place (the library), not restated in every agent
-    # .md. shared_context is ingested rules/standards CONTENT the agent must have
-    # (before the free-text brief); shared_instructions is the run-wide brief.
-    # The caller's `prompt` already contains any per-node context + instructions +
-    # the work order (composed by agent_node). A result schema, if supplied, is
-    # embedded in the protocol block.
-    schema = coerce_schema(result_schema)
-    blocks: list[str] = []
-    if control_file is not None:
-        schema_dict = schema.to_json_schema() if schema is not None else None
-        blocks.append(build_control_preamble(agent, str(control_file), schema_dict))
-    if shared_context and shared_context.strip():
-        blocks.append(f"## Run-wide context\n\n{shared_context.strip()}")
-    if shared_instructions and shared_instructions.strip():
-        blocks.append(f"## Run-wide instructions\n\n{shared_instructions.strip()}")
-    blocks.append(prompt)
-    full_prompt = "\n\n".join(blocks)
-
-    cmd = runner.build_command(
-        AgentInvocation(agent=agent, prompt=full_prompt, model=model, instructions=instructions, agent_dir=str(agent_dir) if agent_dir else "")
-    )
-
-    env = os.environ.copy()
-    if env_extra:
-        env.update(env_extra)
-
-    # cwd = agent_dir when set (the runtime's project dir, e.g. where opencode
-    # finds .opencode/agent). Not run_dir — that is the artifact/sidecar root and
-    # nothing chdir's there. When unset, inherit the current cwd.
-    start = time.monotonic()
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(agent_dir) if agent_dir else None,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        start_new_session=True,
-    )
-
-    sup = _supervise(proc, runner=runner, idle_timeout_s=idle_timeout_s, control_file=control_file, on_event=on_event)
-    duration = time.monotonic() - start
-
-    # The control sidecar is the SOLE verdict. No sidecar => error; the engine
-    # never inspects artifacts to guess success (that is the gate's job, one
-    # layer up).
-    sidecar = _read_sidecar(control_file)
-    if sidecar is None:
-        sidecar = {
-            "status": "error",
-            "agent": agent,
-            "reason": f"no control sidecar written (completion={sup.completion})",
-        }
-
-    # Validate the result payload against the schema, if one was supplied. The
-    # outcome is ATTACHED (never raised) — a schema violation is a flow-control
-    # decision for the gate, not an engine failure.
-    outcome = schema.validate(sidecar.get("result", {})) if schema is not None else None
-
-    result = AgentResult(
+    inv = AgentInvocation(
         agent=agent,
-        exit_code=proc.returncode,
-        duration_s=duration,
-        control=sidecar,
-        tokens=sup.tokens,
-        cost=sup.cost,
-        events=sup.events,
-        completion=sup.completion,
-        result_valid=outcome.valid if outcome is not None else True,
-        result_obj=outcome.obj if outcome is not None else None,
-        result_errors=outcome.errors if outcome is not None else (),
+        prompt=prompt,
+        run_dir=run_dir,
+        node=node,
+        result_schema=result_schema,
+        model=model,
+        agent_dir=str(agent_dir) if agent_dir else "",
+        instructions=instructions,
+        shared_instructions=shared_instructions,
+        shared_context=shared_context,
+        idle_timeout_s=idle_timeout_s,
+        on_event=on_event,
     )
-
-    status = sidecar.get("status")
-
-    # Stale (idle) with no successful sidecar => genuinely hung.
-    if sup.completion == "stale" and status not in ("ok", "verified"):
-        raise AgentTimeoutError(f"agent {agent!r} went stale after {duration:.1f}s (no event/sidecar for {idle_timeout_s}s)")
-
-    # Content failure: sidecar explicitly reports a non-ok status.
-    if status not in ("ok", "verified"):
-        raise AgentContentFailedError(f"agent {agent!r} reported status={status!r}: {sidecar.get('reason')}")
-
-    return result
+    return SubprocessExecutor(runner, env_extra=env_extra).run(inv, control_file=control_file)
 
 
 def _kill_group(proc: subprocess.Popen) -> None:

@@ -1,6 +1,7 @@
 """Unit tests for the AgentRunner strategy (command building + event parsing)."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +11,13 @@ from agent_flow.runners import (
     OpenCodeRunner,
     get_runner,
 )
+
+
+def _inv(**kw) -> AgentInvocation:
+    """AgentInvocation with a filled run_dir — these tests exercise only
+    build_command, which does not use run_dir, so a placeholder is fine."""
+    kw.setdefault("run_dir", Path("/tmp/run"))
+    return AgentInvocation(**kw)
 
 
 def test_get_runner_known():
@@ -24,7 +32,7 @@ def test_get_runner_unknown_raises():
 
 def test_opencode_build_command_shape():
     r = OpenCodeRunner()
-    cmd = r.build_command(AgentInvocation(agent="tech-stack-analyst", prompt="PRODUCT_KEY: x", model="m"))
+    cmd = r.build_command(_inv(agent="tech-stack-analyst", prompt="PRODUCT_KEY: x", model="m"))
     assert cmd[:2] == ["opencode", "run"]
     assert "--agent" in cmd and "tech-stack-analyst" in cmd
     assert "--model" in cmd and "m" in cmd
@@ -36,29 +44,29 @@ def test_opencode_build_command_shape():
 def test_opencode_build_command_omits_model_when_unset():
     # No model configured -> NO --model flag, so the runtime (opencode) resolves
     # the model from its own config. The library never hardcodes a model.
-    cmd = OpenCodeRunner().build_command(AgentInvocation(agent="a", prompt="p"))
+    cmd = OpenCodeRunner().build_command(_inv(agent="a", prompt="p"))
     assert "--model" not in cmd
 
 
 def test_mock_build_command_omits_model_when_unset():
-    cmd = MockRunner().build_command(AgentInvocation(agent="a", prompt="p"))
+    cmd = MockRunner().build_command(_inv(agent="a", prompt="p"))
     assert "--model" not in cmd
 
 
 def test_opencode_build_command_emits_dir_when_agent_dir_set():
-    cmd = OpenCodeRunner().build_command(AgentInvocation(agent="a", prompt="p", agent_dir="/proj"))
+    cmd = OpenCodeRunner().build_command(_inv(agent="a", prompt="p", agent_dir="/proj"))
     assert "--dir" in cmd and "/proj" in cmd
     assert cmd.index("--dir") < cmd.index("/proj")
     assert cmd[-1] == "p"  # prompt still trailing
 
 
 def test_opencode_build_command_no_dir_when_agent_dir_absent():
-    cmd = OpenCodeRunner().build_command(AgentInvocation(agent="a", prompt="p"))
+    cmd = OpenCodeRunner().build_command(_inv(agent="a", prompt="p"))
     assert "--dir" not in cmd
 
 
 def test_mock_ignores_agent_dir():
-    cmd = MockRunner().build_command(AgentInvocation(agent="analyst", prompt="p", agent_dir="/proj"))
+    cmd = MockRunner().build_command(_inv(agent="analyst", prompt="p", agent_dir="/proj"))
     assert "--dir" not in cmd  # mock has no project concept
 
 
@@ -91,7 +99,7 @@ def test_opencode_parse_event_other_event_type_is_heartbeat():
 
 def test_mock_runner_command_and_no_events():
     r = MockRunner()
-    cmd = r.build_command(AgentInvocation(agent="domain-analyst", prompt="p"))
+    cmd = r.build_command(_inv(agent="domain-analyst", prompt="p"))
     assert cmd[0] == "python3"
     assert "--agent" in cmd and "domain-analyst" in cmd
     assert r.parse_event("anything").is_event is False
