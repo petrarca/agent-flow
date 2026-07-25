@@ -75,7 +75,7 @@ def _print_nodes_table(nodes, name: str, *, details: bool, console) -> None:
                     str(n.max_cycles),
                     (n.gate_ref if n.gate_ref else "yes") if (n.gate_ref or n.gate is not None) else "-",
                     "yes" if n.result_schema is not None else "-",
-                    "yes" if n.exports is not None else "-",
+                    (n.export_ref if n.export_ref else "yes") if (n.export_ref or n.exports is not None) else "-",
                 ]
             table.add_row(*row)
 
