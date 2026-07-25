@@ -131,7 +131,7 @@ end-of-run Node|Agent|Outcome|Duration table), and `print_preflight_results`.
 the raw firehose + results table. `--show-diffs` composes with either — it layers
 edit/write diff blocks (via `render_diff`, `--diff-style` unified|split, reading the neutral
 `ev.diff`) onto the default table OR the firehose. `rich`/`typer` are an OPTIONAL `cli` extra
-(`pip install 'agent-flow[cli]'`), lazy-imported inside the CLI functions (via
+(`pip install 'petrarca-agent-flow[cli]'`), lazy-imported inside the CLI functions (via
 `utils.require_extra`), so the engine core stays render-agnostic AND import-cheap:
 it emits `Event`s and `on_node_event` data and returns `NodeOutcome`s, and only
 the `cli` package turns those into terminal output.

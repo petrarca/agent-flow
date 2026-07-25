@@ -70,7 +70,7 @@ signal). Everything else the agent emits is opaque. See
    opt-in extras matching the runtime seams: `[cli]` (typer + rich, the display
    layer) and `[prefect]` (the opt-in Prefect backend). Both are lazy-imported
    at their entry points, and using a feature without its extra raises a clear
-   "install agent-flow[...]" message.
+   "install petrarca-agent-flow[...]" message.
 4. **Swappable seams, shared everything else.** Three things may change behind
    thin adapters — the **execution backend** (in-process vs Prefect), the **agent
    runtime** (opencode vs Claude Code, via `AgentRunner`), and the **pipeline**

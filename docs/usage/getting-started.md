@@ -17,13 +17,17 @@ has been run as written.
 Requires Python 3.14+ and [`uv`](https://docs.astral.sh/uv/). For real (not
 mock) runs, `opencode` must be on `PATH` and configured with model access.
 
+The PyPI distribution is `petrarca-agent-flow` (the import name is `agent_flow`).
+
 ```bash
 # core only (programmatic build_flow on the in-process backend):
-uv add "agent-flow @ git+https://github.com/petrarca/agent-flow"
+uv add "petrarca-agent-flow"
 # with the CLI (run_cli + live display) — the typical interactive install:
-uv add "agent-flow[cli] @ git+https://github.com/petrarca/agent-flow"
+uv add "petrarca-agent-flow[cli]"
 # add the opt-in Prefect backend too:
-uv add "agent-flow[cli,prefect] @ git+https://github.com/petrarca/agent-flow"
+uv add "petrarca-agent-flow[cli,prefect]"
+# or pin to the git repo instead of PyPI:
+uv add "petrarca-agent-flow[cli] @ git+https://github.com/petrarca/agent-flow"
 ```
 
 **Lean core, optional extras.** The default install is small: pydantic,
@@ -32,11 +36,12 @@ pipeline and run it in-process on the default **in-process backend**, with typed
 result output, typed run-parameter models, and YAML/`--config` support. The
 heavy pieces are opt-in extras that mirror the runtime seams:
 
-- `agent-flow[cli]` — typer + rich, for the reusable `run_cli` command and the
-  live event / status-table display.
-- `agent-flow[prefect]` — Prefect, for the opt-in `--backend prefect` (run UI,
-  scheduling, scale). The default in-process backend needs none of it.
-- `agent-flow[all]` — both. `agent-flow[dev]` implies `[all]` plus the toolchain.
+- `petrarca-agent-flow[cli]` — typer + rich, for the reusable `run_cli` command
+  and the live event / status-table display.
+- `petrarca-agent-flow[prefect]` — Prefect, for the opt-in `--backend prefect`
+  (run UI, scheduling, scale). The default in-process backend needs none of it.
+- `petrarca-agent-flow[all]` — both. `petrarca-agent-flow[dev]` implies `[all]`
+  plus the toolchain.
 
 Using a feature without its extra raises a clear message naming the extra to
 install.

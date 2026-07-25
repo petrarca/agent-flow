@@ -12,7 +12,7 @@ from typing import Any
 
 
 def require_extra(module: str, extra: str, feature: str):
-    """Import `module`, or raise a clear 'install agent-flow[extra]' error.
+    """Import `module`, or raise a clear 'install petrarca-agent-flow[extra]' error.
 
     Optional dependencies (prefect, typer, rich) are grouped into install extras.
     A consumer who uses a feature without its extra should get an actionable
@@ -27,7 +27,9 @@ def require_extra(module: str, extra: str, feature: str):
     try:
         return importlib.import_module(module)
     except ImportError as exc:
-        raise ImportError(f"{feature} requires the optional '{module}' dependency. Install it with: pip install 'agent-flow[{extra}]'") from exc
+        raise ImportError(
+            f"{feature} requires the optional '{module}' dependency. Install it with: pip install 'petrarca-agent-flow[{extra}]'"
+        ) from exc
 
 
 def resolve_template(value: str, params: dict[str, Any], *, strict: bool = False) -> str:

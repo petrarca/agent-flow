@@ -16,9 +16,9 @@ def test_require_extra_raises_friendly_on_missing():
         require_extra("no_such_module_xyz", "cli", "the run_cli command")
     msg = str(exc.value)
     assert "the run_cli command" in msg
-    assert "pip install 'agent-flow[cli]'" in msg
+    assert "pip install 'petrarca-agent-flow[cli]'" in msg
 
 
 def test_require_extra_names_the_extra():
-    with pytest.raises(ImportError, match=r"agent-flow\[prefect\]"):
+    with pytest.raises(ImportError, match=r"petrarca-agent-flow\[prefect\]"):
         require_extra("no_such_module_xyz", "prefect", "the Prefect backend")

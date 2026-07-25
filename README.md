@@ -253,18 +253,20 @@ a pipeline and run it on the default in-process backend, with typed
 params/results and config (pydantic, pydantic-settings, pyyaml, jsonschema,
 python-dotenv). The heavy pieces are opt-in extras that match the runtime seams:
 
+Installed from PyPI as `petrarca-agent-flow` (the import name is `agent_flow`).
+
 | Install | Adds | Use when |
 |---|---|---|
-| `agent-flow` | core only | programmatic `build_flow` on the in-process backend |
-| `agent-flow[cli]` | typer, rich | the `run_cli` command + live display |
-| `agent-flow[prefect]` | prefect | `--backend prefect` (run UI / scale) |
-| `agent-flow[all]` | cli + prefect | a full interactive install |
-| `agent-flow[dev]` | all + toolchain | development (implies `[all]`) |
+| `petrarca-agent-flow` | core only | programmatic `build_flow` on the in-process backend |
+| `petrarca-agent-flow[cli]` | typer, rich | the `run_cli` command + live display |
+| `petrarca-agent-flow[prefect]` | prefect | `--backend prefect` (run UI / scale) |
+| `petrarca-agent-flow[all]` | cli + prefect | a full interactive install |
+| `petrarca-agent-flow[dev]` | all + toolchain | development (implies `[all]`) |
 
 ```bash
-pip install "agent-flow[cli]"          # typical interactive use
-pip install "agent-flow[cli,prefect]"  # + the Prefect backend
-task install                           # editable dev install (implies [all])
+pip install "petrarca-agent-flow[cli]"          # typical interactive use
+pip install "petrarca-agent-flow[cli,prefect]"  # + the Prefect backend
+task install                                    # editable dev install (implies [all])
 ```
 
 Using a feature without its extra raises a clear message telling you which

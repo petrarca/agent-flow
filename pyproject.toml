@@ -3,7 +3,9 @@ requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agent-flow"
+# Distribution name on PyPI (namespaced — plain "agent-flow" is too similar to
+# existing projects). The IMPORT name is unchanged: `import agent_flow`.
+name = "petrarca-agent-flow"
 authors = [
     { name = "Wolfgang Miller", email = "wolfgang.miller@petrarca-labs.com" },
 ]
@@ -52,7 +54,7 @@ all = ["prefect>=3.0.0", "typer>=0.12", "rich>=13.0"]
 # Development tooling. Includes the runtime extras (prefect + cli) so `task
 # install` yields a full dev env able to run the entire test suite (the
 # integration suite exercises the Prefect backend; CLI tests need rich/typer).
-dev = ["agent-flow[all]", "ruff", "pytest", "pytest-cov", "pre-commit", "setuptools-scm"]
+dev = ["petrarca-agent-flow[all]", "ruff", "pytest", "pytest-cov", "pre-commit", "setuptools-scm"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

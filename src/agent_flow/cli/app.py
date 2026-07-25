@@ -65,7 +65,7 @@ def run_cli(
     does not bootstrap Prefect. The default backend is inprocess (no Prefect);
     pass --backend prefect to opt in.
 
-    Requires the `cli` extra (typer + rich): pip install 'agent-flow[cli]'.
+    Requires the `cli` extra (typer + rich): pip install 'petrarca-agent-flow[cli]'.
     """
     from agent_flow.utils import require_extra
 
