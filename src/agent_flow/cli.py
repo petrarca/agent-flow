@@ -66,16 +66,21 @@ def event_printer(agent: str, *, console=None) -> Callable[[Event], None]:
 
 
 def _project_event(raw: str) -> str:
-    """Project one raw event line to a short, styled display line (best-effort)."""
+    """Project one raw event line to a styled display line (best-effort).
+
+    Content is shown in FULL (not truncated) — rich soft-wraps long lines in the
+    terminal; --show-events is a debug stream where seeing the whole message/tool
+    input matters more than fitting one physical line.
+    """
     import json
 
     raw = raw.strip()
     if not raw.startswith("{"):
-        return raw[:120]
+        return raw
     try:
         ev = json.loads(raw)
     except ValueError:
-        return raw[:120]
+        return raw
 
     part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
     ptype = part.get("type") or ev.get("type") or "event"
@@ -92,7 +97,7 @@ def _project_event(raw: str) -> str:
         return f"[cyan]tool {tool}[/cyan] {target}".rstrip()
     if ptype == "text":
         text = " ".join((part.get("text") or "").split())
-        return f"[white]{text[:100]}[/white]" if text else ""
+        return f"[white]{text}[/white]" if text else ""
     return f"[dim]{ptype}[/dim]"
 
 
