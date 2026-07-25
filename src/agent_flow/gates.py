@@ -82,9 +82,14 @@ class GateContext:
     Directive to steer the flow. The library supplies this context; what the gate
     checks and decides is entirely the consumer's concern.
 
-    result    whatever the agent run returned — the control dict (status,
-              telemetry) or an AgentResult, depending on how the consumer wraps
-              run_agent. Typed Any so the library does not dictate the shape.
+    obj       the VALIDATED typed result object when the node declared a
+              `result_schema` (a pydantic model instance) — else None. This is the
+              clean way to read the agent's structured result: `ctx.obj.ready`
+              instead of digging a magic key out of `result`. Prefer it whenever a
+              schema is set.
+    result    the RAW result envelope — the control dict (status, telemetry, and
+              the agent's `result` payload). Use it when there is no schema, or for
+              the envelope fields. Typed Any so the library does not dictate shape.
     node      the node that just ran (its name, and whatever the consumer's node
               type carries). Typed Any so the library does not couple to any one
               pipeline's node/stage shape.
@@ -106,6 +111,7 @@ class GateContext:
     node: Any
     run_dir: Path
     cycles: int
+    obj: Any = None
     params: dict[str, Any] = field(default_factory=dict)
     agent_dir: str = ""
 

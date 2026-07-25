@@ -113,12 +113,14 @@ initial params. A node reads a *snapshot* of it when it starts (so it sees a
 stable view for its execution), and a node can **publish** values into it for
 downstream nodes via `agent_node(exports=...)`:
 
-- declarative `{param_name: result_field}` — copy fields out of the node's
-  `result` into params;
-- callable `(result) -> Mapping` — full control.
+- declarative `{param_name: field}` — copy fields (attribute or dict key) into
+  params;
+- callable `(payload) -> Mapping` — full control.
 
-The engine applies exports after the node settles (Continue or cross-node
-GoTo), so a later node's `{name}` templating picks them up automatically.
+The hook sees the VALIDATED typed object when the node set a `result_schema`, else
+the raw result dict — one payload, no signature sniffing. The engine applies
+exports after the node settles (Continue or cross-node GoTo), so a later node's
+`{name}` templating picks them up automatically.
 Example: the readiness check captures provenance and `exports` it, so every
 downstream agent stamps the same `analysis_timestamp` / `pipeline_commit`
 without re-capturing it.
@@ -129,8 +131,9 @@ Scalar params are the first slice of a broader "dynamic prompt composition"
 direction (injecting context/instructions at run time); see the roadmap.
 
 A param that is *only ever* set this way (not a user input) is declared on the
-`params_model` with a placeholder default and `Field(json_schema_extra={"runtime":
-True})`. The placeholder keeps `{name}` templating resolvable from the first node;
+`params_model` with a placeholder default and the `runtime_param()` marker
+(`Field(json_schema_extra=runtime_param())`). The placeholder keeps `{name}`
+templating resolvable from the first node;
 `run_cli` recognises the marker and **omits the field from the resolved-params
 summary** so it does not read as an input you could pass. The publishing node then
 overwrites it. Example: `analysis_timestamp` / `pipeline_commit`.

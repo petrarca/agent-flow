@@ -75,14 +75,16 @@ values (the historical behavior).
 
 **Runtime-populated fields.** Some params are not user inputs — they are filled
 *at run time* (e.g. a value a node publishes via [`exports`](#exports)). Declare
-such a field with a placeholder default and mark it
-`json_schema_extra={"runtime": True}`:
+such a field with a placeholder default and mark it with the `runtime_param()`
+helper (so you don't hand-encode the marker):
 
 ```python
+from agent_flow import runtime_param
+
 class MyParams(BaseSettings):
     product_key: str                        # user input
     # set at run time by a node's exports; not something you pass with -p:
-    analysis_timestamp: str = Field(default="UNKNOWN", json_schema_extra={"runtime": True})
+    analysis_timestamp: str = Field(default="UNKNOWN", json_schema_extra=runtime_param())
 ```
 
 The placeholder keeps `{analysis_timestamp}` templating resolvable from the very
@@ -235,9 +237,10 @@ agent_node("readiness", "readiness-check", result_schema=ReadinessResult,
            exports={"analysis_timestamp": "analysis_timestamp",
                     "pipeline_commit": "pipeline_commit"})
 
-# Callable: full control over what gets published.
-agent_node("readiness", "readiness-check",
-           exports=lambda result: {"mode": result["_result_obj"].suggested_mode})
+# Callable: full control. With a result_schema set, exports receives the
+# VALIDATED typed object directly (else the raw dict) — no key digging.
+agent_node("readiness", "readiness-check", result_schema=ReadinessResult,
+           exports=lambda r: {"mode": r.suggested_mode})
 
 # A later node then templates the exported value like any other param:
 agent_node("analyst", "analyst", depends_on=("readiness",),
@@ -255,30 +258,27 @@ the publisher, never parallel-group siblings. See
 
 ### What a gate sees
 
-Two simple rules:
+Prefer the typed object; fall back to the dict:
 
-- **`ctx.result["result"]`** — the agent's result **dict**, always present. If a
-  schema was attached, this data was validated (see `_result_valid` /
-  `_result_errors`).
-- **`ctx.result["_result_obj"]`** — the **Pydantic model instance**, *only* when
-  you attached a `PydanticSchema`; otherwise `None` (a dict schema adds no new
-  object — the validated data is the dict already in `result`).
+- **`ctx.obj`** — the **validated pydantic instance** when the node attached a
+  `PydanticSchema`, else `None`. Read structured fields directly: `ctx.obj.ready`.
+- **`ctx.result`** — the raw envelope. The agent's result dict is at
+  `ctx.result["result"]`; schema-check flags at `ctx.result["_result_valid"]` /
+  `["_result_errors"]`. Use this for the no-schema case or the envelope fields.
 
 ```python
 def gate(ctx):
+    if ctx.obj is not None:                              # Pydantic: typed fields
+        return Restart() if len(ctx.obj.languages) < 2 else Continue()
+
     if not ctx.result["_result_valid"]:                 # schema check failed
         return Restart(note=f"invalid result: {ctx.result['_result_errors']}")
-
-    obj = ctx.result.get("_result_obj")                 # a model, or None
-    if obj is not None:                                 # Pydantic: typed fields
-        return Restart() if len(obj.languages) < 2 else Continue()
 
     data = ctx.result.get("result", {})                 # dict/no-schema case
     return Restart() if not data.get("summary") else Continue()
 ```
 
-In short: **the dict is always in `result`; `_result_obj` is the model if you
-gave one, else `None`.**
+In short: **read `ctx.obj` when you set a schema; `ctx.result` otherwise.**
 
 ## Watch progress live
 

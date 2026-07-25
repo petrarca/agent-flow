@@ -91,6 +91,8 @@ from agent_flow.run_config import (
     get_settings,
     init_settings,
     parse_params,
+    runtime_param,
+    runtime_param_fields,
 )
 from agent_flow.run_context import (
     RunContextService,
@@ -146,6 +148,8 @@ __all__ = [
     "init_settings",
     "clear_settings",
     "parse_params",
+    "runtime_param",
+    "runtime_param_fields",
     "resolve_run_dir",
     "default_temp_base",
     # result-schema seam (typed agent output)

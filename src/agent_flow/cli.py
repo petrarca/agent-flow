@@ -393,7 +393,7 @@ def run_cli(
     """
     import typer
 
-    from agent_flow.run_config import build_run_config, parse_params
+    from agent_flow.run_config import build_run_config, parse_params, runtime_param_fields
 
     app = typer.Typer(add_completion=False, help=f"Run the {name} pipeline.")
 
@@ -442,7 +442,7 @@ def run_cli(
         # {"runtime": True}) are NOT user inputs — they get an initial placeholder
         # and are overwritten at run time (e.g. by a node's exports). Hide them
         # from the resolved-params summary so they don't read as things you pass.
-        runtime_fields = _runtime_param_fields(params_model)
+        runtime_fields = runtime_param_fields(params_model)
         # model / idle_timeout_s are run-wide knobs the batteries node reads from
         # params; inject the resolved values so a node uses them (a per-node
         # model=/idle_timeout_s= and an explicit -p still win, so only set if the
@@ -462,25 +462,6 @@ def run_cli(
         _run_with_view(build_nodes(), params, cfg, console, name=name, llm_tag=llm_tag)
 
     app()
-
-
-def _runtime_param_fields(model: type | None) -> set[str]:
-    """Names of params_model fields marked runtime-populated (not user inputs).
-
-    A field is runtime-populated when its `Field(json_schema_extra={"runtime":
-    True})`. Such fields hold a placeholder at startup and are set at run time
-    (e.g. by a node's `exports`), so the CLI hides them from the resolved-params
-    summary. Returns an empty set when there is no model / no such fields.
-    """
-    fields = getattr(model, "model_fields", None)
-    if not fields:
-        return set()
-    out: set[str] = set()
-    for fname, finfo in fields.items():
-        extra = getattr(finfo, "json_schema_extra", None)
-        if isinstance(extra, dict) and extra.get("runtime"):
-            out.add(fname)
-    return out
 
 
 def _print_run_summary(name: str, cfg, params: dict, console, *, hide: set[str] | None = None) -> None:

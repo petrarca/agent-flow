@@ -19,11 +19,11 @@ schema. When (and only when) a consumer attaches one to a run, the engine:
 
 The engine **never fails** a run on a validation error. That is a flow-control
 decision, so it is surfaced to the [gate](gates.md), which decides
-Restart/Continue/Stop. Via the batteries layer a gate reads these as
-`ctx.result["_result_valid"]` / `["_result_errors"]`, and the typed object as
-`ctx.result["_result_obj"]` — a Pydantic instance for `PydanticSchema`, else
-`None` (a dict schema / no schema add no new object; the validated data is the
-dict already in `ctx.result["result"]`). (Validating here is
+Restart/Continue/Stop. The gate reads the **typed object as `ctx.obj`** — a
+Pydantic instance for `PydanticSchema`, else `None` (a dict schema / no schema add
+no new object; the validated data is the dict at `ctx.result["result"]`). The
+schema-check flags are on the envelope: `ctx.result["_result_valid"]` /
+`["_result_errors"]`. (Validating here is
 a convenience so the common case needs no gate code; a purist consumer may pass
 no schema and validate inside their own gate instead. Either way, deciding what
 to DO about a bad result stays the consumer's.)

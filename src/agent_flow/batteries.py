@@ -111,12 +111,14 @@ def agent_node(
             (opencode `--dir`). Defaults to the flow's build_flow(agent_dir=...).
             Templated; absolute after templating.
         exports: optional result->params publish hook. After this node completes
-            (and is not re-running), the engine derives keys from the node's
-            `result` and merges them into the run-context service, so DOWNSTREAM
-            nodes template `{key}` against them. Two forms:
-              - declarative `{param_name: result_field}` — copy result fields into
-                params under (possibly renamed) keys; missing fields are skipped.
-              - callable `(result) -> Mapping[str, Any]` — full control.
+            (and is not re-running), the engine derives keys from the node's result
+            and merges them into the run-context service, so DOWNSTREAM nodes
+            template `{key}` against them. The hook sees the VALIDATED typed object
+            when the node set a `result_schema` (a pydantic instance), else the raw
+            result dict — one payload, no signature sniffing. Two forms:
+              - declarative `{param_name: field}` — copy fields (attribute or dict
+                key) into params under (possibly renamed) keys; missing skipped.
+              - callable `(payload) -> Mapping[str, Any]` — full control.
             Use it to route a value a node DISCOVERS (e.g. a readiness check's
             captured provenance or a chosen mode) to the agents that follow.
             Same-process, downstream-only; never targets parallel-group siblings

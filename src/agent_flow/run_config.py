@@ -48,6 +48,45 @@ from pydantic_settings import (
 
 from agent_flow.agent_runtime import DEFAULT_IDLE_TIMEOUT_S
 
+# The json_schema_extra KEY that marks a params_model field as runtime-populated
+# (set at run time — e.g. by a node's exports — not a user input). Named here so
+# both the writer (a consumer's Field) and the reader (runtime_param_fields) share
+# one source of truth instead of a hand-typed string.
+RUNTIME_PARAM_KEY = "runtime"
+
+
+def runtime_param(**extra: Any) -> dict[str, Any]:
+    """Marker for a runtime-populated params_model field, for `Field(json_schema_extra=...)`.
+
+    A field carrying this is NOT a user input: it holds a placeholder at startup
+    and is filled at run time (a node's exports, a default_factory, …). `run_cli`
+    recognises the marker and OMITS the field from the resolved-params summary.
+
+    Usage in a consumer's params model:
+
+        from agent_flow import runtime_param
+        pipeline_commit: str = Field(default="UNKNOWN", json_schema_extra=runtime_param())
+
+    Extra keys are merged in, so you can attach your own schema metadata too.
+    """
+    return {RUNTIME_PARAM_KEY: True, **extra}
+
+
+def runtime_param_fields(model: type | None) -> set[str]:
+    """Names of a params_model's fields marked runtime-populated (see runtime_param).
+
+    Returns an empty set when there is no model / no such fields.
+    """
+    fields = getattr(model, "model_fields", None)
+    if not fields:
+        return set()
+    out: set[str] = set()
+    for fname, finfo in fields.items():
+        extra = getattr(finfo, "json_schema_extra", None)
+        if isinstance(extra, dict) and extra.get(RUNTIME_PARAM_KEY):
+            out.add(fname)
+    return out
+
 
 def _validate_yaml_top_level(path: Path) -> None:
     """Reject unknown top-level keys in a --config YAML (fail loudly on typos).

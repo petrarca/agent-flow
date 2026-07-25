@@ -3,14 +3,15 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
-from agent_flow.cli import _print_run_summary, _runtime_param_fields
+from agent_flow import runtime_param, runtime_param_fields
+from agent_flow.cli import _print_run_summary
 
 
 class _Params(BaseSettings):
     product_key: str = "demo"
-    # runtime-populated: a placeholder overwritten at run time (e.g. by exports)
-    analysis_timestamp: str = Field(default="UNKNOWN", json_schema_extra={"runtime": True})
-    pipeline_commit: str = Field(default="UNKNOWN", json_schema_extra={"runtime": True})
+    # runtime-populated via the agent-flow helper (not a hand-typed marker).
+    analysis_timestamp: str = Field(default="UNKNOWN", json_schema_extra=runtime_param())
+    pipeline_commit: str = Field(default="UNKNOWN", json_schema_extra=runtime_param())
 
 
 class _Cfg:
@@ -21,17 +22,22 @@ class _Cfg:
     idle_timeout_s = 120
 
 
+def test_runtime_param_helper_shape():
+    assert runtime_param() == {"runtime": True}
+    assert runtime_param(examples=["x"]) == {"runtime": True, "examples": ["x"]}
+
+
 def test_runtime_param_fields_detects_tagged_fields():
-    assert _runtime_param_fields(_Params) == {"analysis_timestamp", "pipeline_commit"}
+    assert runtime_param_fields(_Params) == {"analysis_timestamp", "pipeline_commit"}
 
 
 def test_runtime_param_fields_none_or_untagged():
-    assert _runtime_param_fields(None) == set()
+    assert runtime_param_fields(None) == set()
 
     class Plain(BaseSettings):
         a: str = "1"
 
-    assert _runtime_param_fields(Plain) == set()
+    assert runtime_param_fields(Plain) == set()
 
 
 def test_summary_hides_runtime_fields(capsys):
@@ -39,7 +45,7 @@ def test_summary_hides_runtime_fields(capsys):
 
     console = Console(force_terminal=False)
     params = {"product_key": "demo", "analysis_timestamp": "UNKNOWN", "pipeline_commit": "UNKNOWN"}
-    _print_run_summary("t", _Cfg(), params, console, hide=_runtime_param_fields(_Params))
+    _print_run_summary("t", _Cfg(), params, console, hide=runtime_param_fields(_Params))
     out = capsys.readouterr().out
     assert "product_key" in out
     assert "analysis_timestamp" not in out

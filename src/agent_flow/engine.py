@@ -265,8 +265,12 @@ def interpret(
         except Exception as exc:  # noqa: BLE001 - deliberately broad: the run callable is caller code
             return NodeOutcome(status=on_error(node, exc))
 
+        # The validated typed object (a pydantic instance when a result_schema was
+        # set, else None) — surfaced as GateContext.obj so gates/exports read it
+        # directly instead of digging the `_result_obj` key out of `result`.
+        obj = result.get("_result_obj") if isinstance(result, dict) else None
         directive = (
-            node.gate(GateContext(result=result, node=node, run_dir=run_dir, cycles=cycles, params=eff_params, agent_dir=agent_dir))
+            node.gate(GateContext(result=result, obj=obj, node=node, run_dir=run_dir, cycles=cycles, params=eff_params, agent_dir=agent_dir))
             if node.gate
             else Continue()
         )
@@ -284,7 +288,7 @@ def interpret(
 
         # Node is settling (Continue / cross-node GoTo / exhausted Restart): apply
         # its result->params exports to the run-context for DOWNSTREAM nodes.
-        _apply_exports(node, result, log)
+        _apply_exports(node, result, obj, log)
 
         if isinstance(directive, GoTo) and directive.node != node.name:
             # Cross-node jump-back: the node itself is done; the walker decides
@@ -296,24 +300,37 @@ def interpret(
         return NodeOutcome(status="ok")
 
 
-def _apply_exports(node: Node, result: Any, log: Callable[[str], None]) -> None:
+_MISSING = object()
+
+
+def _read_field(src: Any, field: str) -> Any:
+    """Read `field` from a dict (by key) or an object (by attribute); _MISSING if absent."""
+    if isinstance(src, dict):
+        return src.get(field, _MISSING)
+    return getattr(src, field, _MISSING)
+
+
+def _apply_exports(node: Node, result: Any, obj: Any, log: Callable[[str], None]) -> None:
     """Merge a node's result-derived exports into the run-context service.
 
-    `node.exports` is either a callable `(result) -> Mapping` or a declarative
-    `{param_name: result_field}` map. Missing result fields are skipped. Never
-    raises: an exports mistake logs and is ignored rather than failing the run.
+    The consumer's `node.exports` sees the VALIDATED typed object when the node
+    declared a `result_schema` (a pydantic instance), else the raw result dict —
+    one payload, no signature sniffing. Two forms:
+      - callable `(payload) -> Mapping` — full control.
+      - declarative `{param_name: field}` — copy fields (attribute or dict key).
+    Missing fields are skipped. Never raises: a mistake logs and is ignored.
     """
     spec = node.exports
     if not spec:
         return
     from agent_flow.run_context import get_run_context
 
+    payload = obj if obj is not None else result
     try:
         if callable(spec):
-            derived = dict(spec(result) or {})
+            derived = dict(spec(payload) or {})
         else:
-            src = result if isinstance(result, dict) else {}
-            derived = {param: src[field] for param, field in spec.items() if field in src}
+            derived = {param: v for param, field in spec.items() if (v := _read_field(payload, field)) is not _MISSING}
         if derived:
             get_run_context().update(derived)
             log(f"node {node.name}: exported {sorted(derived)} to run-context")

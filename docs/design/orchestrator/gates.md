@@ -32,13 +32,21 @@ four outcomes and understands the whole vocabulary.
 
 ```python
 GateContext(
-    result,    # what the run returned — the control dict (status/result/…) or an AgentResult
+    obj,       # the VALIDATED typed result object (pydantic instance) when the node
+               #   set a result_schema, else None — read ctx.obj.field directly
+    result,    # the RAW control envelope (status/result/telemetry) — for the no-schema
+               #   case or the envelope fields
     node,      # the node that just ran (name + whatever the consumer's node type carries)
     run_dir,   # the run's artifact dir — a gate stats files under here
     cycles,    # how many times this node has re-run, so the gate can bound itself
     params,    # the pipeline's run-time params (same dict RunContext.params carries)
 )
 ```
+
+Prefer **`ctx.obj`** whenever the node declared a `result_schema`: it is the
+validated pydantic instance, so `ctx.obj.ready` reads the structured result
+cleanly — no digging a magic key out of `result`. `ctx.obj` is `None` when there
+is no schema; fall back to `ctx.result` then.
 
 `result` and `node` are typed `Any` on purpose — the library does not dictate the
 shape of either, so any pipeline's node/result works. `params` is included

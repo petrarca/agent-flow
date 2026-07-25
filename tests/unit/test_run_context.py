@@ -87,6 +87,31 @@ def test_callable_exports_full_control():
     assert get_run_context().get("mode") == "VALIDATION"
 
 
+def test_exports_reads_typed_object_when_result_schema_set():
+    # When a result_schema is used, the result dict carries the validated object
+    # under _result_obj; exports (declarative AND callable) see the TYPED object,
+    # so a consumer reads attributes directly — no _result_obj key digging.
+    import types
+
+    init_run_context({})
+    obj = types.SimpleNamespace(pipeline_commit="abc1234", ready="yes")
+
+    def run(ctx):
+        return {"status": "ok", "_result_obj": obj}
+
+    # declarative: field name resolves as an ATTRIBUTE on the typed object
+    node = _node("readiness", run, exports={"pipeline_commit": "pipeline_commit"})
+    interpret(node, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
+    assert get_run_context().get("pipeline_commit") == "abc1234"
+
+    # callable: receives the typed object directly
+    clear_run_context()
+    init_run_context({})
+    node2 = _node("r2", run, exports=lambda o: {"ready": o.ready})
+    interpret(node2, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
+    assert get_run_context().get("ready") == "yes"
+
+
 def test_missing_result_field_is_skipped_not_error():
     init_run_context({})
 
