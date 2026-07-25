@@ -58,9 +58,10 @@ def event_printer(label: str, *, console=None, lines: bool = True, diffs: bool =
 
     Two INDEPENDENT, composable outputs (from --show-events / --show-diffs):
       - `lines`  : one styled progress line per event (the firehose).
-      - `diffs`  : for a file-changing event carrying a diff, a syntax-highlighted
-                   diff block AFTER its line. Works with or without `lines`, so
-                   `--show-diffs` alone layers diffs onto the default table view.
+      - `diffs`  : for a file-changing event carrying a diff, a rendered diff
+                   block (unified or split, per `diff_style`) AFTER its line.
+                   Works with or without `lines`, so `--show-diffs` alone layers
+                   diffs onto the default table view.
 
     Rendering is RUNNER-AGNOSTIC: the runner already normalized the event into
     neutral fields (kind/title/detail/status/diff) in `parse_event`; here we only

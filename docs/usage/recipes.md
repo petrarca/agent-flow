@@ -301,10 +301,9 @@ line per agent event — `tool edit … (+12/-3)`, text, `step done (N tokens)`)
 useful for debugging. **Ctrl-C** stops cleanly: the running agent's process group
 is killed and the CLI exits 130 (no orphaned opencode, no raw traceback).
 
-`--show-diffs` renders each edit/write as a syntax-highlighted diff block. It
-**composes** with the other views — use it alone to keep the compact node table
-and *also* see what each edit changed, or with `--show-events` to add diff blocks
-to the firehose:
+`--show-diffs` renders each edit/write as a diff block. It **composes** with the
+other views — use it alone to keep the compact node table and *also* see what each
+edit changed, or with `--show-events` to add diff blocks to the firehose:
 
 | flags | base view | diff blocks |
 |---|---|---|
@@ -312,6 +311,18 @@ to the firehose:
 | `--show-diffs` | node table | yes |
 | `--show-events` | firehose | no |
 | `--show-events --show-diffs` | firehose | yes |
+
+Pick the layout with `--diff-style` (or `AGENT_FLOW_DIFF_STYLE`):
+
+- `unified` (default) — one column: magenta hunk header, red `-` removals / green
+  `+` additions, dim context. The diff header noise (`Index:`/`---`/`+++`) is
+  stripped since the tool line already names the file. Robust on any width.
+- `split` — side-by-side two columns (old | new), for wide terminals / large edits.
+
+```bash
+… --show-diffs                 # unified (default)
+… --show-diffs --diff-style split
+```
 
 It is line-based on purpose (no repainting TUI), so it interleaves cleanly with
 logs and works in non-TTY/CI. To build your own view (a Live table, a TUI),

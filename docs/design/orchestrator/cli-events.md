@@ -82,7 +82,11 @@ For file-changing tools the runner MAPS its runtime's native change shape onto t
 neutral `diff`/`added`/`removed` (opencode `metadata.diff` + `filediff.additions/
 deletions`; Claude Code `gitDiff.patch/additions/deletions`) — it never parses or
 computes. The CLI formats `+added/-removed` for the one-line detail and, under
-`--show-diffs`, renders `diff` as a syntax-highlighted block.
+`--show-diffs`, renders `diff` as a block in the chosen `--diff-style`: `unified`
+(default, one column, header noise stripped) or `split` (side-by-side old | new).
+Both are built rich-only by parsing the diff (`_diff_rows`) — rich has no native
+diff widget — so all layout lives in the CLI and the runner only supplies the
+neutral diff string.
 
 The **CLI** renders only these neutral fields — it never re-parses `raw`. `kind`
 drives the base style; for tools, `status` refines the color (running=cyan,
@@ -124,7 +128,7 @@ progress, consuming `on_node_event`), `print_results_table(results, agents=)` (t
 end-of-run Node|Agent|Outcome|Duration table), and `print_preflight_results`.
 `run_cli` wires them: default = progress lines + results table; `--show-events` =
 the raw firehose + results table. `--show-diffs` composes with either — it layers
-syntax-highlighted edit/write diff blocks (via `render_diff`, reading the neutral
+edit/write diff blocks (via `render_diff`, `--diff-style` unified|split, reading the neutral
 `ev.diff`) onto the default table OR the firehose. `rich`/`typer` are core
 dependencies, but the engine core stays render-agnostic: it emits `Event`s and
 `on_node_event` data and returns `NodeOutcome`s, and only the `cli` module turns

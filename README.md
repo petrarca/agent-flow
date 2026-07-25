@@ -68,9 +68,10 @@ into four recurring problems. agent-flow addresses each directly:
   Code stubbed), per-runner preflight checks and an `AgentRunnerInfo` doctor view
   (resolved model/tools per agent dir).
 - **Runner-agnostic live display** — the runner normalizes each event into neutral
-  fields (`kind`/`title`/`detail`/`status`); the CLI renders them (status colors +
-  rich token highlighting) with zero runtime-specific knowledge. Node-labeled
-  progress lines + an end-of-run results table.
+  fields (`kind`/`title`/`detail`/`status`/`diff`); the CLI renders them (status
+  colors + rich token highlighting) with zero runtime-specific knowledge.
+  Node-labeled progress lines, an end-of-run results table, and optional
+  `--show-diffs` edit/write diffs (`--diff-style unified|split`).
 - **Settings** — `RunConfig` (pydantic-settings, `AGENT_FLOW_*`) with a strict
   precedence chain; domain params typed via a `params_model` (missing required →
   fail fast, exit 2).
