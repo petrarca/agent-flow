@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: The input plane — how instructions reach an agent
-description: The four prompt channels (protocol, run-wide brief, per-node, work order) plus persona; templating; the CLI brief.
+description: The prompt channels (completion protocol, run-wide context/brief, per-node context/instructions, run-time instructions, work order) plus persona; templating; the CLI brief.
 tags: [agent-flow, input-plane, instructions, prompt, templating, cli]
 timestamp: 2026-07-23T07:51:35Z
 ---
@@ -76,7 +76,7 @@ files for you.
 
 ## Templating
 
-Instruction blocks (3, 5), context sources (2, 4), and work-order values (6) may
+Instruction blocks (3, 5, 6), context sources (2, 4), and work-order values (7) may
 reference run params via `{name}` (one-level `str.format`). `{run_dir}` is
 provided automatically; other `{name}`s resolve from what you pass to
 `pipeline(**params)` at start. A missing placeholder is left literal rather than
@@ -171,22 +171,22 @@ guidance the agent sees. So it overrides earlier instructions by recency, no
 special flag needed: *"Ignore the prior instruction about compact tables — produce
 the full breakdown instead."*
 
-This is distinct from `start_at` (a per-invocation entry point, CLI/programmatic
-only, never persisted in config), though the two pair naturally: when you re-enter
+This is distinct from `start_from` (CLI `--start-from`, a per-invocation entry
+point, never persisted in config), though the two pair naturally: when you re-enter
 the flow at a node to iterate, you usually also want to tell that node what to do
 differently.
 
 ## Mapping to the old orchestrator vocabulary
 
-- "stuff currently in the orchestrator" → **(3)** per-node `instructions` and
-  **(4)** `inputs`.
-- "stuff passed when we start the orchestrator" → **(2)** the CLI/`build_flow`
-  brief, and params interpolated into **(4)**.
+- "stuff currently in the orchestrator" → **(5)** per-node `instructions` and
+  **(7)** `inputs`.
+- "stuff passed when we start the orchestrator" → **(3)** the CLI/`build_flow`
+  brief, and params interpolated into **(7)**.
 
 ## Where it lives
 
-`src/agent_flow/control_protocol.py` (block 1), `agent_runtime.run_agent`
+`src/agent_flow/core/control_protocol.py` (block 1), `core.agent_runtime.run_agent`
 (composes 1 + 2 + the caller prompt), `batteries.agent_node` (composes 4 + 5 + 6
 and forwards 2/3), the `RunContext.shared_instructions` / `RunContext.node_instructions`
 / `build_flow(node_instructions=)` plumbing in `engine.py`, and the CLI
-`--instruct` + config `node_instructions:` handling in `cli.py` / `run_config.py`.
+`--instruct` + config `node_instructions:` handling in `cli/app.py` / `run_config.py`.

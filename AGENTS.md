@@ -9,43 +9,44 @@ agent-flow is a Python library for **deterministic orchestration of coding-agent
 pipelines**. It replaces the fragile "LLM orchestrator agent" pattern with a
 deterministic engine that supervises coding-agent subprocesses (opencode today)
 and runs them as a graph — with parallelism, bounded re-runs, cross-node
-jump-back, telemetry, and optional typed output. The execution backend (Prefect)
-and the agent runtime (opencode / Claude Code / …) are both pluggable.
+jump-back, telemetry, and optional typed output. The execution backend (local
+in-process default / opt-in Prefect) and the agent runtime (opencode / Claude
+Code / …) are both pluggable.
 
 ### The three usage tiers (high level → low level)
 
-- **Tier 3 — declarative**: declare `Node`s, call `build_flow` → a runnable
-  Prefect flow. `agent_node` builds a node that runs one agent in one call.
+- **Tier 3 — declarative**: declare `Node`s, call `build_flow` → a runnable flow
+  callable that dispatches execution to the selected backend. `agent_node` builds
+  a node that runs one agent in one call.
 - **Tier 2 — primitives in your own flow**: call `run_agent` as the leaf of a
-  hand-written Prefect flow.
+  hand-written flow (a consumer may hand-write a Prefect flow around it — the toy
+  example does).
 - **Tier 1 — engine core**: `run_agent` spawns + liveness-supervises + kills +
   reads the control sidecar. Runtime-agnostic; no Prefect.
 
 The dependency direction is strictly downward: **Tier 3 (`engine.py`) must not
-import Tier 1** (`agent_runtime`/`runners`) — they meet only through a node's
-`run` callable. `batteries.py` is the single module allowed to bridge both.
+import Tier 1** (`core.agent_runtime`/`runners`) — they meet only through a
+node's `run` callable. `batteries.py` is the single module allowed to bridge
+both.
 
 ## Project Structure
 
 ```
 src/agent_flow/
   __init__.py            # Public API exports (keep in sync with what ships)
-  agent_runtime.py       # run_agent — supervised subprocess + liveness + sidecar verdict (Tier 1)
-  runners.py             # AgentRunner strategy (opencode / mock / claude stub) + Event
   engine.py              # Node / RunContext / build_flow / plan_groups / interpret / _walk (Tier 3)
   batteries.py           # agent_node — one-call node (bridges engine + run_agent)
   gates.py               # Directive (Continue/Restart/GoTo/Stop) + GateContext + ready gates
-  control_protocol.py    # build_control_preamble — the injected control-file contract
-  schema.py              # ResultSchema protocol / JsonSchema / ValidationOutcome / coerce_schema
-  schema_pydantic.py     # PydanticSchema adapter (pydantic is a core dependency)
-  context.py             # read_context_blocks — inject rules/standards file CONTENT into prompts
   run_config.py          # RunConfig (pydantic-settings) / build_run_config / get_settings lifecycle
+  run_context.py         # RunContextService — open domain params + exports
   preflight.py           # runtime pre-flight checks (opencode/agent_dir/prefect) -> Check results
-  cli.py                 # run_cli (+ params_model) + event_printer + print_results_table/print_preflight_results
-  utils.py               # resolve_run_dir / default_temp_base
-  env.py                 # load_env (.env -> os.environ)
-  _prefect_env.py        # bootstrap (embedded / file / server Prefect modes)
-  _mock_agent.py         # no-token stand-in for `opencode run` (same sidecar contract)
+  utils.py               # resolve_run_dir / default_temp_base / require_extra (pure top-level leaf)
+  core/                  # Tier-1 primitives, GUARANTEED backend-free (run_agent,
+                         #   control protocol, result-schema, context ingestion, env)
+  runners/               # agent-runtime seam (AgentRunner Protocol) + get_runner registry
+  backends/              # execution seam (FlowBackend ABC) + get_backend;
+                         #   local default, prefect opt-in (DEFAULT_BACKEND="local")
+  cli/                   # run_cli + display helpers (typer/rich, opt-in [cli] extra)
 examples/
   toy_pipeline/          # Tier-2 demo (hand-written flow) + its .opencode/agent/*.md
   tech_assessment/       # Tier-3 demo (declared graph) + its .opencode/agent/*.md
@@ -157,12 +158,15 @@ inputs/context/paths. To hand a value TO the agent, put it in `inputs`.
 - Ruff `E, F, B, I, C90`, line length **150**, McCabe max-complexity **10**.
 - No bare `except Exception`; catch concrete types. `except A, B:` (no `as`) is
   valid Python 3.14 (PEP 758) — do not flag it.
-- Dependencies are a single core set (no optional runtime extras). Prefect,
-  pydantic, pydantic-settings, typer, rich, pyyaml, and jsonschema are all core.
-  Prefect dominates the install footprint, so keeping the others as extras earned
-  nothing but optional-import branching; they are first-class. Prefect is still
-  lazy-imported inside `build_flow` (import speed, not optionality). Only the
-  `dev` extra is optional.
+- Dependencies are a lean core plus opt-in extras. Core (always installed):
+  pydantic, pydantic-settings, pyyaml, jsonschema, python-dotenv — enough to
+  declare a pipeline and run it on the default LocalBackend. The heavy pieces are
+  extras matching the runtime seams: `[prefect]` (the opt-in PrefectBackend) and
+  `[cli]` (typer + rich for `run_cli` / display); `[all]` is both, `[dev]` adds
+  the tooling. An optional dep is lazy-imported at its entry point only — prefect
+  inside `backends/prefect.py`, rich/typer inside `cli/` — guarded by
+  `utils.require_extra(...)` so a missing extra fails with an actionable
+  "install agent-flow[...]" message.
 - When adding a public symbol, export it in `src/agent_flow/__init__.py` and keep
   the module-docstring "Public API" example current.
 

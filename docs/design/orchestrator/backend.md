@@ -1,8 +1,8 @@
 ---
 type: Concept
-title: Execution backend — Prefect now, swappable by design
-description: Why Prefect 3 for this workload, the candidates considered, swappability, and deployment modes.
-tags: [agent-flow, backend, prefect, swappable, deployment]
+title: Execution backend — local default, Prefect opt-in, swappable by design
+description: The FlowBackend seam, the local default and Prefect opt-in backends, the candidates considered, and deployment modes.
+tags: [agent-flow, backend, local, prefect, swappable, deployment]
 timestamp: 2026-07-23T07:51:35Z
 ---
 
@@ -93,9 +93,13 @@ workload becomes long-lived / human-gated (not this pipeline).
 
 ## Deployment modes
 
-- **Embedded (dev):** `build_flow` spins an in-process temporary server + local
-  SQLite, torn down per run. Zero standing infra; no UI/history. Controlled via
-  `_prefect_env.bootstrap()`.
+These modes apply to the **PrefectBackend** only; the LocalBackend runs in-process
+with no server and no SQLite.
+
+- **Embedded (dev):** the PrefectBackend runs an in-process temporary server + an
+  in-memory SQLite DB, torn down per run. Zero standing infra; no UI/history.
+  Configured by `PrefectBackend.bootstrap()` (which owns `_prefect_env.bootstrap()`),
+  invoked only when `--backend prefect` is selected.
 - **File-backed (dev+):** `PREFECT_PERSIST=1` — a file-backed SQLite so runs
   survive process restart without a standing server.
 - **Persistent (production):** a standing Prefect **server + Postgres**; the flow

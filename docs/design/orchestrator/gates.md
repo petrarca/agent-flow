@@ -40,6 +40,8 @@ GateContext(
     run_dir,   # the run's artifact dir — a gate stats files under here
     cycles,    # how many times this node has re-run, so the gate can bound itself
     params,    # the pipeline's run-time params (same dict RunContext.params carries)
+    agent_dir, # the agent-definitions dir for the just-run node (mirrors RunContext.agent_dir),
+               #   provided for symmetry — usually unneeded by a gate
 )
 ```
 
@@ -61,7 +63,7 @@ The two checks almost every pipeline writes, shipped so you don't hand-roll a
 closure:
 
 ```python
-from agent_flow.gates import require_file, rerun_on_signal
+from agent_flow.gates import require_file, rerun_on_signal, rerun_on_named
 
 # "did the agent actually produce its artifact?" -> Restart if missing (bounded).
 # May template run params: require_file("{product_key}-report.md").
@@ -69,12 +71,18 @@ gate = require_file("tech-stack.md")
 
 # "did this (verifier) node signal a re-run of an earlier node?" -> GoTo(target).
 gate = rerun_on_signal(target="tech-stack")
+
+# same signal, but route to WHICHEVER node the sidecar names (e.g. a final
+# coherence check that may bounce to any upstream stage) -> GoTo(named).
+gate = rerun_on_named()
 ```
 
 `require_file` reads `produced()`, resolving `{name}` in its path argument
 against `ctx.params`; `rerun_on_signal` reads the node's sidecar
-`rerun_required` and returns `GoTo(target)` when set. Both are ordinary gates you
-may use, wrap, compose, or ignore.
+`rerun_required` and returns `GoTo(target)` for a FIXED target when the field is
+set. `rerun_on_named` reads the same field but routes to the node it NAMES (first
+valid backward target). All are ordinary gates you may use, wrap, compose, or
+ignore.
 
 **A real agent must be TOLD `rerun_required` exists to use it.** The injected
 [control-file protocol](control-file.md) mentions the field, but a specific
@@ -93,4 +101,6 @@ built-in pairing (see [engine](engine.md) jump-back).
 ## Where it lives
 
 `src/agent_flow/gates.py` (`Directive`, `Continue`/`Restart`/`GoTo`/`Stop`,
-`GateContext`, `Gate`, `require_file`, `rerun_on_signal`).
+`GateContext`, `Gate`, `require_file`, `rerun_on_signal`, `rerun_on_named`).
+The `produced` / `rerun_from_sidecar` helpers the gates read live in
+`agent_flow.core` (report_signals).

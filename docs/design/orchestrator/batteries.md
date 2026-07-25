@@ -25,11 +25,15 @@ keeping `engine.py` itself decoupled from the runtime.
 agent_node(
     name, agent, *,
     inputs=None,             # KEY: value work order, templated (see input-plane.md)
+    depends_on=(), parallel_group=None, criticality="blocking",
     instructions="",         # per-node instruction block, additive (see input-plane.md)
-    depends_on=(), parallel_group=None, criticality="blocking", max_cycles=1,
+    context=(),              # per-node context SOURCES, content injected (see input-plane.md)
     gate=None,               # optional consumer gate (see gates.md)
     result_schema=None,      # optional typed output (see result-schema.md)
-    model=None, idle_timeout_s=120,
+    max_cycles=1,
+    model=None, idle_timeout_s=None,
+    agent_dir=None,          # per-node override of where agent definitions live
+    exports=None,            # optional result->params publish hook
 ) -> Node
 ```
 

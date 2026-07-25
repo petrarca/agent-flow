@@ -87,6 +87,7 @@ step to re-run). See `examples/tech_assessment/.opencode/agent/*-verifier.md`.
 
 ## Where it lives
 
-`src/agent_flow/control_protocol.py` (`build_control_preamble`),
-`src/agent_flow/report_signals.py` (`rerun_from_sidecar`, `produced`), and the
-verdict logic in `src/agent_flow/agent_runtime.py`.
+`src/agent_flow/core/control_protocol.py` (`build_control_preamble`, also
+re-exported as `agent_flow.build_control_preamble`),
+`src/agent_flow/core/report_signals.py` (`rerun_from_sidecar`, `produced`), and
+the verdict logic in `src/agent_flow/core/agent_runtime.py`.

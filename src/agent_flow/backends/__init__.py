@@ -12,10 +12,11 @@ Two backends ship:
     server-side concurrency limit). Prefect is imported lazily so importing this
     package stays Prefect-free.
 
-The seam is an ABC (`FlowBackend`) with a concrete template-method `run_group`
-and one abstract primitive `_execute_parallel` — backends share the
-solo-vs-parallel + degraded-mapping logic and vary only the concurrency
-primitive. `get_backend(name)` resolves a fresh instance by name.
+The seam is an ABC (`FlowBackend`): a concrete template-method `run_group`
+carries the shared solo-vs-parallel + degraded-mapping logic, and abstract
+primitives (see `base.py`) supply what each backend does differently — how a
+group executes, the concurrency limit, the logger, and the run lifecycle.
+`get_backend(name)` resolves a fresh instance by name.
 """
 
 from __future__ import annotations

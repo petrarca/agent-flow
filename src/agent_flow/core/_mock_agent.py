@@ -2,8 +2,8 @@
 """Mock agent stub — a no-token stand-in for `opencode run --agent <name>`.
 
 It reproduces exactly what the real agents do (writes its output files and its
-control sidecar) so the Prefect flow can be demonstrated end to end without any
-model calls. Selected via runtime="mock".
+control sidecar) so a flow can be demonstrated end to end without any model
+calls. Selected via runtime="mock".
 
 Control sidecar contract (what every agent writes to CONTROL_FILE):
   ENVELOPE (the engine reads): `status` (required), `agent`, `reason`,

@@ -13,8 +13,9 @@ task example:tech PRODUCT=my-product         # real opencode + model
 ```
 
 ## toy_pipeline/
-A minimal 3-stage pipeline (analyst → verifier → extractor) demonstrating the
-original Prefect flow primitives (transactions, rollback, resume).
+A minimal 3-stage pipeline (analyst → verifier → extractor). It hand-writes its
+own Prefect flow, reusing the library primitives (run_agent, build_run_config,
+preflight), and demonstrates transactions, rollback, and resume.
 
 ```bash
 task example:toy:mock TOPIC="Hexagonal architecture"

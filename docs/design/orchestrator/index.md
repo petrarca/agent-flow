@@ -11,8 +11,9 @@ timestamp: 2026-07-23T07:51:35Z
 `agent-flow` replaces the fragile "LLM orchestrator agent" pattern with a
 **deterministic engine** that supervises coding-agent subprocesses (opencode
 today) and runs them as a graph — with parallelism, bounded re-runs, cross-node
-jump-back, telemetry, and optional typed output. The execution backend (Prefect)
-and the agent runtime (opencode / Claude Code / …) are both pluggable.
+jump-back, telemetry, and optional typed output. The execution backend
+(in-process local by default, Prefect opt-in) and the agent runtime (opencode /
+Claude Code / …) are both pluggable.
 
 This directory is an [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
 bundle: this `index.md` is the entry point; each concept lives in its own file
@@ -67,11 +68,11 @@ signal). Everything else the agent emits is opaque. See
    programmatic `build_flow` run on the default local backend needs (pydantic,
    pydantic-settings, pyyaml, jsonschema, python-dotenv). The heavy pieces are
    opt-in extras matching the runtime seams: `[cli]` (typer + rich, the display
-   layer) and `[prefect]` (the opt-in Prefect backend). All three are lazy-
-   imported at their entry points, and using a feature without its extra raises
-   a clear "install agent-flow[...]" message.
+   layer) and `[prefect]` (the opt-in Prefect backend). Both are lazy-imported
+   at their entry points, and using a feature without its extra raises a clear
+   "install agent-flow[...]" message.
 4. **Swappable seams, shared everything else.** Three things may change behind
-   thin adapters — the **execution backend** (Prefect vs …), the **agent
+   thin adapters — the **execution backend** (local vs Prefect), the **agent
    runtime** (opencode vs Claude Code, via `AgentRunner`), and the **pipeline**
    itself (the declared graph). What is deliberately NOT abstracted is agent
    *content* (names, `.md` bodies, persona) — that is runtime-specific.
@@ -83,7 +84,7 @@ signal). Everything else the agent emits is opaque. See
 Each tier is usable on its own; the number reflects how close you are to the metal.
 
 ```
-TIER 3  DECLARATIVE          declare Nodes -> build_flow() -> a runnable Prefect flow
+TIER 3  DECLARATIVE          declare Nodes -> build_flow() -> a runnable flow callable (dispatches to the backend)
         agent_node() = one call per agent (batteries)
               │ composes
 TIER 2  PRIMITIVES           call run_agent() as the leaf of YOUR OWN Prefect flow
@@ -131,7 +132,7 @@ build_flow(nodes, name="tech")(product_key="acme", runtime="opencode")  # no run
 | Batteries | [batteries.md](batteries.md) | `agent_node` — the one-call node; the Tier-3 developer experience |
 | Input plane | [input-plane.md](input-plane.md) | The prompt channels (ingested context + inline instructions, global & per-node) + persona; templating; the CLI brief; run-context + `exports` (result->params) |
 | Result schema | [result-schema.md](result-schema.md) | Typed agent output; Pydantic-optional; opt-in consumer convenience |
-| Backend | [backend.md](backend.md) | Prefect now, swappable by design; candidates; deployment modes |
+| Backend | [backend.md](backend.md) | `FlowBackend` seam; LocalBackend (default, in-process) and PrefectBackend (opt-in); deployment modes |
 | CLI & events | [cli-events.md](cli-events.md) | `Event`/`on_event`, `--show-events` projection, the Typer/rich CLI |
 
 ## Prototype status

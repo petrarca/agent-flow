@@ -2,17 +2,24 @@
 type: Concept
 title: The engine — declarative graph to a runnable flow
 description: Node, plan_groups, build_flow; DAG ordering and parallel groups; bounded re-runs and cross-node jump-back.
-tags: [agent-flow, engine, node, build_flow, dag, jump-back, prefect]
+tags: [agent-flow, engine, node, build_flow, dag, jump-back, backend]
 timestamp: 2026-07-23T07:51:35Z
 ---
 
 # The engine (Tier 3)
 
-The engine compiles a graph of `Node`s into a runnable Prefect flow. It is
-deliberately **agnostic to what a node does**: a `Node` carries a `run` callable
-and an optional [gate](gates.md); the engine only orchestrates order,
-parallelism, criticality, bounded re-runs, and cross-node jump-back. Domain
-knowledge lives in `run` and `gate`, never in the engine.
+The engine compiles a graph of `Node`s into a runnable flow callable that
+dispatches execution to the selected backend. It is deliberately **agnostic to
+what a node does**: a `Node` carries a `run` callable and an optional
+[gate](gates.md); the engine only orchestrates order, parallelism, criticality,
+bounded re-runs, and cross-node jump-back. Domain knowledge lives in `run` and
+`gate`, never in the engine.
+
+The engine is backend-agnostic: it owns all flow logic (`plan_groups`,
+`interpret`, `_walk`, jump-back, `start_from`, `only`, run-context) and hands the
+backend a `run_node` closure. The backend (LocalBackend by default, PrefectBackend
+opt-in) supplies only execution mechanics — parallel fan-out, concurrency limit,
+logger, and bootstrap/teardown.
 
 The engine does **not** import Tier 1 — it meets `run_agent` only through the
 caller-supplied `Node.run`. (The [batteries](batteries.md) module is the one
@@ -66,19 +73,24 @@ and unit-tested without Prefect.
 Errors raised by `run` are mapped to the node's criticality by an `on_error`
 callback: `blocking` → `NodeBlocked`; `degrade` → status `degraded`.
 
-## `build_flow` — compile to Prefect
+## `build_flow` — compile to a runnable flow callable
 
-`build_flow(nodes, *, name, llm_tag, llm_concurrency, on_event_factory, shared_instructions)`
-returns a Prefect `@flow` callable `pipeline(run_dir, **params)`. It:
+`build_flow(nodes, *, name, llm_tag, llm_concurrency, on_event_factory, on_node_event, shared_instructions, shared_context, agent_dir, node_instructions, backend="local")`
+returns a plain callable `f(run_dir="", start_from="", only="", **params) -> dict[str, NodeOutcome]`.
+It:
 
 - fails fast at build time on cycles/unknown deps (`plan_groups`),
-- runs each group (solo inline; parallel via `.submit()` + `wait()`),
+- resolves the selected `backend` (default `"local"`) and dispatches each
+  group's execution to it (solo inline; parallel fan-out via the backend),
 - honors bounded **cross-node jump-back**,
-- applies an optional global LLM concurrency limit on `llm_tag`.
+- honors `start_from` (enter at a group, run forward) and `only` (run exactly
+  one group, stop),
+- applies an optional LLM concurrency limit on `llm_tag` (a process-local
+  semaphore on the local backend; a server-side limit on the Prefect backend).
 
-Prefect is imported **lazily inside `build_flow`** so the engine module can be
-imported before the app calls `_prefect_env.bootstrap()`, and so the core carries
-no hard Prefect import cost on the non-flow paths.
+The backend is resolved **lazily inside `build_flow`** (via
+`agent_flow.backends.get_backend`) so the engine module imports without pulling
+any backend, keeping Prefect optional.
 
 ## Cross-node jump-back (the walker)
 

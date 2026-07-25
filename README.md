@@ -95,23 +95,23 @@ Pick the tier that fits; each is usable on its own. Higher tiers are more
 declarative; lower tiers give more control.
 
 ```
-TIER 3  DECLARATIVE      declare Nodes -> build_flow() -> a runnable Prefect flow
+TIER 3  DECLARATIVE      declare Nodes -> build_flow() -> a runnable flow callable
   (most declarative)     agent_node() = one call per agent            examples/tech_assessment
         │ composes
-TIER 2  PRIMITIVES       call run_agent() as the leaf of YOUR OWN Prefect flow
+TIER 2  PRIMITIVES       call run_agent() as the leaf of YOUR OWN flow
         │ uses                                                        examples/toy_pipeline
 TIER 1  ENGINE CORE      run_agent(): spawn + liveness-supervise + kill + sidecar verdict
-  (closest to the metal) runner-agnostic; no Prefect
+  (closest to the metal) runner-agnostic; backend-free
         │ invokes
         AGENT RUNTIME    opencode agents (.md) — external, unchanged
 ```
 
 - **Tier 3 — declare the graph** (`agent_node` + `build_flow`): one call per
   agent; the library builds the prompt, sidecar path, and DAG.
-- **Tier 2 — your own Prefect flow**: call `run_agent` as the leaf of a
+- **Tier 2 — your own flow**: call `run_agent` as the leaf of a
   hand-written flow.
 - **Tier 1 — one supervised agent** (`run_agent`): spawn + liveness-supervise +
-  kill + read the sidecar verdict. Prefect-free.
+  kill + read the sidecar verdict. Backend-free.
 
 ### Example — a two-node flow (Tier 3)
 
@@ -162,15 +162,18 @@ nodes = [
     ),
 ]
 
-# build_flow compiles the nodes into a runnable flow; calling it starts the run.
-# Params (product_key, runtime, …) can be passed or overridden here.
+# build_flow compiles the nodes into a runnable flow callable; calling it starts
+# the run. Params (product_key, runtime, …) can be passed or overridden here.
 build_flow(nodes, name="tech")(product_key="acme", runtime="opencode")
 ```
 
-**Orchestration backend.** `build_flow` compiles your graph into a
-[**Prefect**](https://www.prefect.io/) flow (parallel fan-out, retries,
-concurrency limits, a run UI). Prefect is a swappable seam — it is imported only
-inside `build_flow`, and Tiers 1–2 do not require it — so the backend can change
+**Orchestration backend.** `build_flow` compiles your graph into a runnable flow
+callable that dispatches execution to the selected backend. The default
+`LocalBackend` runs in-process (threadpool + semaphore + stdlib logging, no
+Prefect); the opt-in `PrefectBackend` (`build_flow(..., backend="prefect")`)
+routes execution through [**Prefect**](https://www.prefect.io/) for parallel
+fan-out, concurrency limits, and a run UI. The backend is a swappable seam — the
+engine owns all flow logic and stays backend-free, so the backend can change
 without touching your pipeline. See
 [`docs/design/orchestrator/backend.md`](docs/design/orchestrator/backend.md).
 
@@ -220,25 +223,20 @@ standards live in **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
 ## Layout
 
 ```
-src/agent_flow/          the library
-  agent_runtime.py       run_agent — supervised subprocess + liveness + sidecar verdict
-  runners.py             AgentRunner strategy (opencode / mock / …) + Event
-  engine.py              Node / build_flow / plan_groups / interpret (DAG, re-runs, jump-back)
-  batteries.py           agent_node — the one-call node
-  gates.py               Directive / GateContext + ready gates
-  control_protocol.py    the injected completion protocol (control-file contract)
-  schema.py              result-schema seam (typed agent output)
-  run_config.py          RunConfig settings (pydantic-settings) + build_run_config
-  run_context.py         run-scoped domain-param store + result->params exports
-  preflight.py           runtime pre-flight checks (opencode/agent_dir/prefect)
-  cli.py                 run_cli + neutral event rendering + rich tables
-  env.py / _prefect_env.py  .env loading; Prefect bootstrap (embedded/file/server)
-examples/
-  toy_pipeline/          Tier 2 demo (hand-written flow)
-  tech_assessment/       Tier 3 demo (declared graph)
-deploy/                  docker-compose (Prefect server + Postgres) for persistent mode
-docs/design/orchestrator/  the design (start at index.md)
+src/agent_flow/     the library
+  core/             backend-free Tier-1 primitives (run_agent, control protocol,
+                    result-schema, context ingestion, env)
+  runners/          the agent-runtime seam (AgentRunner) — opencode, mock, …
+  backends/         the execution seam (FlowBackend) — local (default), prefect (opt-in)
+  cli/              run_cli + neutral event rendering + tables (the [cli] extra)
+  engine, gates, batteries, run_config, run_context, preflight, utils
+                    the DAG engine, flow-control gates, the one-call node, and
+                    the run-time plumbing that ties the seams together
+examples/           toy_pipeline (Tier 2) and tech_assessment (Tier 3) demos
+docs/design/orchestrator/   the design (start at index.md)
 ```
+
+Layer order: `utils < runners < core < engine/gates/batteries < backends < cli`.
 
 ## Documentation
 

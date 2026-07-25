@@ -1,10 +1,12 @@
-"""Declaration-driven engine — compiles a Node graph into a Prefect flow.
+"""Declaration-driven engine — compiles a Node graph into a runnable flow.
 
 This is the library's Layer-3 API: declare a pipeline as a list of `Node`s and
-`build_flow` returns a runnable Prefect flow that walks the DAG, fans out
+`build_flow` returns a runnable flow callable that walks the DAG, fans out
 parallel groups, invokes each node's gate, and interprets the returned directive
 (Continue / Restart / GoTo / Stop) with bounded re-run cycles and per-node
-criticality.
+criticality. Execution is dispatched to a `FlowBackend` (the local backend by
+default, Prefect opt-in); the engine itself owns the flow logic and is
+backend-free.
 
 The engine is deliberately AGNOSTIC to what a node does. It knows nothing about
 "analysts", "verifiers", reports, or prompts — a `Node` carries a `run` callable
@@ -13,13 +15,13 @@ of several agents, whatever). The engine only orchestrates: order, parallelism,
 gate directives, criticality. Domain knowledge lives in `run` and `gate`.
 
 Two layers of use:
-  - Layer 3 (this module): declare Nodes, call `build_flow`. Prefect is hidden.
-  - Layer 2 (no this module): write your own Prefect flow and call `run_agent`
-    directly as a leaf. `build_flow` is optional, not required.
+  - Layer 3 (this module): declare Nodes, call `build_flow`.
+  - Layer 2 (no this module): call `run_agent` directly as the leaf of your own
+    flow. `build_flow` is optional, not required.
 
-The DAG walk and gate interpretation are factored into pure helpers
-(`plan_groups`, `interpret`) that take a `submit` callable, so the orchestration
-logic is unit-testable without a Prefect server.
+The DAG walk and gate interpretation are pure helpers (`plan_groups`,
+`interpret`, `_walk`), so the orchestration logic is unit-testable in-process
+with no execution backend.
 """
 
 from __future__ import annotations

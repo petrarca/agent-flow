@@ -28,9 +28,9 @@ a convenience so the common case needs no gate code; a purist consumer may pass
 no schema and validate inside their own gate instead. Either way, deciding what
 to DO about a bad result stays the consumer's.)
 
-## Runtime-agnostic, Pydantic-optional
+## Runtime-agnostic, schema-library-agnostic
 
-The core depends only on a tiny protocol, never on Pydantic:
+The engine depends only on a tiny protocol, not on any one schema library:
 
 ```python
 class ResultSchema(Protocol):
@@ -40,21 +40,19 @@ class ResultSchema(Protocol):
 
 Two ways to supply a schema:
 
-- **A plain JSON-schema `dict`** — no third-party dependency. Wrapped in
-  `JsonSchema`; validated with the `jsonschema` package if present, otherwise
-  advisory (the schema was still injected into the prompt).
-- **A `ResultSchema` implementation.** The optional `pydantic` extra ships
-  `PydanticSchema`, which wraps a `BaseModel` and yields validated model
-  **instances** in `result_obj`.
+- **A plain JSON-schema `dict`** — no schema class needed. Wrapped in
+  `JsonSchema`; validated with the `jsonschema` package.
+- **A `ResultSchema` implementation.** `PydanticSchema` wraps a `BaseModel` and
+  yields validated model **instances** in `result_obj`.
 
 ```python
-# Pydantic (extra installed):
+# Pydantic model:
 class TechStackResult(BaseModel):
     summary: str
     languages: list[str]
 agent_node("tech-stack", "tech-stack-analyst", result_schema=PydanticSchema(TechStackResult))
 
-# or a plain dict (no Pydantic):
+# or a plain dict:
 agent_node("tech-stack", "tech-stack-analyst",
            result_schema={"type": "object", "required": ["summary", "languages"], ...})
 ```
@@ -65,11 +63,15 @@ Frameworks like Pydantic AI weld an output type to *their* in-process LLM call
 (`agent.run_sync(output_type=…)`). Here the schema only touches the **prompt**
 (injection) and the **control file** (validation), so it rides over ANY runner —
 opencode subprocess, Claude Code CLI, mock — because the runtime abstraction
-(`AgentRunner`) is preserved. Pydantic stays optional; a raw JSON-schema dict
-works with zero heavy dependencies.
+(`AgentRunner`) is preserved. The core depends only on the `ResultSchema`
+protocol, not on any one schema library, so a raw JSON-schema dict is a
+first-class alternative to a Pydantic model.
 
 ## Where it lives
 
-`src/agent_flow/schema.py` (`ResultSchema`, `JsonSchema`, `ValidationOutcome`,
-`coerce_schema`), `src/agent_flow/schema_pydantic.py` (`PydanticSchema`, behind
-the `pydantic` extra), and the injection/validation in `agent_runtime.run_agent`.
+`src/agent_flow/core/schema.py` (`ResultSchema`, `JsonSchema`, `ValidationOutcome`,
+`coerce_schema`), `src/agent_flow/core/schema_pydantic.py` (`PydanticSchema`), and
+the injection/validation in `core/agent_runtime.py` `run_agent`. All of these
+types are re-exported at the top level, so consumers import them as
+`from agent_flow import PydanticSchema` (etc.); the `core.schema_pydantic` path is
+the internal location.

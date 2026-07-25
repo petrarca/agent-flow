@@ -44,10 +44,10 @@ declared graph. You write:
 Three tiers; each is usable on its own. Most consumers use Tier 3.
 
 ```
-TIER 3  DECLARATIVE      declare Nodes -> build_flow() -> a runnable Prefect flow
+TIER 3  DECLARATIVE      declare Nodes -> build_flow() -> a runnable flow callable
   (most declarative)     agent_node() = one call per agent
         │ composes
-TIER 2  PRIMITIVES       call run_agent() as the leaf of YOUR OWN Prefect flow
+TIER 2  PRIMITIVES       call run_agent() as the leaf of YOUR OWN flow
         │ uses
 TIER 1  ENGINE CORE      run_agent(): spawn + liveness-supervise + kill + sidecar verdict
   (closest to the metal) runner-agnostic; no Prefect
@@ -55,10 +55,13 @@ TIER 1  ENGINE CORE      run_agent(): spawn + liveness-supervise + kill + sideca
         AGENT RUNTIME    opencode agents (.md) — external, unchanged
 ```
 
-**The orchestration engine is [Prefect](https://www.prefect.io/).** At Tier 3,
-`build_flow` compiles your graph into a Prefect flow (parallel fan-out, retries,
-concurrency limits, a run UI). It is a swappable seam — imported only inside
-`build_flow`; Tiers 1–2 don't require it. Details and the "why Prefect" rationale:
+**The engine owns the flow logic and dispatches execution to a swappable
+backend.** At Tier 3, `build_flow` compiles your graph into a runnable flow
+callable that runs on the selected backend: the in-process `LocalBackend`
+(default) or the opt-in [Prefect](https://www.prefect.io/) backend (parallel
+fan-out, concurrency limits, a run UI). The backend is a seam — Prefect is
+imported only when you choose it, and Tiers 1–2 don't require it. Details and the
+backend rationale:
 [`design/orchestrator/backend.md`](../design/orchestrator/backend.md).
 
 ```python

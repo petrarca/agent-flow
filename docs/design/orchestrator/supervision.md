@@ -121,6 +121,7 @@ neutral view to one readable line when `--show-events` is on.
 
 ## Where it lives
 
-`src/agent_flow/agent_runtime.py` (`run_agent`, `_supervise`, `AgentResult`) and
-`src/agent_flow/runners.py` (`AgentRunner`, `Event`, `OpenCodeRunner`,
-`MockRunner`, `get_runner`).
+`src/agent_flow/core/agent_runtime.py` (`run_agent`, `_supervise`, `AgentResult`)
+and the `src/agent_flow/runners/` package: `base.py` (`AgentRunner`, `Event`),
+`opencode.py` (`OpenCodeRunner`), `mock.py` (`MockRunner`), and `__init__.py`
+(`get_runner`).

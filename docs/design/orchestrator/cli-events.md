@@ -10,9 +10,10 @@ timestamp: 2026-07-23T07:51:35Z
 
 Three complementary observability channels, layered:
 
-- **Logs (Prefect INFO)** — the always-on diagnostics: node start/finish,
-  jump-backs, concurrency setup, errors. Default level; for debugging and the
-  essential record.
+- **Logs (backend logger, INFO)** — the always-on diagnostics: node start/finish,
+  jump-backs, concurrency setup, errors. The default local backend uses stdlib
+  logging; the opt-in Prefect backend uses Prefect's logger. Default level; for
+  debugging and the essential record.
 - **Node progress (default)** — a line per node transition (running →
   ok/degraded/failed, with the agent label and elapsed time) plus an end-of-run
   results table. Driven by the node-lifecycle hook (below), rendered by the CLI.
@@ -36,8 +37,8 @@ carried through the flow result (`dict[str, NodeOutcome]`), so the results table
 shows Node | Agent | Outcome | Duration without the CLI reconstructing timing.
 
 The default CLI view (`NodeProgressPrinter`) is deliberately **line-based**, not a
-repainting `rich.Live`/TUI: a Live table fights Prefect's threaded task execution
-and interleaved logging (duplicated frames, corrupted output). A plain
+repainting `rich.Live`/TUI: a Live table fights the backends' threaded task
+execution and interleaved logging (duplicated frames, corrupted output). A plain
 `console.print` per transition interleaves cleanly with logs and is robust in
 non-TTY/CI. A consumer who wants a richer TUI can build one on the **same** hooks
 (`on_node_event` + `on_event_factory`) — the library ships only the simple
@@ -129,16 +130,21 @@ end-of-run Node|Agent|Outcome|Duration table), and `print_preflight_results`.
 `run_cli` wires them: default = progress lines + results table; `--show-events` =
 the raw firehose + results table. `--show-diffs` composes with either — it layers
 edit/write diff blocks (via `render_diff`, `--diff-style` unified|split, reading the neutral
-`ev.diff`) onto the default table OR the firehose. `rich`/`typer` are core
-dependencies, but the engine core stays render-agnostic: it emits `Event`s and
-`on_node_event` data and returns `NodeOutcome`s, and only the `cli` module turns
-those into terminal output.
+`ev.diff`) onto the default table OR the firehose. `rich`/`typer` are an OPTIONAL `cli` extra
+(`pip install 'agent-flow[cli]'`), lazy-imported inside the CLI functions (via
+`utils.require_extra`), so the engine core stays render-agnostic AND import-cheap:
+it emits `Event`s and `on_node_event` data and returns `NodeOutcome`s, and only
+the `cli` package turns those into terminal output.
 
 ## Where it lives
 
-`src/agent_flow/runners.py` (`Event` with the neutral display fields;
-`parse_event` fills them), `agent_runtime` (the `on_event` callback, Ctrl-C
-process-group kill), `engine.py` (`RunContext.on_event_factory`,
-`build_flow(on_event_factory=, on_node_event=)`, `NodeOutcome.duration_s`),
-`src/agent_flow/cli.py` (`event_printer`, `render_event`, `NodeProgressPrinter`,
-`print_results_table`, `get_console`).
+`src/agent_flow/runners/base.py` (`Event` with the neutral display fields
+`kind`/`title`/`detail`/`status`/`diff`/`added`/`removed`; each runtime's
+`parse_event` fills them; re-exported as `agent_flow.runners.Event`),
+`agent_runtime` (the `on_event` callback, Ctrl-C process-group kill), `engine.py`
+(`RunContext.on_event_factory`, `build_flow(on_event_factory=, on_node_event=)`,
+`NodeOutcome.duration_s`), and the `src/agent_flow/cli/` package:
+`events.py` (`event_printer`, `render_event`, `render_diff`), `progress.py`
+(`NodeProgressPrinter`), `tables.py` (`print_results_table`,
+`print_preflight_results`), `console.py` (`get_console`), and `app.py`
+(`run_cli`).

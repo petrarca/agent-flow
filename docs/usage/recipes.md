@@ -301,7 +301,7 @@ agent_node("tech-stack", "tech-stack-analyst", result_schema=schema)
 
 # Or, with the `pydantic` extra:
 from pydantic import BaseModel
-from agent_flow.schema_pydantic import PydanticSchema
+from agent_flow import PydanticSchema
 
 class TechStackResult(BaseModel):
     summary: str

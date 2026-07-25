@@ -72,10 +72,8 @@ injects it. See [writing-agents.md](writing-agents.md) for the full contract.
 
 ```python
 # flow.py
-from agent_flow.env import load_env
+from agent_flow import load_env
 load_env()
-from agent_flow._prefect_env import bootstrap
-bootstrap()
 
 from agent_flow import agent_node, build_flow
 from agent_flow.gates import require_file
@@ -94,9 +92,9 @@ result = pipeline(runtime="mock")   # no run_dir -> a temp dir under <temp>/agen
 print(result)  # {'hello': 'ok'}
 ```
 
-`load_env()` and `bootstrap()` **must run before Prefect is imported** — they
-pin a project-local Prefect home and avoid a startup race. Always put them
-first, exactly as shown.
+`load_env()` loads a `.env` file into the process environment so every agent
+subprocess inherits it. Call it first, before building the flow, exactly as
+shown. The default **local backend** needs no further setup.
 
 ### Where does `run_dir` come from, and how does the gate find the file?
 
@@ -138,9 +136,11 @@ pipeline(run_dir="{repos_root}/{product_key}/output",             # outputs here
          repos_root="/data/products", product_key="acme", repo="/work/pipeline", runtime="opencode")
 ```
 
-Run it: `python flow.py`. You should see `{'hello': 'ok'}` and a `work/hello.md`
-file. This ran the packaged **mock agent** — no opencode process, no tokens —
-so you can develop your graph shape before spending anything on real agents.
+Run it: `python flow.py`. You should see `{'hello': 'ok'}` and a `hello.md`
+file under the temp `run_dir` logged at flow start (pass an explicit `run_dir`
+to keep it). This ran the packaged **mock agent** — no opencode process, no
+tokens — so you can develop your graph shape before spending anything on real
+agents.
 
 ## 4. Switch to a real agent
 
