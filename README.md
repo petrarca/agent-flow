@@ -63,7 +63,8 @@ into four recurring problems. agent-flow addresses each directly:
   **downstream** nodes template them (e.g. a readiness check publishing captured
   provenance to every later agent).
 - **The input plane** — ordered prompt composition with **content injection** of
-  context files/globs, `{param}` templating, and a per-run brief (`-i` / file).
+  context files/globs, `{param}` templating, a per-run brief (`-i` / file), and
+  per-node run-time instructions (`--instruct NODE=…` / config, additive last-word).
 - **Runner strategy** — `AgentRunner` (opencode + a token-free `mock`; Claude
   Code stubbed), per-runner preflight checks and an `AgentRunnerInfo` doctor view
   (resolved model/tools per agent dir).

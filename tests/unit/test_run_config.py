@@ -96,6 +96,13 @@ def test_env_beats_yaml(tmp_path, monkeypatch):
     assert build_run_config(config_file=str(p)).runtime == "fromenv"
 
 
+def test_yaml_node_instructions_section(tmp_path):
+    p = tmp_path / "run.yml"
+    p.write_text('runtime: mock\nnode_instructions:\n  analyst: "full breakdown"\n  summary: "lead with tenancy"\n')
+    cfg = build_run_config(config_file=str(p))
+    assert cfg.node_instructions == {"analyst": "full breakdown", "summary": "lead with tenancy"}
+
+
 def test_yaml_rejects_unknown_key(tmp_path):
     p = tmp_path / "run.yml"
     p.write_text("runtimee: opencode\n")  # typo

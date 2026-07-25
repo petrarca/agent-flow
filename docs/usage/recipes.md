@@ -41,6 +41,8 @@ agent_dir: /work/pipelines/tech-assessment
 llm_concurrency: 2
 instructions: |
   Experimental code-graph support is available; use it alongside RAG.
+node_instructions:            # per-node steering, appended last to that node
+  analyst: "Weight the security assessment heavily."
 ```
 
 **Generic settings** resolve via `RunConfig` (a pydantic-settings model) with
@@ -170,13 +172,43 @@ example does — see `examples/tech_assessment/tech_flow.py`.) It's injected int
 
 ## Give one node an extra, specific instruction
 
-Additive to the run-wide brief, for one node only:
+Additive to the run-wide brief, for one node only (set at BUILD time):
 
 ```python
 agent_node("tech-stack", "tech-stack-analyst",
            inputs={"REPORT": "{run_dir}/tech-stack.md"},
            instructions="List concrete versions where known; prefer a compact table.")
 ```
+
+## Steer one node at RUN time (`--instruct` / `node_instructions`)
+
+To steer a node for a run *without* editing `build_nodes()` — or to persist
+per-product steering in config — attach a per-node instruction at run time. It is
+appended **LAST** (after the build-time instruction, before the work order), so it
+is the most recent standing guidance and overrides earlier ones by recency:
+
+```bash
+# CLI (repeatable; NODE=text like -p):
+python my_flow.py -p product_key=acme \
+  --instruct analyst="Ignore the compact-table instruction; produce the full breakdown." \
+  --instruct summary="Lead with the tenancy gap."
+```
+
+```yaml
+# --config run.yml — persist it per product (parallel to params:)
+node_instructions:
+  analyst: "Weight the security assessment heavily for Dim 14."
+```
+
+```python
+# programmatic
+build_flow(nodes, name="my-pipeline")(product_key="acme",
+    node_instructions={"analyst": "…", "summary": "…"})
+```
+
+CLI `--instruct` merges over the config `node_instructions:` (CLI wins per node).
+Pairs naturally with re-entering the flow at a node to iterate. See
+[input-plane](../design/orchestrator/input-plane.md#per-node-run-time-instructions).
 
 ## Make agents actually read rules/standards (ingest context)
 

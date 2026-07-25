@@ -12,7 +12,7 @@ from agent_flow.engine import interpret
 from agent_flow.gates import Continue
 
 
-def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, shared_context=()):
+def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, shared_context=(), node_instructions=None):
     """Run a batteries node with a stubbed run_agent that captures the prompt."""
     captured = {}
 
@@ -39,6 +39,7 @@ def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, 
         on_error=lambda n, e: "degraded",
         shared_instructions=shared,
         shared_context=tuple(shared_context),
+        node_instructions=node_instructions or {},
     )
     return captured
 
@@ -62,6 +63,29 @@ def test_per_node_instructions_prepended_to_work_order(monkeypatch):
 def test_instructions_are_templated(monkeypatch):
     node = agent_node("n", "agent-x", inputs={"K": "v"}, instructions="Focus on {product_key}.")
     cap = _capture_prompt(monkeypatch, node, params={"product_key": "acme"})
+    assert "Focus on acme." in cap["prompt"]
+
+
+def test_runtime_node_instruction_appended_after_build_time(monkeypatch):
+    # The run-time per-node instruction (CLI --instruct / config node_instructions)
+    # is appended AFTER the build-time instruction and BEFORE the work order, so
+    # it is the last standing guidance (additive, last-word override).
+    node = agent_node("analyst", "agent-x", inputs={"K": "v"}, instructions="Prefer a compact table.")
+    cap = _capture_prompt(monkeypatch, node, node_instructions={"analyst": "Ignore that; produce the full breakdown."})
+    p = cap["prompt"]
+    assert p.find("Prefer a compact table.") < p.find("produce the full breakdown") < p.find("K: v")
+
+
+def test_runtime_node_instruction_only_targets_named_node(monkeypatch):
+    node = agent_node("summary", "agent-x", inputs={"K": "v"})
+    # an instruction for a DIFFERENT node must not appear
+    cap = _capture_prompt(monkeypatch, node, node_instructions={"analyst": "analyst-only note"})
+    assert "analyst-only note" not in cap["prompt"]
+
+
+def test_runtime_node_instruction_is_templated(monkeypatch):
+    node = agent_node("analyst", "agent-x", inputs={"K": "v"})
+    cap = _capture_prompt(monkeypatch, node, params={"product_key": "acme"}, node_instructions={"analyst": "Focus on {product_key}."})
     assert "Focus on acme." in cap["prompt"]
 
 

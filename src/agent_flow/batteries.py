@@ -148,6 +148,12 @@ def agent_node(
             parts.append(f"## Context for this step\n\n{node_ctx}")
         if instructions and instructions.strip():
             parts.append(f"## Instructions for this step\n\n{resolve_template(instructions, tmpl)}")
+        # Run-time per-node instruction (CLI --instruct / config node_instructions),
+        # appended AFTER the build-time per-node instructions so it is the LAST
+        # standing guidance before the work order — additive, last-word override.
+        runtime_instr = (ctx.node_instructions.get(name) or "").strip()
+        if runtime_instr:
+            parts.append(f"## Additional instructions for this run\n\n{resolve_template(runtime_instr, tmpl)}")
         parts.append(work_order)
         prompt = "\n\n".join(parts)
 

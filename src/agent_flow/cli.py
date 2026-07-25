@@ -406,6 +406,9 @@ def run_cli(
         agent_dir: str | None = typer.Option(None, "--agent-dir", help="where agent definitions live (opencode --dir)"),
         instructions: str | None = typer.Option(None, "--instructions", "-i", help="run-wide brief for every agent"),
         instructions_file: str | None = typer.Option(None, "--instructions-file"),
+        instruct: list[str] | None = typer.Option(  # noqa: B008 - Typer idiom
+            None, "--instruct", help="per-node instruction NODE=text (repeatable); appended LAST to the node's prompt"
+        ),
         llm_concurrency: int | None = typer.Option(None, "--llm-concurrency"),
         show_events: bool = typer.Option(False, "--show-events", "-v", help="raw per-event firehose (instead of the live table)"),
         show_diffs: bool = typer.Option(
@@ -436,6 +439,10 @@ def run_cli(
             model=model,
             idle_timeout_s=idle_timeout,
         )
+        # Per-node instructions: CLI --instruct NODE=text merges OVER the config
+        # node_instructions: (CLI wins per node). Same NODE=text shape as -p. Store
+        # the merged map back on cfg so _build_and_run threads it into build_flow.
+        cfg.node_instructions = {**cfg.node_instructions, **parse_params(instruct)}
         # 2) Domain params (validated against params_model, or untyped passthrough).
         params = _resolve_params(params_model, parse_params(param), console)
         # Fields the model marks as runtime-populated (json_schema_extra
@@ -603,6 +610,7 @@ def _build_and_run(nodes, params, cfg, console, *, name, llm_tag, on_event_facto
         on_node_event=on_node_event,
         shared_instructions=cfg.resolved_instructions(),
         agent_dir=cfg.agent_dir,
+        node_instructions=cfg.node_instructions,
     )
     result = pipeline(run_dir=cfg.run_dir, runtime=cfg.runtime, **params)
     if render_results:

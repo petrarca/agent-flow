@@ -12,12 +12,13 @@ Several channels feed an agent's prompt, each with a different owner and
 lifetime. They compose in a **fixed order** into the final prompt:
 
 ```
-[1 completion protocol]     library, ALWAYS      where to write status + the control JSON shape
-[2 run-wide context]        consumer, at START   ingested FILE CONTENT for every agent (rules/standards)
-[3 run-wide brief]          consumer, at START   inline text for every agent (the global directive)
-[4 per-node context]        consumer, declared   ingested FILE CONTENT for this node only
-[5 per-node instructions]   consumer, declared   inline text for this node only
-[6 work order]              consumer, declared   KEY: value, templated
+[1 completion protocol]        library, ALWAYS      where to write status + the control JSON shape
+[2 run-wide context]           consumer, at START   ingested FILE CONTENT for every agent (rules/standards)
+[3 run-wide brief]             consumer, at START   inline text for every agent (the global directive)
+[4 per-node context]           consumer, declared   ingested FILE CONTENT for this node only
+[5 per-node instructions]      consumer, declared   inline text for this node only (build time)
+[6 per-node RUN-TIME instr]    consumer, at RUN     inline text for this node only (CLI/config), additive LAST
+[7 work order]                 consumer, declared   KEY: value, templated
 ```
 
 Note the pattern: at each scope, **ingested context (files) precedes inline
@@ -56,8 +57,16 @@ Plus a **separate** channel that is NOT part of this prompt:
 - **(4) per-node context** — `agent_node(context=["…"])`, file SOURCES injected
   for one node only. Same "inject content, not a pointer" idea, scoped to a step.
 - **(5) per-node instructions** — `agent_node(instructions="…")`, inline text,
-  additive to the protocol/brief, for one node only.
-- **(6) work order** — `agent_node(inputs={KEY: "value-or-{template}"})`, the
+  additive to the protocol/brief, for one node only. Set at BUILD time.
+- **(6) per-node RUN-TIME instruction** — an extra instruction attached to a node
+  at RUN time (not in `build_nodes()`): CLI `--instruct NODE="…"` (repeatable), a
+  `node_instructions:` section in the `--config` YAML, or programmatically
+  `build_flow(node_instructions={"node": "…"})`. It is appended **LAST** (after
+  (5), before the work order), so it is the most recent standing guidance — which
+  makes it an additive, last-word override ("ignore the prior instruction; do X
+  instead"). CLI `--instruct` merges over the config section (CLI wins per node).
+  May template run params. See [Per-node run-time instructions](#per-node-run-time-instructions).
+- **(7) work order** — `agent_node(inputs={KEY: "value-or-{template}"})`, the
   per-run values (product key, report path, focus).
 
 Context sources (2, 4) accept file paths or globs; a source matching no file is
@@ -138,6 +147,35 @@ templating resolvable from the first node;
 summary** so it does not read as an input you could pass. The publishing node then
 overwrites it. Example: `analysis_timestamp` / `pipeline_commit`.
 
+## Per-node run-time instructions
+
+Channel (6) lets you steer ONE node for a run without editing `build_nodes()`.
+Three entry surfaces, all producing a `{node_name: text}` map:
+
+- **CLI** — `--instruct NODE="text"` (repeatable, `NODE=text` like `-p`).
+- **Config YAML** — a `node_instructions:` section (persist per-product steering):
+  ```yaml
+  node_instructions:
+    analyst: "Weight the security assessment heavily for Dim 14."
+    summary: "Keep it to one page; lead with the tenancy gap."
+  ```
+- **Programmatic** — `build_flow(node_instructions={"analyst": "…"})`.
+
+CLI `--instruct` **merges over** the config section (CLI wins per node); the merged
+map is threaded via `RunContext.node_instructions` and each batteries node appends
+its own entry.
+
+**Additive, LAST word.** The run-time instruction is appended AFTER the build-time
+per-node instruction (5) and before the work order — the most recent standing
+guidance the agent sees. So it overrides earlier instructions by recency, no
+special flag needed: *"Ignore the prior instruction about compact tables — produce
+the full breakdown instead."*
+
+This is distinct from `start_at` (a per-invocation entry point, CLI/programmatic
+only, never persisted in config), though the two pair naturally: when you re-enter
+the flow at a node to iterate, you usually also want to tell that node what to do
+differently.
+
 ## Mapping to the old orchestrator vocabulary
 
 - "stuff currently in the orchestrator" → **(3)** per-node `instructions` and
@@ -148,6 +186,7 @@ overwrites it. Example: `analysis_timestamp` / `pipeline_commit`.
 ## Where it lives
 
 `src/agent_flow/control_protocol.py` (block 1), `agent_runtime.run_agent`
-(composes 1 + 2 + the caller prompt), `batteries.agent_node` (composes 3 + 4 and
-forwards 2), and the `RunContext.shared_instructions` / `build_flow` plumbing in
-`engine.py`.
+(composes 1 + 2 + the caller prompt), `batteries.agent_node` (composes 4 + 5 + 6
+and forwards 2/3), the `RunContext.shared_instructions` / `RunContext.node_instructions`
+/ `build_flow(node_instructions=)` plumbing in `engine.py`, and the CLI
+`--instruct` + config `node_instructions:` handling in `cli.py` / `run_config.py`.

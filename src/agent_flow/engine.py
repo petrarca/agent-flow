@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -82,6 +82,11 @@ class RunContext:
     # run time (per node, so templating against params works). Build-time
     # plumbing, not a domain param.
     shared_context: tuple[str, ...] = ()
+    # Run-time per-node instructions {node_name: text}, from CLI --instruct / the
+    # config node_instructions: section. A batteries node appends its own entry
+    # LAST (after the build-time per-node instructions), so it is the most recent
+    # standing guidance before the work order — additive, last-word override.
+    node_instructions: dict[str, str] = field(default_factory=dict)
 
 
 # A node's work: perform the invocation, return whatever the gate will inspect
@@ -230,6 +235,7 @@ def interpret(
     shared_instructions: str = "",
     shared_context: tuple[str, ...] = (),
     agent_dir: str = "",
+    node_instructions: dict[str, str] | None = None,
 ) -> NodeOutcome:
     """Run one node to completion, interpreting its gate's directives.
 
@@ -260,6 +266,7 @@ def interpret(
                     shared_instructions=shared_instructions,
                     shared_context=shared_context,
                     agent_dir=agent_dir,
+                    node_instructions=dict(node_instructions or {}),
                 )
             )
         except Exception as exc:  # noqa: BLE001 - deliberately broad: the run callable is caller code
@@ -330,7 +337,7 @@ def _apply_exports(node: Node, result: Any, obj: Any, log: Callable[[str], None]
         if callable(spec):
             derived = dict(spec(payload) or {})
         else:
-            derived = {param: v for param, field in spec.items() if (v := _read_field(payload, field)) is not _MISSING}
+            derived = {param: v for param, fld in spec.items() if (v := _read_field(payload, fld)) is not _MISSING}
         if derived:
             get_run_context().update(derived)
             log(f"node {node.name}: exported {sorted(derived)} to run-context")
@@ -349,6 +356,7 @@ def build_flow(
     shared_instructions: str = "",
     shared_context: Iterable[str] | None = None,
     agent_dir: str = "",
+    node_instructions: dict[str, str] | None = None,
 ):
     """Compile a Node graph into a runnable Prefect flow.
 
@@ -396,6 +404,7 @@ def build_flow(
     from prefect.futures import wait
 
     shared_context_t = tuple(shared_context or ())
+    node_instructions_d = dict(node_instructions or {})
     planned = plan_groups(nodes)  # fail fast on cycles/unknown deps at build time
     by_name = {n.name: n for n in nodes}
     group_index = {key: i for i, (key, _) in enumerate(planned)}  # group key -> plan position
@@ -434,6 +443,7 @@ def build_flow(
             shared_instructions=shared_instructions,
             shared_context=shared_context_t,
             agent_dir=agent_dir,
+            node_instructions=node_instructions_d,
         )
         # Stamp the node's wall-clock duration (timed here, where the node runs).
         outcome = replace(outcome, duration_s=time.monotonic() - started)
