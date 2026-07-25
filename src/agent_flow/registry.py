@@ -10,8 +10,10 @@ the code is centralized and reusable. Two kinds, kept distinct on purpose:
     pre-seeded, so the common cases need NO user code.
 
   - OBSERVING hooks: `on(event)` callbacks the engine fires at lifecycle points
-    (e.g. "after_node"). They observe/telemeter; they do NOT steer the flow (only
-    a node's gate decides Continue/Restart/GoTo/Stop). Cross-cutting concerns.
+    (before_node / after_node / on_error, and before_group / after_group). The
+    per-node events may be SCOPED to specific node names via `on(event, node=…)`.
+    They observe/telemeter; they do NOT steer the flow (only a node's gate decides
+    Continue/Restart/GoTo/Stop). Cross-cutting concerns.
 
 Plus EXPORT impls: a named `(payload) -> Mapping[str, Any]` a node references via
 `export_ref` (the declarative `{param: field}` form stays inline data on the
@@ -33,12 +35,21 @@ from agent_flow.gates import Gate, require_file, rerun_on_named, rerun_on_signal
 GateFactory = Callable[..., Gate]
 # An export impl: maps a node's result payload to params for downstream nodes.
 ExportImpl = Callable[[Any], Mapping[str, Any]]
-# An observing hook: (node, outcome) -> None. Fired at a lifecycle event; the
-# return value is ignored (observers never steer flow).
+# An observing hook: fired at a lifecycle event; the return value is IGNORED
+# (observers never steer flow — only a node's gate decides Continue/GoTo/Stop).
 Hook = Callable[..., None]
 
-# The known lifecycle events an observing hook may subscribe to.
-_EVENTS = frozenset({"after_node"})
+# The known lifecycle events an observing hook may subscribe to, with their args:
+#   before_node(node)            — before each run attempt (fires on re-run cycles)
+#   after_node(node, outcome)    — after the node settles
+#   on_error(node, exc)          — the node's run raised (before criticality mapping)
+#   before_group(group)          — before a (parallel or solo) group executes
+#   after_group(group, outcomes) — after the group's nodes settle
+# Per-node events (before_node/after_node/on_error) may be SCOPED to specific
+# node names; group events are not node-scoped.
+_NODE_EVENTS = frozenset({"before_node", "after_node", "on_error"})
+_GROUP_EVENTS = frozenset({"before_group", "after_group"})
+_EVENTS = _NODE_EVENTS | _GROUP_EVENTS
 
 
 class FlowRegistry:
@@ -47,7 +58,9 @@ class FlowRegistry:
     def __init__(self, *, seed_builtins: bool = True) -> None:
         self._gates: dict[str, GateFactory] = {}
         self._exports: dict[str, ExportImpl] = {}
-        self._hooks: dict[str, list[Hook]] = {e: [] for e in _EVENTS}
+        # event -> list of (node_scope, hook). node_scope is None (all nodes) or a
+        # frozenset of node names; ignored for group events.
+        self._hooks: dict[str, list[tuple[frozenset[str] | None, Hook]]] = {e: [] for e in _EVENTS}
         if seed_builtins:
             self._seed_builtin_gates()
 
@@ -88,13 +101,22 @@ class FlowRegistry:
 
         return deco
 
-    def on(self, event: str) -> Callable[[Hook], Hook]:
-        """Register an OBSERVING hook for a lifecycle `event` (decorator)."""
+    def on(self, event: str, *, node: str | list[str] | tuple[str, ...] | None = None) -> Callable[[Hook], Hook]:
+        """Register an OBSERVING hook for a lifecycle `event` (decorator).
+
+        `node` scopes a per-node event (before_node/after_node/on_error) to one
+        name or a list of names; None (default) means all nodes. `node` is not
+        allowed for group events (before_group/after_group), which are not
+        node-scoped. Observers never steer flow — a hook's return is ignored.
+        """
         if event not in _EVENTS:
             raise ValueError(f"unknown hook event {event!r} (known: {sorted(_EVENTS)})")
+        if node is not None and event in _GROUP_EVENTS:
+            raise ValueError(f"event {event!r} is not node-scoped; drop node=")
+        scope = None if node is None else frozenset((node,) if isinstance(node, str) else node)
 
         def deco(fn: Hook) -> Hook:
-            self._hooks[event].append(fn)
+            self._hooks[event].append((scope, fn))
             return fn
 
         return deco
@@ -129,8 +151,15 @@ class FlowRegistry:
         except KeyError:
             raise ValueError(f"unknown export {export_ref!r} (registered: {sorted(self._exports)})") from None
 
-    def fire(self, event: str, /, *args: Any, **kwargs: Any) -> None:
-        """Fire all observing hooks for `event`. Never raises (an observer must
-        not break the run); a failing hook is swallowed by the caller's log."""
-        for hook in self._hooks.get(event, ()):  # unknown event -> no hooks
+    def fire(self, event: str, /, *args: Any, _node_name: str | None = None, **kwargs: Any) -> None:
+        """Fire the observing hooks registered for `event`.
+
+        For per-node events, pass `_node_name` so scoped hooks (registered with
+        `node=`) match only their target; a None scope fires for every node.
+        Group events ignore `_node_name`. The return of each hook is discarded.
+        (The engine wraps this so a failing observer never breaks the run.)
+        """
+        for scope, hook in self._hooks.get(event, ()):  # unknown event -> no hooks
+            if scope is not None and _node_name is not None and _node_name not in scope:
+                continue
             hook(*args, **kwargs)

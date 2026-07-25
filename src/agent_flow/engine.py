@@ -273,6 +273,8 @@ def interpret(
 
     cycles = 0
     while True:
+        # Observing hook: before each run attempt (fires again on re-run cycles).
+        _fire_hook(registry, "before_node", node, log, node)
         # Effective params = the passed params overlaid with the live run-context
         # snapshot, so this node sees any values UPSTREAM nodes exported. Snapshot
         # is taken at THIS node's start -> a stable view for its whole execution.
@@ -292,6 +294,7 @@ def interpret(
                 )
             )
         except Exception as exc:  # noqa: BLE001 - deliberately broad: the run callable is caller code
+            _fire_hook(registry, "on_error", node, log, node, exc)
             return NodeOutcome(status=on_error(node, exc))
 
         # The validated typed object (a pydantic instance when a result_schema was
@@ -324,12 +327,12 @@ def interpret(
             # whether to rewind to the target (bounded there).
             log(f"node {node.name}: gate -> GoTo {directive.node} ({directive.note})")
             outcome = NodeOutcome(status="ok", goto=directive.node)
-            _fire_after_node(registry, node, outcome, log)
+            _fire_hook(registry, "after_node", node, log, node, outcome)
             return outcome
 
         # Continue, or an exhausted Restart.
         outcome = NodeOutcome(status="ok")
-        _fire_after_node(registry, node, outcome, log)
+        _fire_hook(registry, "after_node", node, log, node, outcome)
         return outcome
 
 
@@ -356,12 +359,37 @@ def _resolve_gate(node: Node, registry: Any):
     return None
 
 
-def _fire_after_node(registry: Any, node: Node, outcome: NodeOutcome, log: Callable[[str], None]) -> None:
-    """Fire observing after_node hooks (telemetry/cross-cutting). Never steers flow."""
+def _fire_hook(registry: Any, event: str, node: Node, log: Callable[[str], None], *fire_args: Any) -> None:
+    """Fire an observing per-node hook (scoped to node.name). Never steers flow.
+
+    An observer must never break the run — a failing hook is logged and ignored.
+    `fire_args` are the event's payload (e.g. (node,) / (node, outcome) /
+    (node, exc)); node.name is passed as the scope key so node-scoped hooks match.
+    """
     try:
-        registry.fire("after_node", node, outcome)
+        registry.fire(event, *fire_args, _node_name=node.name)
     except Exception as exc:  # noqa: BLE001 - an observer must never break the run
-        log(f"node {node.name}: after_node hook failed ({exc}) — ignored")
+        log(f"node {node.name}: {event} hook failed ({exc}) — ignored")
+
+
+def _fire_group_hook(registry: Any, event: str, group: list[Node], warn: Callable[[str], None], *extra: Any) -> None:
+    """Fire an observing group hook (before_group/after_group). Not node-scoped."""
+    try:
+        registry.fire(event, group, *extra)
+    except Exception as exc:  # noqa: BLE001 - an observer must never break the run
+        warn(f"{event} hook failed ({exc}) — ignored")
+
+
+def _make_group_runner(backend_impl: Any, registry: Any, run_node: Any, logger: Any):
+    """Wrap the backend's group execution with before_group/after_group hooks."""
+
+    def run_group(group: list[Node]) -> dict[str, NodeOutcome]:
+        _fire_group_hook(registry, "before_group", group, logger.warning)
+        outcomes = backend_impl.run_group(group, run_node)
+        _fire_group_hook(registry, "after_group", group, logger.warning, outcomes)
+        return outcomes
+
+    return run_group
 
 
 def _apply_exports(node: Node, result: Any, obj: Any, log: Callable[[str], None], registry: Any) -> None:
@@ -549,10 +577,11 @@ def build_flow(
             if llm_concurrency is not None:
                 backend_impl.apply_concurrency_limit(llm_tag, llm_concurrency, logger.info, logger.warning)
             run_node = _make_run_node(wd, params, logger)
+            run_group = _make_group_runner(backend_impl, registry, run_node, logger)
             start_index, single_group = _resolve_entry(start_from, only, by_name, group_index, node_group, logger)
             results = _walk(
                 planned,
-                run_group=lambda group: backend_impl.run_group(group, run_node),
+                run_group=run_group,
                 group_index=group_index,
                 node_group=node_group,
                 by_name=by_name,

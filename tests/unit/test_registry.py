@@ -155,6 +155,70 @@ def test_after_node_hook_fires_via_build_flow():
     assert fired == [("a", "ok")]
 
 
+def test_all_lifecycle_events_fire_in_order():
+    r = FlowRegistry()
+    ev = []
+    r.on("before_group")(lambda group: ev.append(("bg", [n.name for n in group])))
+    r.on("after_group")(lambda group, outs: ev.append(("ag", sorted(outs))))
+    r.on("before_node")(lambda node: ev.append(("bn", node.name)))
+    r.on("after_node")(lambda node, out: ev.append(("an", node.name)))
+    nodes = [
+        Node(name="a", run=lambda ctx: {}),
+        Node(name="b", run=lambda ctx: {}, depends_on=["a"]),
+    ]
+    build_flow(nodes, name="t", registry=r)(run_dir="")
+    assert ev == [
+        ("bg", ["a"]),
+        ("bn", "a"),
+        ("an", "a"),
+        ("ag", ["a"]),
+        ("bg", ["b"]),
+        ("bn", "b"),
+        ("an", "b"),
+        ("ag", ["b"]),
+    ]
+
+
+def test_node_scoped_hook_fires_only_for_target():
+    r = FlowRegistry()
+    hit = []
+    r.on("after_node", node="b")(lambda node, out: hit.append(node.name))
+    nodes = [Node(name="a", run=lambda ctx: {}), Node(name="b", run=lambda ctx: {}, depends_on=["a"])]
+    build_flow(nodes, name="t", registry=r)(run_dir="")
+    assert hit == ["b"]  # only the scoped node, not 'a'
+
+
+def test_node_scoped_list():
+    r = FlowRegistry()
+    hit = []
+    r.on("before_node", node=["a", "c"])(lambda node: hit.append(node.name))
+    nodes = [
+        Node(name="a", run=lambda ctx: {}),
+        Node(name="b", run=lambda ctx: {}, depends_on=["a"]),
+        Node(name="c", run=lambda ctx: {}, depends_on=["b"]),
+    ]
+    build_flow(nodes, name="t", registry=r)(run_dir="")
+    assert sorted(hit) == ["a", "c"]
+
+
+def test_on_error_hook_fires():
+    r = FlowRegistry()
+    errs = []
+    r.on("on_error")(lambda node, exc: errs.append((node.name, str(exc))))
+
+    def boom(ctx):
+        raise RuntimeError("kaboom")
+
+    nodes = [Node(name="a", run=boom, criticality="degrade")]
+    build_flow(nodes, name="t", registry=r)(run_dir="")
+    assert errs and errs[0][0] == "a" and "kaboom" in errs[0][1]
+
+
+def test_node_scope_rejected_for_group_event():
+    with pytest.raises(ValueError, match="not node-scoped"):
+        FlowRegistry().on("before_group", node="a")
+
+
 def test_default_registry_when_none():
     # build_flow with no registry seeds a default (built-in gates); a node using
     # a built-in gate ref resolves without the caller supplying a registry.
