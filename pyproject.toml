@@ -13,6 +13,9 @@ description = "Deterministic orchestration of coding-agent pipelines (supervised
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.14,<4.0"
+# Ship LICENSE and the Apache-2.0 NOTICE in the sdist/wheel .dist-info so the
+# required attribution (License §4.d) travels with every distribution.
+license-files = ["LICENSE", "NOTICE"]
 classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python",
