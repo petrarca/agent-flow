@@ -67,7 +67,7 @@ def classify(inv: AgentInvocation) -> Classification:
     keyword heuristics so the example is deterministic and dependency-free.
 
     (Imperatively this same function could be attached with
-    `agent_node("classify", "classifier", impl=classify)`; here it is referenced
+    `agent_node("classify", "classify", impl=classify)`; here it is referenced
     by name from the FlowDef via `impl_ref="classify"`.)
     """
     text = inv.prompt.lower()
@@ -111,16 +111,30 @@ def inv_params(inv: AgentInvocation) -> dict:
 
 
 # --- The pipeline as data ---------------------------------------------------
-# Both nodes are in-process (impl_ref set). `agent` is still required as the
-# node's label. classify publishes its typed fields downstream via `exports`,
-# so respond can template {category}/{urgency} into its work order.
+# Both nodes are in-process (impl_ref set).
+#
+# Three orthogonal names per node:
+#   name=      the NODE identity in the DAG (depends_on target, result key,
+#              --only/--start-from target). No registry lookup.
+#   agent=     the AGENT identity — label shown in the results table. Also the
+#              key used to look up a @registry.mock_agent in --mock-agents mode.
+#              For subprocess nodes it is the --agent name (the .md file).
+#   impl_ref=  the key used to look up @registry.agent_impl in the registry
+#              (separate dict from mock_agent). Does NOT need to match `agent`
+#              or `name` — it just must match the string passed to agent_impl().
+#
+# Keeping name == agent == impl_ref (as done here) is the simplest convention
+# and avoids confusion; diverge only when there is a real reason to.
+#
+# classify publishes its typed fields downstream via `exports` so respond can
+# template {category}/{urgency} into its work order.
 FLOW = FlowDef(
     name="ticket-triage (in-process)",
     nodes=[
         NodeDef(
             name="classify",
-            agent="classifier",
-            impl_ref="classify",
+            agent="classify",  # matches @REGISTRY.agent_impl("classify")
+            impl_ref="classify",  # resolved from registry by this key
             inputs={"TICKET": "{ticket}"},
             result_schema="Classification",
             exports={"category": "category", "urgency": "urgency"},
@@ -128,7 +142,7 @@ FLOW = FlowDef(
         ),
         NodeDef(
             name="respond",
-            agent="responder",
+            agent="respond",  # matches @REGISTRY.agent_impl("respond")
             impl_ref="respond",
             depends_on=["classify"],
             inputs={"CATEGORY": "{category}", "URGENCY": "{urgency}"},
