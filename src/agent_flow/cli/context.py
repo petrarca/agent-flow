@@ -26,3 +26,4 @@ class RunCliContext:
     default_run_dir: str  # fallback run_dir ({param} templating allowed)
     params_model: type | None  # optional pydantic-settings model for -p validation
     registry: object = None  # optional FlowRegistry (named gates/exports/hooks); None -> engine default
+    version: str | None = None  # the CONSUMER's app version (shown by `version`); None -> show agent-flow only

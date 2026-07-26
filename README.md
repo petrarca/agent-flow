@@ -70,7 +70,9 @@ into four recurring problems. agent-flow addresses each directly:
   `--start-from`. Mutually exclusive with it.
 - **Multi-command CLI** — the reusable `run_cli` is a subcommand app: `run`
   executes the pipeline; `flow nodes` prints it in execution order (node → agent,
-  deps, parallel group, gate) to discover `--only`/`--start-from` targets.
+  deps, parallel group, gate) to discover `--only`/`--start-from` targets;
+  `version` prints the pipeline's version (your app version, if you pass one, plus
+  the agent-flow version).
 - **Liveness supervision** — idle-timeout (not wall-clock) kill, process-group
   termination.
 - **Control sidecar** — a per-node JSON envelope the agent writes; the engine
@@ -182,7 +184,9 @@ run_flow(flow, product_key="acme", runtime="opencode")
 ```
 
 Hand `flow` to the reusable CLI instead of calling `run_flow` directly to get
-`run_cli(flow)`'s `run` / `flow nodes` subcommands for free.
+`run_cli(flow)`'s `run` / `flow nodes` / `version` subcommands for free. Pass
+`run_cli(flow, version="1.2.0")` to surface your app's version alongside
+agent-flow's.
 
 The same pipeline can be written imperatively with `agent_node(...)`, the
 lower-level Tier-3 form.

@@ -8,8 +8,9 @@ module-level singleton) — so commands receive their config via a `RunCliContex
 rather than importing a global.
 
 Commands today:
-  - `run`  — execute the pipeline (all the generic run flags + -p/--param).
-  - `flow` — inspect the pipeline's flow / graph (`flow nodes`).
+  - `run`     — execute the pipeline (all the generic run flags + -p/--param).
+  - `flow`    — inspect the pipeline's flow / graph (`flow nodes`).
+  - `version` — print the pipeline name + the agent-flow version.
 
 The rendering helpers (event_printer, NodeProgressPrinter, print_results_table,
 print_preflight_results, get_console) live in the sibling cli modules and are
@@ -35,6 +36,7 @@ def run_cli(
     default_run_dir: str = "",
     params_model: type | None = None,
     registry: object = None,
+    version: str | None = None,
 ) -> None:
     """Run a pipeline from a UNIFIED CLI: subcommands over generic flags + params.
 
@@ -48,6 +50,13 @@ def run_cli(
         (AGENT_FLOW_*) > .env > --config YAML > default.
       - `flow nodes` — the pipeline's nodes in execution order (name, agent,
         group, deps), to discover --only/--start-from targets.
+      - `version` — the pipeline name, the consumer's app version (the `version`
+        argument, if given), and the agent-flow version powering it.
+
+    `version` is the CONSUMER's own app version string (e.g. its package
+    version). It is shown as the primary version; agent-flow's version is always
+    shown as a secondary layer (the two-layer client/server convention). Omit it
+    and only the agent-flow version is shown.
 
     `default_agent_dir` / `default_run_dir` supply the pipeline's own fallbacks
     when neither CLI nor env set them; `default_run_dir` may use `{param}`
@@ -73,6 +82,7 @@ def run_cli(
 
     from agent_flow.cli.commands import flow as flow_cmd
     from agent_flow.cli.commands import run as run_cmd
+    from agent_flow.cli.commands import version as version_cmd
     from agent_flow.cli.context import RunCliContext
 
     # `flow` is either a FlowDef (the declarative surface) or a build_nodes()
@@ -108,6 +118,7 @@ def run_cli(
         default_run_dir=default_run_dir,
         params_model=params_model,
         registry=registry,
+        version=version,
     )
 
     # Multi-command app. no_args_is_help shows the command list on bare
@@ -122,5 +133,6 @@ def run_cli(
 
     run_cmd.register(app, ctx)
     flow_cmd.register(app, ctx)
+    version_cmd.register(app, ctx)
 
     app()

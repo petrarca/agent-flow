@@ -29,18 +29,24 @@ flow = FlowDef(name="my-pipeline", agent_dir="{repo}/pipelines/tech", nodes=[
 run_flow(flow, product_key="acme", runtime="opencode")
 ```
 
-Via the CLI (adds `run` / `flow nodes`, `-p/--param`, `--config`, etc.):
+Via the CLI (adds `run` / `flow nodes` / `version`, `-p/--param`, `--config`, etc.):
 
 ```python
 def main():
     from agent_flow.cli import run_cli
-    run_cli(flow)                 # or run_cli(flow, registry=…, params_model=…)
+    run_cli(flow)                 # or run_cli(flow, registry=…, params_model=…, version="1.2.0")
 ```
 
 ```bash
 python -m my_pkg.pipeline run -p product_key=acme --runtime opencode
 python -m my_pkg.pipeline flow nodes      # inspect the pipeline (node -> agent, deps, gate)
+python -m my_pkg.pipeline version         # e.g. "my-pipeline 1.2.0 (agent-flow 0.1.2)"
 ```
+
+Pass `run_cli(flow, version="1.2.0")` with your own app/package version: `version`
+then prints it as the primary version and the agent-flow version as a secondary
+layer (the client/server convention). Omit it and only the agent-flow version is
+shown.
 
 ## Built-in gates
 

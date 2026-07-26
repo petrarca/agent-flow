@@ -171,12 +171,13 @@ Two entry points, no manual compile/build in the common case:
 from agent_flow import run_flow          # programmatic one-liner
 run_flow(flow, registry=registry, product_key="acme", runtime="opencode")
 
-from agent_flow.cli import run_cli        # the reusable CLI (run / flow nodes)
+from agent_flow.cli import run_cli        # the reusable CLI (run / flow nodes / version)
 run_cli(flow, registry=registry, params_model=MyParams)
 ```
 
-`run_cli(flow_def)` compiles + runs it and also gives `run` and `flow nodes`
-subcommands. When no registry is passed, a default (built-in gates only) is used.
+`run_cli(flow_def)` compiles + runs it and also gives `run`, `flow nodes`, and
+`version` subcommands (pass `version="…"` to surface your app version alongside
+agent-flow's). When no registry is passed, a default (built-in gates only) is used.
 The FlowDef's flow-wide `agent_dir` becomes the CLI's default agent dir.
 
 `compile_flow(flow_def, registry) -> list[Node]` and `build_flow(nodes)` remain

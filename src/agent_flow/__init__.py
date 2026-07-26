@@ -131,7 +131,26 @@ from agent_flow.runners import (
 from agent_flow.runners.executor import AgentContentFailedError, AgentCrashError, AgentTimeoutError
 from agent_flow.utils import default_temp_base, resolve_run_dir
 
+
+def _resolve_version() -> str:
+    """The installed distribution version (set by setuptools-scm at build time).
+
+    Read from installed package metadata; falls back to "0+unknown" when the
+    package is not installed (e.g. running from a bare source tree with no
+    metadata). Single source for the `version` CLI command and any consumer.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("petrarca-agent-flow")
+    except PackageNotFoundError:
+        return "0+unknown"
+
+
+__version__ = _resolve_version()
+
 __all__ = [
+    "__version__",
     # agent execution
     "run_agent",
     "AgentResult",
