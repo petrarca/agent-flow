@@ -2,7 +2,7 @@
 type: Design
 title: ServeExecutor — shared opencode serve daemon
 description: Design for ServeExecutor, a peer executor that talks to a shared opencode serve HTTP daemon instead of spawning one process per node. Covers motivation, API surface, sidecar contract, directory routing, the scope boundary (daemon management is out of scope), and infrastructure gaps.
-tags: [agent-flow, serve-executor, opencode, http, sse, executor]
+tags: [agent-flow, serve-executor, opencode, goose, crush, http, sse, executor]
 status: ideation
 ---
 
@@ -57,6 +57,38 @@ The **sidecar family** (`Subprocess` + `Serve`) vs the **return-value family**
 (`InProcess` + `Mock`) is the real structural split. Both sidecar executors
 poll for a control file and harvest telemetry from an event stream. A shared
 base class is a natural future extraction; start flat.
+
+---
+
+## The pattern is not opencode-specific
+
+The "persistent local HTTP+SSE server sharing a warm process across
+invocations" pattern is a small but growing norm among standalone terminal
+coding agents. Three ship a near-identical create-session → post-message →
+stream-events triad:
+
+| Agent | Server entry | Create session | Prompt | Events |
+|-------|-------------|----------------|--------|--------|
+| opencode | `opencode serve` | `POST /session` | `POST /session/:id/message` | SSE `/event` |
+| Goose | `goosed` / `goose web` | `POST /sessions` | `POST /sessions/:id/messages` | SSE |
+| Crush | `internal/server` (unix socket) | `POST /v1/sessions` | agent send | SSE `/v1/.../events` |
+
+A second family exposes the same warm-process benefit over **JSON-RPC** rather
+than HTTP+SSE: **Codex CLI** (`codex app-server`, a real daemon) and **Cursor**
+(`cursor-agent acp`, ACP over stdio). These would need a different executor
+(JSON-RPC/ACP transport), out of scope here.
+
+The rest — Claude Code, Gemini CLI, Amp, Aider — are subprocess-per-invocation
+or in-process-SDK only, served by the existing `SubprocessExecutor`.
+
+**Consequence for the design:** `ServeExecutor` is genuinely runtime-agnostic
+for the HTTP+SSE family. The runtime-specific bits — endpoint paths
+(`/session` vs `/sessions` vs `/v1/sessions`) and event/response shapes — must
+be delegated to the runner (via `parse_sse_event` and endpoint-building
+methods), NOT hardcoded into `ServeClient`. This mirrors how `AgentRunner`
+delegates `build_command`/`parse_event` for the subprocess family. The MVP
+targets opencode only, but the seam must not bake opencode's paths into the
+generic executor.
 
 ---
 
@@ -476,16 +508,22 @@ provides `parse_event` and `parse_stderr_line` today.
 
 Advantages: explicit and discoverable (`opencode-remote` is self-documenting);
 `get_executor` remains a single-parameter lookup; the `-remote` suffix is a
-consistent convention across all future runtimes.
+genuine cross-runtime convention for the HTTP+SSE server family — it applies to
+`goose-remote` and `crush-remote` as well (see "The pattern is not
+opencode-specific"), each mapping the *same* `ServeExecutor` to a different
+runner. It correctly does NOT apply to subprocess-only runtimes (Claude Code,
+Gemini, Amp), which have no daemon.
 
-Disadvantages: introduces a new name string per runtime (`opencode-remote`,
-`claude-code-remote`, ...); `-remote` must not collide with actual runner names.
+Disadvantages: introduces a new name string per HTTP-server runtime; `-remote`
+must not collide with actual runner names.
 
 ---
 
-**Lean toward Option B** — explicit naming is worth the extra string. The
-`-remote` suffix is unambiguous and the pattern scales cleanly to future
-runtimes. Needs sign-off before implementation.
+**Lean toward Option B.** The ecosystem finding confirms `-remote` is a
+meaningful convention, not just opencode sugar: opencode, Goose, and Crush all
+have HTTP+SSE server modes that `ServeExecutor` can serve via per-runtime
+runner adapters. The suffix marks "this runtime, in its remote-daemon mode."
+Needs sign-off before implementation.
 
 ---
 
