@@ -175,19 +175,92 @@ session emits `session.idle` asynchronously after interruption.
 
 ---
 
-## Sidecar contract — unchanged
+## The verdict protocol belongs to the runner
 
-The agent still writes `<node>.control.json` via its Write tool into `run_dir`.
-`ServeExecutor` reads it after `session.idle` arrives (same as
-`SubprocessExecutor` reads it after process EOF). The status verdict, gate
-machinery, `result_schema` validation, and `check_content_status` all work
-identically.
+The verdict round-trip — HOW the agent is told to report its outcome, and HOW
+that outcome is read back — is runtime- and transport-specific. It must NOT be a
+library-wide assumption.
 
-The sidecar is an **agent contract**, not a subprocess mechanism.
-`ServeExecutor` does not use `message.structured` from the prompt response for
-the verdict — that would couple it to opencode's `StructuredOutput` tool
-injection and introduce the same re-nudge fragility as other HTTP-based
-approaches.
+Today `build_control_preamble` lives in `core/control_protocol.py` and
+`SubprocessExecutor` hardcodes "the agent writes a sidecar file; read it off
+disk". That bakes the sidecar mechanism into the whole library. But:
+
+- the sidecar preamble ("write CONTROL_FILE with the Write tool") is only
+  universal for runtimes with a Write tool + a filesystem;
+- reading the verdict back over HTTP (`GET /file/content`) is opencode-specific;
+- an inline structured verdict (`info.structured` via `format:{json_schema}`) is
+  opencode-specific too.
+
+So there is NO single verdict mechanism that fits every runtime and transport.
+The resolution: **the runner owns both ends of its verdict protocol.**
+
+```
+RunnerBase
+  ├── spec()
+  ├── parse_event(raw) -> Event
+  └── verdict protocol (runtime + transport owned):
+        build_verdict_preamble(agent, node, run_dir, result_schema) -> str
+        harvest_verdict(ctx) -> control_dict        # ctx: response / paths / client
+```
+
+- `build_verdict_preamble` — the instruction block telling the agent how to
+  report (prepended to the prompt, exactly where `build_control_preamble` output
+  goes today).
+- `harvest_verdict` — reads the outcome back the runner's own way and returns the
+  neutral control envelope (`status`/`agent`/`reason`/`rerun_required`/`result`).
+
+The executors become verdict-agnostic — they orchestrate, the runner decides:
+
+```
+SubprocessExecutor.run(inv):
+    preamble = runner.build_verdict_preamble(...)
+    <spawn + supervise>
+    control  = runner.harvest_verdict(<sidecar path / proc>)
+    assemble_result(control) + check_content_status      # shared, unchanged
+
+ServeExecutor.run(inv):
+    preamble = runner.build_verdict_preamble(...)
+    resp = POST /session/:id/message (blocking)
+    control  = runner.harvest_verdict(<resp / client>)
+    assemble_result(control) + check_content_status      # shared, unchanged
+```
+
+### What each runner does
+
+- **`OpenCodeRunner` (subprocess)** — `build_verdict_preamble` returns the
+  sidecar instruction (the current `build_control_preamble` output, verbatim);
+  `harvest_verdict` reads `<run_dir>/<node>.control.json` off disk. **Behaviour
+  identical to today**, just relocated from `core` + `SubprocessExecutor` into
+  the runner.
+- **`OpenCodeRemoteRunner`** — owns the remote choice. MVP: same sidecar
+  preamble, harvest by reading the file back via opencode's `GET /file/content`
+  (the daemon reads its own disk — no shared mount needed). Later, optionally,
+  the C.2 structured-output path (`format:{json_schema}` → `info.structured`) if
+  it proves worthwhile — a change entirely inside this runner.
+- **`GooseRemoteRunner` / others** — their own preamble + harvest, whatever their
+  runtime supports.
+
+`build_control_preamble` in `core/control_protocol.py` does NOT disappear — it
+becomes a shared HELPER the sidecar-style runners choose to call, not a
+library-wide contract. `result_schema` still flows through it (embedded in the
+preamble) the same way.
+
+### Design it in the existing structure now
+
+This refactor is behaviour-preserving for the subprocess path and can land
+BEFORE `ServeExecutor` exists:
+
+1. Add `build_verdict_preamble` + `harvest_verdict` to the runner protocol
+   (`RunnerBase`) as optional methods (getattr/hasattr, like `preflight_checks`).
+2. Implement them on `OpenCodeRunner` by moving the sidecar preamble + sidecar
+   read out of `SubprocessExecutor` / `agent_runtime` into the runner.
+3. `SubprocessExecutor` calls `runner.build_verdict_preamble(...)` /
+   `runner.harvest_verdict(...)` instead of hardcoding the sidecar — with a
+   fallback to the current behaviour so nothing breaks during migration.
+4. Tests stay green (same sidecar behaviour, new call path).
+
+Then `ServeExecutor` + `OpenCodeRemoteRunner` slot in with the verdict protocol
+already a runner concern.
 
 ---
 
