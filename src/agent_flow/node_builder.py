@@ -298,6 +298,13 @@ def agent_node(
             "_result_valid": result.result_valid,
             "_result_errors": list(result.result_errors),
             "_result_obj": result.result_obj,
+            # The node's OWN resolved inputs (KEY: resolved-value), available to
+            # gates via {KEY} templating. Local to this node instance — they WIN
+            # over same-named global params in gate path resolution (most specific
+            # wins) but do NOT flow into the shared run-context. This lets
+            # gate_args reference the same value the node passed the agent
+            # (e.g. {REPORT}) without repetition.
+            "_inputs": dict(resolved_inputs),
         }
 
     return Node(

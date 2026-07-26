@@ -241,3 +241,54 @@ def test_walk_delivers_goto_instruction_to_target():
     # least assert the instruction was routed to the target key during the jump.
     # Since this run_group does not drain `pending`, it remains recorded for A.
     assert pending.get("A") == "redo A"
+
+
+# --- node-local inputs available to gates -----------------------------------
+
+
+def test_gate_resolves_input_key_from_node_inputs(tmp_path):
+    # A gate's path= can reference {REPORT} from the node's own inputs — no need
+    # to repeat the value in gate_args. The resolved input is injected into the
+    # gate result dict under _inputs.
+    report = tmp_path / "report.md"
+    report.write_text("content")
+    node = Node("n", run=lambda c: None)
+    # Simulate the result dict agent_node produces (with _inputs populated).
+    result = {"status": "ok", "_inputs": {"REPORT": str(report)}}
+    ctx = GateContext(result=result, obj=None, node=node, run_dir=tmp_path, cycles=0, params={}, agent_dir="")
+    d = require_file(ctx, path="{REPORT}")
+    assert isinstance(d, Continue)
+
+
+def test_gate_node_input_missing_file_restarts(tmp_path):
+    # When {REPORT} from node inputs points at a non-existent file -> Restart.
+    node = Node("n", run=lambda c: None)
+    result = {"status": "ok", "_inputs": {"REPORT": str(tmp_path / "missing.md")}}
+    ctx = GateContext(result=result, obj=None, node=node, run_dir=tmp_path, cycles=0, params={}, agent_dir="")
+    d = require_file(ctx, path="{REPORT}")
+    assert isinstance(d, Restart)
+
+
+def test_gate_node_input_wins_over_global_param(tmp_path):
+    # Node-local input wins over a same-named global param.
+    local_file = tmp_path / "local.md"
+    local_file.write_text("local")
+    node = Node("n", run=lambda c: None)
+    result = {"status": "ok", "_inputs": {"REPORT": str(local_file)}}
+    # Global param points at a non-existent file — local input must win.
+    global_params = {"REPORT": str(tmp_path / "global_missing.md")}
+    ctx = GateContext(result=result, obj=None, node=node, run_dir=tmp_path, cycles=0, params=global_params, agent_dir="")
+    d = require_file(ctx, path="{REPORT}")
+    assert isinstance(d, Continue)  # local file exists -> Continue, not Restart
+
+
+def test_gate_node_inputs_do_not_pollute_global_params(tmp_path):
+    # Node-local inputs must NOT flow into the shared run params.
+    # Verified by checking that ctx.params is unchanged after the gate call.
+    node = Node("n", run=lambda c: None)
+    global_params = {"product_key": "acme"}
+    result = {"status": "ok", "_inputs": {"REPORT": str(tmp_path / "r.md")}}
+    ctx = GateContext(result=result, obj=None, node=node, run_dir=tmp_path, cycles=0, params=global_params, agent_dir="")
+    require_file(ctx, path="{REPORT}")
+    assert ctx.params == {"product_key": "acme"}  # unchanged — no REPORT leaked in
+    assert "REPORT" not in ctx.params

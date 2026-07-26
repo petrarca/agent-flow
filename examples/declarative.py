@@ -109,7 +109,11 @@ FLOW = FlowDef(
             depends_on=["tech-stack-verify"],
             parallel_group="analysis",
             gate="require_file",
-            gate_args={"path": "{run_dir}/domain.md"},
+            # {REPORT} resolves from the node's own inputs above — no need to
+            # repeat the path. Node-local inputs are available to gates and win
+            # over same-named global params (but never flow into the shared run
+            # context).
+            gate_args={"path": "{REPORT}"},
         ),
         NodeDef(
             name="architecture",
@@ -118,7 +122,7 @@ FLOW = FlowDef(
             depends_on=["tech-stack-verify"],
             parallel_group="analysis",
             gate="require_file",
-            gate_args={"path": "{run_dir}/architecture.md"},
+            gate_args={"path": "{REPORT}"},  # resolves from this node's inputs
         ),
         NodeDef(
             name="domain-verify",

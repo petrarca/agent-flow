@@ -224,15 +224,25 @@ def rerun_on_named(ctx: GateContext, *, control_file: str | None = None) -> Dire
 
 
 def _resolve_path(path: str, ctx: GateContext) -> str:
-    """Expand `{param}` placeholders in a gate path from run params.
+    """Expand `{param}` placeholders in a gate path.
 
-    `{run_dir}` is always available (mirrors agent_node input templating).
-    The CALLER joins a bare (non-absolute) result onto ctx.run_dir — so
-    `"report.md"` and `"{run_dir}/report.md"` both resolve to the same file
-    under run_dir. run_dir is NOT the process cwd; it is the artifact directory
-    for this run. Missing placeholders are left literal (no crash).
+    Template precedence (highest wins):
+      1. Node-local inputs (`_inputs` in ctx.result) — the resolved KEY: value
+         work-order the node passed its agent (e.g. REPORT, PRODUCT_KEY).
+         Most specific: computed for this exact node instance, so they win
+         over same-named global params.
+      2. Global run params (`ctx.params`) — pipeline-wide values.
+      3. `{run_dir}` — always available as the base fallback.
+
+    A bare filename without a leading `/` or `{run_dir}` is joined onto
+    ctx.run_dir by the caller — NOT the process cwd.
+    Missing placeholders are left literal (no crash).
     """
-    tmpl = {**ctx.params, "run_dir": str(ctx.run_dir)}
+    node_inputs = ctx.result.get("_inputs", {}) if isinstance(ctx.result, dict) else {}
+    # Precedence (highest first): node-local inputs > global params > run_dir.
+    # Node inputs are the most specific (computed for this exact node instance)
+    # and win over same-named global params. run_dir is always the fallback base.
+    tmpl = {"run_dir": str(ctx.run_dir), **ctx.params, **node_inputs}
     try:
         return path.format(**tmpl)
     except KeyError, IndexError:
