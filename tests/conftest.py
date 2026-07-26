@@ -7,13 +7,14 @@ docker-free); integration tests run via `-m integration`.
 """
 
 import json
+import shlex
 import shutil
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from agent_flow.runners.base import AgentInvocation, AgentRunnerInfo, Event
+from agent_flow.runners.base import AgentInvocation, AgentRunnerInfo, Event, LaunchSpec
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -28,21 +29,31 @@ class StubRunner:
     entirely on the command line:
       - emit=<dict>: the stub writes that envelope as the sidecar and exits 0.
       - sleep=True:  the stub hangs forever (tests the stale/kill path).
+      - print_line=<str> + exit_code=<int>: print a raw stdout line, write NO
+        sidecar, exit with the code (tests the no-sidecar diagnostic + routing).
     """
 
     name = "stub"
 
-    def __init__(self, *, emit: dict | None = None, sleep: bool = False) -> None:
+    def __init__(self, *, emit: dict | None = None, sleep: bool = False, print_line: str = "", exit_code: int = 0) -> None:
         self._emit = emit
         self._sleep = sleep
+        self._print = print_line
+        self._exit = exit_code
 
-    def build_command(self, inv: AgentInvocation) -> list[str]:
-        cmd = ["python3", str(_STUB), "--agent", inv.agent, "--prompt", inv.prompt]
+    def build_command(self, inv: AgentInvocation) -> LaunchSpec:
+        argv = ["python3", str(_STUB), "--agent", inv.agent, "--prompt", inv.prompt]
         if self._sleep:
-            cmd.append("--sleep")
+            argv.append("--sleep")
+        elif self._print or self._exit:
+            if self._print:
+                argv += ["--print", self._print]
+            if self._exit:
+                argv += ["--exit-code", str(self._exit)]
         elif self._emit is not None:
-            cmd += ["--emit", json.dumps(self._emit)]
-        return cmd
+            argv += ["--emit", json.dumps(self._emit)]
+        display = shlex.join(argv[:5]) + " <prompt elided>"
+        return LaunchSpec(argv=argv, display=display)
 
     def parse_event(self, line: str) -> Event:
         return Event.none()  # stub finishes fast; completion is via sidecar

@@ -51,11 +51,22 @@ def main() -> None:
     ap.add_argument("--model", required=False, default="")
     ap.add_argument("--emit", required=False, default="")  # JSON envelope to write
     ap.add_argument("--sleep", action="store_true")  # hang forever (test the kill path)
+    ap.add_argument("--print", required=False, default="")  # print a raw stdout line (no sidecar)
+    ap.add_argument("--exit-code", type=int, default=0)  # exit with this code
     args = ap.parse_args()
 
     if args.sleep:
         time.sleep(100000)  # never returns; the supervisor kills us on idle
         return
+
+    # A raw stdout line with NO sidecar (tests the no-verdict diagnostic + exit
+    # code routing). Used to simulate a runtime that fails to start.
+    if args.print:
+        print(args.print, flush=True)
+        raise SystemExit(args.exit_code)
+
+    if args.exit_code:
+        raise SystemExit(args.exit_code)
 
     payload = json.loads(args.emit) if args.emit else {"status": "ok", "agent": args.agent}
     _write_sidecar(args.prompt, payload)

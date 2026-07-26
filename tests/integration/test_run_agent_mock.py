@@ -11,8 +11,8 @@ import json
 
 import pytest
 
-from agent_flow.core.agent_runtime import run_agent
-from agent_flow.runners.executor import AgentContentFailedError, AgentTimeoutError
+from agent_flow.core.agent_runtime import SubprocessExecutor, run_agent
+from agent_flow.runners.executor import AgentContentFailedError, AgentCrashError, AgentTimeoutError
 
 # stub_runner is a fixture (tests/conftest.py) — not a plain import — so it
 # resolves identically regardless of pytest invocation style (tests/ has no
@@ -116,4 +116,61 @@ def test_run_agent_flags_invalid_result_without_failing(tmp_path, stub_runner):
     )
     assert result.control["status"] == "ok"  # engine did NOT fail the run
     assert result.result_valid is False
-    assert result.result_errors
+
+
+# --- no-verdict routing (no sidecar): crash vs. content-failure -------------
+
+
+def test_no_sidecar_nonzero_exit_is_crash(tmp_path, stub_runner):
+    # Process exits non-zero, prints a non-JSON line, writes NO sidecar and the
+    # runner recognises no runtime error -> a genuine crash -> AgentCrashError
+    # (transient, retryable).
+    control = tmp_path / "n.control.json"
+    with pytest.raises(AgentCrashError) as ei:
+        run_agent(
+            agent="a",
+            prompt=_prompt(tmp_path / "out.md", control),
+            run_dir=tmp_path,
+            runner=stub_runner(print_line="boom on stderr-ish", exit_code=1),
+            control_file=control,
+        )
+    # The diagnostic carries the exit code and the last output.
+    assert "exit=1" in str(ei.value)
+    assert "boom on stderr-ish" in str(ei.value)
+
+
+def test_no_sidecar_clean_exit_is_content_failure(tmp_path, stub_runner):
+    # Process exits 0 but writes NO sidecar (agent finished yet produced no
+    # verdict) -> content failure -> AgentContentFailedError (do NOT retry).
+    control = tmp_path / "n.control.json"
+    with pytest.raises(AgentContentFailedError) as ei:
+        run_agent(
+            agent="a",
+            prompt=_prompt(tmp_path / "out.md", control),
+            run_dir=tmp_path,
+            runner=stub_runner(print_line="did some work then forgot the sidecar", exit_code=0),
+            control_file=control,
+        )
+    assert "no control sidecar written" in str(ei.value)
+
+
+def test_start_failure_binary_missing_is_crash(tmp_path):
+    # A runner whose binary does not exist -> Popen raises OSError -> AgentCrashError.
+    from agent_flow.runners.base import AgentInvocation, LaunchSpec
+
+    class _MissingBinaryRunner:
+        name = "missing"
+
+        def build_command(self, inv):
+            return LaunchSpec(argv=["definitely-not-a-real-binary-xyz", "arg"], display="definitely-not-a-real-binary-xyz <prompt>")
+
+        def parse_event(self, line):
+            from agent_flow.runners.base import Event
+
+            return Event.none()
+
+    control = tmp_path / "n.control.json"
+    inv = AgentInvocation(agent="a", prompt="p", run_dir=tmp_path, node="n")
+    with pytest.raises(AgentCrashError) as ei:
+        SubprocessExecutor(_MissingBinaryRunner()).run(inv, control_file=control)
+    assert "failed to start" in str(ei.value)

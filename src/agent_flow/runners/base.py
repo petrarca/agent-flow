@@ -193,6 +193,11 @@ class Event:
     is_terminal: bool = False
     is_event: bool = True  # False for lines that are not real events (ignored for liveness)
     raw: str = ""  # the original stdout line, diagnostic passthrough (NOT for neutral render)
+    # A RUNTIME ERROR the runner recognised in the stream (e.g. opencode's
+    # {"type":"error"} line: model unresolved, provider failure). "" when the
+    # event is not an error. The supervisor collects these so that a run which
+    # ends with no control sidecar can report WHY, not just "no sidecar written".
+    error: str = ""
     # Neutral display view (runner-filled, CLI-rendered) — see class docstring.
     kind: str = ""
     title: str = ""
@@ -207,12 +212,33 @@ class Event:
         return Event(is_event=False)
 
 
+@dataclass(frozen=True)
+class LaunchSpec:
+    """How to launch one agent invocation — the runner's `build_command` output.
+
+    A runner turns a (prompt-composed) `AgentInvocation` into this control
+    structure. It separates the two things the executor needs but must NOT
+    conflate:
+
+      argv     the exact argv to spawn (Popen consumes it). Includes whatever
+               payload the runner chose — for a CLI runner the prompt is usually
+               the trailing positional.
+      display  a human, diagnosis-safe one-line rendering of the command with the
+               (huge) prompt payload ELIDED. The runner formats it because only
+               the runner knows which parts are flags vs. payload; the executor
+               just prints it verbatim in an error. A plain string, not an argv.
+    """
+
+    argv: list[str]
+    display: str
+
+
 @runtime_checkable
 class AgentRunner(Protocol):
     """Strategy for one agent-execution backend.
 
-    REQUIRED: `build_command` (the argv) + `parse_event` (stdout line -> Event).
-    Everything else (supervision, kill, sidecar, DAG) is runner-agnostic.
+    REQUIRED: `build_command` (-> LaunchSpec) + `parse_event` (stdout line ->
+    Event). Everything else (supervision, kill, sidecar, DAG) is runner-agnostic.
 
     OPTIONAL (a runner may implement them; callers use getattr/hasattr):
       - `preflight_checks(agent_dir) -> list[Check]`: runtime pre-conditions this
@@ -228,8 +254,8 @@ class AgentRunner(Protocol):
 
     name: str
 
-    def build_command(self, inv: AgentInvocation) -> list[str]:
-        """The argv to spawn this runner for one agent invocation."""
+    def build_command(self, inv: AgentInvocation) -> LaunchSpec:
+        """Build the LaunchSpec (argv + diagnosis-safe display) for one invocation."""
         ...
 
     def parse_event(self, line: str) -> Event:

@@ -24,7 +24,7 @@ present in `RUNNERS`.
 
 from __future__ import annotations
 
-from agent_flow.runners.base import DEFAULT_IDLE_TIMEOUT_S, AgentInvocation, AgentRunner, AgentRunnerInfo, Event, compose_prompt
+from agent_flow.runners.base import DEFAULT_IDLE_TIMEOUT_S, AgentInvocation, AgentRunner, AgentRunnerInfo, Event, LaunchSpec, compose_prompt
 from agent_flow.runners.claude_code import ClaudeCodeRunner
 from agent_flow.runners.executor import AgentExecutor
 from agent_flow.runners.inprocess import AgentImpl, InProcessExecutor
@@ -79,6 +79,7 @@ __all__ = [
     "MockAgent",
     "Event",
     "compose_prompt",
+    "LaunchSpec",
     "DEFAULT_IDLE_TIMEOUT_S",
     "OpenCodeRunner",
     "ClaudeCodeRunner",

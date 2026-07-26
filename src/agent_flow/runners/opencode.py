@@ -9,10 +9,11 @@ preflight_checks() introspect the opencode binary/config relative to agent_dir.
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 from pathlib import Path
 
-from agent_flow.runners.base import AgentInvocation, AgentRunnerInfo, Event
+from agent_flow.runners.base import AgentInvocation, AgentRunnerInfo, Event, LaunchSpec
 
 
 class OpenCodeRunner:
@@ -20,7 +21,7 @@ class OpenCodeRunner:
 
     name = "opencode"
 
-    def build_command(self, inv: AgentInvocation) -> list[str]:
+    def build_command(self, inv: AgentInvocation) -> LaunchSpec:
         # opencode identity lives in the agent .md; we pass --agent + work order.
         # --auto auto-approves permissions not explicitly denied: a headless,
         # orchestrated runner is unattended, so writes into a fresh workspace
@@ -30,15 +31,20 @@ class OpenCodeRunner:
         # Only force a model when one was explicitly configured (param/env/CLI/
         # programmatic). With no model, OMIT --model so opencode resolves it from
         # its own config/router — the library never hardcodes a model.
-        cmd = ["opencode", "run", "--agent", inv.agent, "--format", "json", "--auto"]
+        flags = ["opencode", "run", "--agent", inv.agent, "--format", "json", "--auto"]
         if inv.model:
-            cmd += ["--model", inv.model]
+            flags += ["--model", inv.model]
         # --dir points opencode at the project where .opencode/agent lives, so
         # agents resolve regardless of the process cwd (opencode chdir's into it).
         if inv.agent_dir:
-            cmd += ["--dir", inv.agent_dir]
-        cmd.append(inv.prompt)
-        return cmd
+            flags += ["--dir", inv.agent_dir]
+        # The prompt is the trailing positional. `display` shows everything BUT
+        # the prompt (which is the whole composed prompt + control preamble —
+        # hundreds of lines); we know it is the last element because we just put
+        # it there, so no guessing.
+        argv = [*flags, inv.prompt]
+        display = shlex.join(flags) + f" <prompt: {len(inv.prompt)} chars>"
+        return LaunchSpec(argv=argv, display=display)
 
     def parse_event(self, line: str) -> Event:
         """Parse one opencode NDJSON line into supervision fields + the NEUTRAL view.
@@ -58,6 +64,21 @@ class OpenCodeRunner:
             return Event.none()
         part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
         ptype = part.get("type") or ev.get("type") or "event"
+
+        # A top-level runtime error (e.g. model unresolved, provider failure).
+        # opencode emits it on stdout as {"type":"error","error":{name,data:{message,ref}}}
+        # and exits non-zero without producing a control sidecar. Surface it so
+        # the supervisor can report WHY the run has no sidecar.
+        if ptype == "error":
+            err = ev.get("error") if isinstance(ev.get("error"), dict) else {}
+            data = err.get("data") if isinstance(err.get("data"), dict) else {}
+            name = err.get("name") or "error"
+            msg = data.get("message") or ""
+            ref = data.get("ref")
+            summary = f"{name}: {msg}".strip().rstrip(":").strip()
+            if ref:
+                summary = f"{summary} (ref {ref})"
+            return Event(raw=stripped, kind="error", title=summary, error=summary or name)
 
         if ptype in ("step-start", "step_start"):
             return Event(raw=stripped, kind="step_start")

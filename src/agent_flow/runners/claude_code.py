@@ -6,7 +6,9 @@ future implementation has the verified CLI shape to fill in.
 
 from __future__ import annotations
 
-from agent_flow.runners.base import AgentInvocation, Event
+import shlex
+
+from agent_flow.runners.base import AgentInvocation, Event, LaunchSpec
 
 
 class ClaudeCodeRunner:
@@ -40,13 +42,28 @@ class ClaudeCodeRunner:
 
     name = "claude"
 
-    def build_command(self, inv: AgentInvocation) -> list[str]:  # pragma: no cover
-        cmd = ["claude", "-p", inv.prompt, "--output-format", "stream-json", "--agent", inv.agent]
+    def build_command(self, inv: AgentInvocation) -> LaunchSpec:  # pragma: no cover
+        # NOTE: unlike opencode, Claude puts the prompt right after `-p` (NOT the
+        # trailing positional). This is exactly why display-elision belongs to the
+        # runner: only it knows where its own prompt sits.
+        argv = ["claude", "-p", inv.prompt, "--output-format", "stream-json", "--agent", inv.agent]
         if inv.model:
-            cmd += ["--model", inv.model]
+            argv += ["--model", inv.model]
         if inv.instructions:
-            cmd += ["--append-system-prompt", inv.instructions]
-        return cmd
+            argv += ["--append-system-prompt", inv.instructions]
+        # display: the same argv with the prompt (and any long system prompt)
+        # replaced by short markers.
+        shown = [
+            (
+                f"<prompt: {len(a)} chars>"
+                if a == inv.prompt
+                else f"<instructions: {len(a)} chars>"
+                if a == inv.instructions and inv.instructions
+                else a
+            )
+            for a in argv
+        ]
+        return LaunchSpec(argv=argv, display=shlex.join(shown))
 
     def parse_event(self, line: str) -> Event:  # pragma: no cover
         raise NotImplementedError("decode Claude Code stream-json events into Event")

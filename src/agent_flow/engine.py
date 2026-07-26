@@ -560,11 +560,16 @@ def build_flow(
             attempt_instruction = pending.pop(node_name, "")
 
             def _on_error(n: Node, exc: Exception) -> str:
+                # Log only the first line (the real cause). The full detail —
+                # command, sidecar parenthetical — travels on the raised
+                # NodeBlocked and is printed once by the CLI, so we don't
+                # duplicate the multi-line reason in the log.
+                summary = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
                 if n.criticality == "blocking":
-                    logger.error("BLOCKING node %s failed: %s", n.name, exc)
+                    logger.error("BLOCKING node %s failed: %s", n.name, summary)
                     _emit(n.name, "finish", "failed", n.agent)
                     raise NodeBlocked(f"{n.name}: {exc}") from exc
-                logger.warning("DEGRADE node %s failed: %s — continuing", n.name, exc)
+                logger.warning("DEGRADE node %s failed: %s — continuing", n.name, summary)
                 return "degraded"
 
             logger.info("node %s: start (criticality=%s)", node.name, node.criticality)

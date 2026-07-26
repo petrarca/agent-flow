@@ -32,6 +32,7 @@ import signal
 import subprocess
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -40,7 +41,10 @@ from agent_flow.core.control_protocol import build_control_preamble
 from agent_flow.core.schema import ResultSchema, coerce_schema
 from agent_flow.runners import AgentInvocation, AgentRunner, Event
 from agent_flow.runners.base import DEFAULT_IDLE_TIMEOUT_S, compose_prompt
-from agent_flow.runners.executor import AgentExecutor, AgentResult, AgentTimeoutError
+from agent_flow.runners.executor import AgentCrashError, AgentExecutor, AgentResult, AgentTimeoutError
+
+# How many trailing raw stdout lines to keep for a no-sidecar diagnostic.
+_TAIL_LINES = 20
 
 # Liveness supervision.
 #   IDLE = max silence (no runner event) before the agent is deemed STALE.
@@ -63,6 +67,11 @@ class _Supervision:
     tokens: int
     cost: float
     events: int
+    # Diagnostics for a run that ends with NO control sidecar: runtime errors the
+    # runner recognised in the stream (e.g. opencode's {"type":"error"}), and a
+    # bounded tail of the last raw stdout lines. Empty on a clean run.
+    errors: tuple[str, ...] = ()
+    tail: tuple[str, ...] = ()
 
 
 def _start_line_reader(proc: subprocess.Popen):  # noqa: ANN201 - returns a Queue
@@ -102,12 +111,54 @@ def _apply_event(line: str, st: dict, runner: AgentRunner, on_event: Callable[[E
     st["cost"] += ev.cost
     if ev.is_terminal:
         st["saw_terminal"] = True
+    if ev.error:
+        st["errors"].append(ev.error)
     if on_event is not None:
         try:
             on_event(ev)
         except Exception:  # noqa: BLE001 - display must never break the run
             pass
     return True
+
+
+def _consume_line(line: str, st: dict, runner: AgentRunner, on_event: Callable[[Event], None] | None) -> bool:
+    """Record a raw line's tail, then fold it in via `_apply_event`.
+
+    Keeps the no-sidecar diagnostic (bounded tail of raw output) next to event
+    folding so the supervision loop stays a simple liveness loop. Returns whether
+    the line was a real event (a liveness heartbeat).
+    """
+    if line.strip():
+        st["tail"].append(line.rstrip("\n"))
+    return _apply_event(line, st, runner, on_event)
+
+
+def _sidecar_probe(control_file: Path | None) -> Callable[[], bool]:
+    """A cheap 'has the control sidecar appeared?' predicate for the loop."""
+    return lambda: control_file is not None and control_file.exists()
+
+
+def _stop_kind(idle: bool, sidecar: bool) -> str | None:
+    """Map the two pre-line stop conditions to a completion kind (or None)."""
+    if sidecar:
+        return "sidecar"  # work done, even if the process lingers
+    if idle:
+        return "stale"  # silent for the whole idle window
+    return None
+
+
+def _finish(proc: subprocess.Popen, st: dict, kind: str, *, kill: bool) -> _Supervision:
+    """Build the _Supervision result, optionally killing a lingering process."""
+    if kill:
+        _kill_group(proc)  # idempotent; ensures no lingering process
+    return _Supervision(
+        completion=kind,
+        tokens=st["tokens"],
+        cost=st["cost"],
+        events=st["events"],
+        errors=tuple(st["errors"]),
+        tail=tuple(st["tail"]),
+    )
 
 
 def _supervise(
@@ -150,37 +201,32 @@ def _supervise_loop(
     """The liveness loop (see _supervise). Extracted so _supervise stays a thin
     interrupt-handling wrapper (and both stay under the complexity limit)."""
     buf = _start_line_reader(proc)
-    st = {"tokens": 0, "cost": 0.0, "events": 0, "saw_terminal": False}
+    st: dict = {"tokens": 0, "cost": 0.0, "events": 0, "saw_terminal": False, "errors": [], "tail": deque(maxlen=_TAIL_LINES)}
     idle_deadline = time.monotonic() + idle_timeout_s
-
-    def _finish(kind: str) -> _Supervision:
-        _kill_group(proc)  # idempotent; ensures no lingering process
-        return _Supervision(completion=kind, tokens=st["tokens"], cost=st["cost"], events=st["events"])
-
-    def _sidecar_present() -> bool:
-        return control_file is not None and control_file.exists()
+    sidecar_present = _sidecar_probe(control_file)
 
     while True:
-        now = time.monotonic()
-        if _sidecar_present():
-            return _finish("sidecar")  # work done (even if proc lingers)
-        if now >= idle_deadline:
-            return _finish("stale")  # silent for the whole idle window
+        # Stop conditions checked before waiting for the next line.
+        stop = _stop_kind(time.monotonic() >= idle_deadline, sidecar_present())
+        if stop is not None:
+            return _finish(proc, st, stop, kill=True)
 
         try:
-            line = buf.get(timeout=max(min(idle_deadline - now, 1.0), 0.05))
+            line = buf.get(timeout=max(min(idle_deadline - time.monotonic(), 1.0), 0.05))
         except queue.Empty:
             continue
 
         if line is None:  # reader EOF — process finished
             _reap(proc)
-            return _Supervision(completion="completed", tokens=st["tokens"], cost=st["cost"], events=st["events"])
+            return _finish(proc, st, "completed", kill=False)
 
-        # Line arrived: if it's a real event, it's a heartbeat -> reset idle.
-        if _apply_event(line, st, runner, on_event):
+        # Line arrived: fold it in (tail + events + errors). A real event is a
+        # heartbeat -> reset the idle deadline. A terminal event once the sidecar
+        # is on disk stops promptly (else the top-of-loop check catches it next).
+        if _consume_line(line, st, runner, on_event):
             idle_deadline = time.monotonic() + idle_timeout_s
-        if st["saw_terminal"] and _sidecar_present():
-            return _finish("sidecar")
+        if st["saw_terminal"] and sidecar_present():
+            return _finish(proc, st, "sidecar", kill=True)
 
 
 def _reap(proc: subprocess.Popen) -> None:
@@ -205,6 +251,35 @@ def _read_sidecar(control_file: Path | None) -> dict | None:
         return json.loads(control_file.read_text())
     except json.JSONDecodeError, OSError:
         return None
+
+
+def _no_verdict_reason(sup: _Supervision, returncode: int | None, display: str, cwd: str) -> str:
+    """Build a user-facing `reason` for a run that produced NO status verdict.
+
+    Source-neutral by name: today `SubprocessExecutor`'s verdict source is the
+    control sidecar, but the envelope may later come from an inline marker in an
+    artifact (issue #3) — the failure ("runtime produced no result") is the same,
+    only the concrete source named in the trailing parenthetical differs.
+
+    Lead with the REAL cause (the runtime error the runner recognised, or the
+    last output) — that is what a CLI user needs — then the runner's own
+    diagnosis-safe command `display` (prompt already elided by the runner), its
+    exit code, and cwd. The concrete mechanism that yielded nothing (the sidecar)
+    is a trailing debug parenthetical.
+    """
+    if sup.errors:
+        # De-duplicate, preserve order.
+        seen: list[str] = []
+        for e in sup.errors:
+            if e not in seen:
+                seen.append(e)
+        lead = "; ".join(seen)
+    elif sup.tail:
+        lead = "runtime produced no result — last output: " + " | ".join(sup.tail[-3:])
+    else:
+        lead = "runtime produced no result and no diagnostic output"
+    where = f" [cwd: {cwd}]" if cwd else ""
+    return f"{lead}\n  command: {display}{where}\n  (exit={returncode}, no control sidecar written, completion={sup.completion})"
 
 
 class SubprocessExecutor(AgentExecutor):
@@ -272,7 +347,7 @@ class SubprocessExecutor(AgentExecutor):
         full_prompt = preamble + "\n\n" + compose_prompt(inv)
 
         agent_dir = inv.agent_dir or ""
-        cmd = self.runner.build_command(replace(inv, prompt=full_prompt))
+        spec = self.runner.build_command(replace(inv, prompt=full_prompt))
 
         env = os.environ.copy()
         if self._env_extra:
@@ -281,15 +356,20 @@ class SubprocessExecutor(AgentExecutor):
         # cwd = agent_dir when set (the runtime's project dir, e.g. where opencode
         # finds .opencode/agent). Not run_dir — that is the artifact/sidecar root.
         start = time.monotonic()
-        proc = subprocess.Popen(
-            cmd,
-            cwd=agent_dir or None,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            start_new_session=True,
-        )
+        try:
+            proc = subprocess.Popen(
+                spec.argv,
+                cwd=agent_dir or None,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            # The runtime binary is missing / not executable / cwd is invalid.
+            # Transient-in-principle (fix PATH and retry), so AgentCrashError.
+            raise AgentCrashError(f"agent {agent!r}: failed to start ({spec.display}): {exc}") from exc
 
         sup = _supervise(proc, runner=self.runner, idle_timeout_s=inv.idle_timeout_s, control_file=control_file, on_event=inv.on_event)
         duration = time.monotonic() - start
@@ -298,7 +378,7 @@ class SubprocessExecutor(AgentExecutor):
         # never inspects artifacts to guess success (that is the gate's job).
         sidecar = _read_sidecar(control_file)
         if sidecar is None:
-            sidecar = {"status": "error", "agent": agent, "reason": f"no control sidecar written (completion={sup.completion})"}
+            sidecar = {"status": "error", "agent": agent, "reason": _no_verdict_reason(sup, proc.returncode, spec.display, agent_dir)}
 
         result = self.assemble_result(
             inv,
@@ -311,10 +391,25 @@ class SubprocessExecutor(AgentExecutor):
             completion=sup.completion,
         )
 
-        # Subprocess-only: stale (timed out with no sidecar) takes priority.
-        if sup.completion == "stale" and sidecar.get("status") not in ("ok", "verified"):
-            raise AgentTimeoutError(f"agent {agent!r} went stale after {duration:.1f}s (no event/sidecar for {inv.idle_timeout_s}s)")
-        # Shared content-status policy — same check MockExecutor calls.
+        # Subprocess-only failure routing (only when there is no usable verdict):
+        if sidecar.get("status") not in ("ok", "verified"):
+            # 1. Stale (idle timeout, hung) -> transient; retry may help.
+            if sup.completion == "stale":
+                raise AgentTimeoutError(
+                    f"agent {agent!r} went stale after {duration:.1f}s (no event/sidecar for {inv.idle_timeout_s}s)"
+                    + (f" — last output: {sup.tail[-1]}" if sup.tail else "")
+                )
+            # 2. The runtime reported a startup/config error (e.g. model
+            #    unresolved) — DETERMINISTIC, so do NOT retry: a content failure.
+            #    (check_content_status below raises AgentContentFailedError.)
+            # 3. No error event but the process exited NON-ZERO with no sidecar ->
+            #    a genuine crash (OOM, killed, transient provider 5xx) -> retry.
+            if not sup.errors and proc.returncode not in (0, None):
+                raise AgentCrashError(f"agent {agent!r}: {sidecar['reason']}")
+
+        # Shared content-status policy — same check MockExecutor calls. Raises
+        # AgentContentFailedError (do-not-retry) for a runtime error or a clean
+        # exit with no sidecar.
         self.check_content_status(agent, sidecar)
         return result
 

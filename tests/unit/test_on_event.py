@@ -16,7 +16,9 @@ class _FakeRunner:
         return Event(raw=line)
 
     def build_command(self, inv):  # pragma: no cover - unused here
-        return []
+        from agent_flow.runners.base import LaunchSpec
+
+        return LaunchSpec(argv=[], display="")
 
 
 def test_apply_event_calls_on_event_for_real_events():

@@ -210,6 +210,8 @@ def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str, star
         on_event_factory = None
         on_node_event = NodeProgressPrinter(console=console).on_node_event
 
+    from agent_flow.engine import NodeBlocked
+
     try:
         _build_and_run(
             nodes,
@@ -228,6 +230,12 @@ def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str, star
     except KeyboardInterrupt:
         console.print("[yellow]Interrupted[/yellow] — stopped by user (Ctrl-C).")
         sys.exit(130)
+    except NodeBlocked as exc:
+        # A blocking node failed — an EXPECTED terminal outcome, not a crash.
+        # Print a clean error and exit 1; no Python traceback (the cause is in
+        # the message, e.g. the runtime error + the exact command).
+        console.print(f"[red]Run failed[/red] — {exc}")
+        sys.exit(1)
 
 
 def _build_and_run(
