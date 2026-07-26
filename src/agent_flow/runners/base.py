@@ -220,17 +220,26 @@ class LaunchSpec:
     structure. It separates the two things the executor needs but must NOT
     conflate:
 
-      argv     the exact argv to spawn (Popen consumes it). Includes whatever
-               payload the runner chose — for a CLI runner the prompt is usually
-               the trailing positional.
-      display  a human, diagnosis-safe one-line rendering of the command with the
-               (huge) prompt payload ELIDED. The runner formats it because only
-               the runner knows which parts are flags vs. payload; the executor
-               just prints it verbatim in an error. A plain string, not an argv.
+      argv            the exact argv to spawn (Popen consumes it). Includes
+                      whatever payload the runner chose — for a CLI runner the
+                      prompt is usually the trailing positional.
+      display         a human, diagnosis-safe one-line rendering of the command
+                      with the (huge) prompt payload ELIDED. The runner formats
+                      it because only the runner knows which parts are flags vs.
+                      payload; the executor just prints it verbatim in an error.
+                      A plain string, not an argv.
+      capture_stderr  when True the executor captures stderr on a separate pipe
+                      and passes each line to the runner's `parse_stderr_line`
+                      (if implemented). False → stderr is merged into stdout
+                      (the default, backward-compatible behaviour). Runners that
+                      emit structured diagnostics on stderr (e.g. opencode with
+                      --print-logs) set this to True so the executor can extract
+                      actionable error detail without polluting the stdout parse.
     """
 
     argv: list[str]
     display: str
+    capture_stderr: bool = False
 
 
 @runtime_checkable

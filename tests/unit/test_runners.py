@@ -36,13 +36,17 @@ def test_mock_is_not_a_runner():
 
 def test_opencode_build_command_shape():
     r = OpenCodeRunner()
-    cmd = r.build_command(_inv(agent="tech-stack-analyst", prompt="PRODUCT_KEY: x", model="m")).argv
+    spec = r.build_command(_inv(agent="tech-stack-analyst", prompt="PRODUCT_KEY: x", model="m"))
+    cmd = spec.argv
     assert cmd[:2] == ["opencode", "run"]
     assert "--agent" in cmd and "tech-stack-analyst" in cmd
     assert "--model" in cmd and "m" in cmd
     assert "--format" in cmd and "json" in cmd
     assert "--auto" in cmd  # headless: auto-approve non-denied permissions
+    assert "--print-logs" in cmd  # stderr capture: real error messages on failure
+    assert "--log-level" in cmd and cmd[cmd.index("--log-level") + 1] == "ERROR"
     assert cmd[-1] == "PRODUCT_KEY: x"  # prompt is the trailing positional
+    assert spec.capture_stderr is True  # stderr on separate pipe
 
 
 def test_opencode_build_command_display_elides_prompt():
@@ -109,3 +113,51 @@ def test_opencode_parse_event_surfaces_runtime_error():
     assert "UnknownError" in ev.error
     assert "Unexpected server error" in ev.error
     assert "err_abc123" in ev.error
+
+
+# --- parse_stderr_line tests --------------------------------------------------
+
+
+def test_parse_stderr_line_extracts_error_and_ref():
+    # The actionable shape: level=ERROR message=failed ref=... error="..."
+    line = (
+        "timestamp=2026-07-26T14:15:07.115Z level=ERROR run=abc message=failed"
+        ' ref=err_0ddf08a6 error="ProviderModelNotFoundError: Model not found: bla/."'
+    )
+    result = OpenCodeRunner().parse_stderr_line(line)
+    assert result is not None
+    assert "ProviderModelNotFoundError" in result
+    assert "ref err_0ddf08a6" in result
+
+
+def test_parse_stderr_line_bare_error_without_ref():
+    line = "timestamp=2026-07-26T14:15:07.115Z level=ERROR run=abc message=failed error=SomeError:whatever"
+    result = OpenCodeRunner().parse_stderr_line(line)
+    assert result == "SomeError:whatever"
+
+
+def test_parse_stderr_line_ignores_no_error_field():
+    # Secondary ERROR lines that have no error= field (e.g. "share subscriber failed")
+    line = 'timestamp=2026-07-26T14:15:07.109Z level=ERROR run=abc message="share subscriber failed" type=message.updated cause="Cause([Fail(...)])"'
+    result = OpenCodeRunner().parse_stderr_line(line)
+    assert result is None
+
+
+def test_parse_stderr_line_ignores_non_error_level():
+    line = 'timestamp=2026-07-26T14:15:06.885Z level=INFO run=abc message="creating instance" directory=/tmp/x'
+    result = OpenCodeRunner().parse_stderr_line(line)
+    assert result is None
+
+
+def test_parse_stderr_line_returns_none_for_empty():
+    assert OpenCodeRunner().parse_stderr_line("") is None
+
+
+# --- LaunchSpec.capture_stderr default ----------------------------------------
+
+
+def test_launch_spec_capture_stderr_default_false():
+    from agent_flow.runners.base import LaunchSpec
+
+    spec = LaunchSpec(argv=["opencode", "run"], display="opencode run ...")
+    assert spec.capture_stderr is False

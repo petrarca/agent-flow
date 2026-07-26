@@ -4,16 +4,30 @@ The ONE place opencode's CLI surface and wire format are known: build_command
 (argv) and parse_event (stdout line -> neutral Event). The `_opencode_*` helpers
 lift opencode's tool-event shape onto the neutral display fields; info() and
 preflight_checks() introspect the opencode binary/config relative to agent_dir.
+
+stderr capture: build_command sets capture_stderr=True and adds --print-logs
+--log-level ERROR so opencode emits only ERROR-level diagnostic lines on stderr
+(zero lines on a successful run). parse_stderr_line extracts the actionable
+error= and ref= fields from those lines so SubprocessExecutor can enrich its
+no-sidecar diagnostics with the real cause instead of the vague "Unexpected
+server error" opencode emits on stdout.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import shutil
 from pathlib import Path
 
 from agent_flow.runners.base import AgentInvocation, AgentRunnerInfo, Event, LaunchSpec
+
+# Regex to extract key=value pairs for `error` and `ref` from an opencode
+# stderr ERROR line.  opencode's logfmt formatter (logging.ts) quotes values
+# with JSON.stringify when they contain spaces/=/"/\, bare otherwise.  We only
+# need these two fields — no full logfmt parser required.
+_STDERR_FIELD = re.compile(r'\b(error|ref)=("(?:[^"\\]|\\.)*"|[^\s]+)')
 
 
 class OpenCodeRunner:
@@ -31,7 +45,12 @@ class OpenCodeRunner:
         # Only force a model when one was explicitly configured (param/env/CLI/
         # programmatic). With no model, OMIT --model so opencode resolves it from
         # its own config/router — the library never hardcodes a model.
-        flags = ["opencode", "run", "--agent", inv.agent, "--format", "json", "--auto"]
+        # --print-logs --log-level ERROR: capture stderr separately (see
+        # capture_stderr=True below). At ERROR level opencode emits zero lines on
+        # a successful run; on failure it emits the real cause (e.g.
+        # ProviderModelNotFoundError) that its stdout JSON deliberately obscures
+        # behind "Unexpected server error". parse_stderr_line extracts those.
+        flags = ["opencode", "run", "--agent", inv.agent, "--format", "json", "--auto", "--print-logs", "--log-level", "ERROR"]
         if inv.model:
             flags += ["--model", inv.model]
         # --dir points opencode at the project where .opencode/agent lives, so
@@ -44,7 +63,9 @@ class OpenCodeRunner:
         # it there, so no guessing.
         argv = [*flags, inv.prompt]
         display = shlex.join(flags) + f" <prompt: {len(inv.prompt)} chars>"
-        return LaunchSpec(argv=argv, display=display)
+        # capture_stderr=True: SubprocessExecutor opens a separate stderr pipe
+        # and routes each line through parse_stderr_line (below).
+        return LaunchSpec(argv=argv, display=display, capture_stderr=True)
 
     def parse_event(self, line: str) -> Event:
         """Parse one opencode NDJSON line into supervision fields + the NEUTRAL view.
@@ -94,6 +115,36 @@ class OpenCodeRunner:
             return Event(raw=stripped, kind="text", title=text)
         # A real event we don't specially render: keep it displayable via `title`.
         return Event(raw=stripped, kind="other", title=str(ptype))
+
+    def parse_stderr_line(self, line: str) -> str | None:
+        """Extract an actionable error string from one opencode stderr line, or None.
+
+        Called by SubprocessExecutor for each stderr line when capture_stderr is
+        True.  Only ERROR-level lines are interesting (--log-level ERROR means
+        nothing else arrives); within those, only lines that carry an `error=`
+        field contain the real cause.  A `ref=` field, when present, is appended
+        so the message can be correlated with the opaque ref in the stdout JSON
+        error event.
+
+        Returns None for lines that carry no actionable information (e.g. the
+        secondary "share subscriber failed" ERROR line that has no error= field).
+        """
+        if "level=ERROR" not in line:
+            return None
+        fields: dict[str, str] = {}
+        for m in _STDERR_FIELD.finditer(line):
+            key, val = m.group(1), m.group(2)
+            if val.startswith('"'):
+                try:
+                    val = json.loads(val)
+                except json.JSONDecodeError:
+                    val = val.strip('"')
+            fields[key] = val
+        error = fields.get("error")
+        if not error:
+            return None
+        ref = fields.get("ref")
+        return f"{error} (ref {ref})" if ref else error
 
     def preflight_checks(self, agent_dir: str | Path | None) -> list:
         """opencode-specific pre-conditions: binary on PATH, not nested, agent layout."""

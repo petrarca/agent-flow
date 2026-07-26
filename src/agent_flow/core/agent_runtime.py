@@ -95,6 +95,27 @@ def _start_line_reader(proc: subprocess.Popen):  # noqa: ANN201 - returns a Queu
     return buf
 
 
+def _start_stderr_reader(proc: subprocess.Popen):  # noqa: ANN201 - returns a Queue
+    """Spawn a daemon thread that drains stderr onto a queue (same as stdout reader).
+
+    Used when LaunchSpec.capture_stderr is True. The runner's parse_stderr_line
+    is called per line in the supervision loop — only when something went wrong
+    (the runner controls which lines are actionable). A trailing None signals EOF.
+    """
+    assert proc.stderr is not None
+    buf: queue.Queue[str | None] = queue.Queue()
+
+    def _reader() -> None:
+        try:
+            for line in proc.stderr:  # type: ignore[union-attr]
+                buf.put(line)
+        finally:
+            buf.put(None)
+
+    threading.Thread(target=_reader, daemon=True).start()
+    return buf
+
+
 def _apply_event(line: str, st: dict, runner: AgentRunner, on_event: Callable[[Event], None] | None) -> bool:
     """Fold one stdout line into supervision state via the runner's parser.
 
@@ -161,6 +182,35 @@ def _finish(proc: subprocess.Popen, st: dict, kind: str, *, kill: bool) -> _Supe
     )
 
 
+def _drain_stderr(stderr_buf: queue.Queue | None, runner: AgentRunner, errors: list) -> None:
+    """Non-blocking drain of any stderr lines already queued.
+
+    Called at the end of the supervision loop (after EOF or kill) to flush
+    whatever the runner's stderr reader has buffered. Each line is passed to
+    runner.parse_stderr_line (if implemented); non-None results are appended to
+    `errors` so _no_verdict_reason can include the real cause.
+
+    Non-blocking: only drains what is already in the queue — never waits. The
+    stderr reader thread is a daemon and will have written all lines before the
+    process exits, so by the time we call this the queue is complete.
+    """
+    if stderr_buf is None:
+        return
+    parse_stderr = getattr(runner, "parse_stderr_line", None)
+    if parse_stderr is None:
+        return
+    while True:
+        try:
+            line = stderr_buf.get_nowait()
+        except queue.Empty:
+            break
+        if line is None:
+            break
+        msg = parse_stderr(line)
+        if msg:
+            errors.append(msg)
+
+
 def _supervise(
     proc: subprocess.Popen,
     *,
@@ -168,6 +218,7 @@ def _supervise(
     idle_timeout_s: int,
     control_file: Path | None,
     on_event: Callable[[Event], None] | None = None,
+    stderr_buf: queue.Queue | None = None,
 ) -> _Supervision:
     """Supervise a running agent by LIVENESS only — kill solely when idle.
 
@@ -180,9 +231,13 @@ def _supervise(
       - kills only on STALE: no event AND no sidecar for idle_timeout_s.
 
     Runner-agnostic: the only runner-specific step is `runner.parse_event`.
+    stderr_buf: when set (LaunchSpec.capture_stderr=True), drained at completion
+    via runner.parse_stderr_line; extracted errors fold into _Supervision.errors.
     """
     try:
-        return _supervise_loop(proc, runner=runner, idle_timeout_s=idle_timeout_s, control_file=control_file, on_event=on_event)
+        return _supervise_loop(
+            proc, runner=runner, idle_timeout_s=idle_timeout_s, control_file=control_file, on_event=on_event, stderr_buf=stderr_buf
+        )
     except KeyboardInterrupt:
         # Ctrl-C: kill the agent's whole process group before propagating, so we
         # never leave an orphaned opencode (and its MCP children) running.
@@ -197,6 +252,7 @@ def _supervise_loop(
     idle_timeout_s: float,
     control_file: Path | None,
     on_event: Callable[[Event], None] | None,
+    stderr_buf: queue.Queue | None,
 ) -> _Supervision:
     """The liveness loop (see _supervise). Extracted so _supervise stays a thin
     interrupt-handling wrapper (and both stay under the complexity limit)."""
@@ -209,6 +265,7 @@ def _supervise_loop(
         # Stop conditions checked before waiting for the next line.
         stop = _stop_kind(time.monotonic() >= idle_deadline, sidecar_present())
         if stop is not None:
+            _drain_stderr(stderr_buf, runner, st["errors"])
             return _finish(proc, st, stop, kill=True)
 
         try:
@@ -218,6 +275,7 @@ def _supervise_loop(
 
         if line is None:  # reader EOF — process finished
             _reap(proc)
+            _drain_stderr(stderr_buf, runner, st["errors"])
             return _finish(proc, st, "completed", kill=False)
 
         # Line arrived: fold it in (tail + events + errors). A real event is a
@@ -226,6 +284,7 @@ def _supervise_loop(
         if _consume_line(line, st, runner, on_event):
             idle_deadline = time.monotonic() + idle_timeout_s
         if st["saw_terminal"] and sidecar_present():
+            _drain_stderr(stderr_buf, runner, st["errors"])
             return _finish(proc, st, "sidecar", kill=True)
 
 
@@ -362,7 +421,11 @@ class SubprocessExecutor(AgentExecutor):
                 cwd=agent_dir or None,
                 env=env,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                # capture_stderr=True: separate pipe so the runner's
+                # parse_stderr_line can extract actionable error detail without
+                # polluting the stdout JSON parse. False: merge into stdout
+                # (backward-compatible default for runners that don't opt in).
+                stderr=subprocess.PIPE if spec.capture_stderr else subprocess.STDOUT,
                 text=True,
                 start_new_session=True,
             )
@@ -371,7 +434,10 @@ class SubprocessExecutor(AgentExecutor):
             # Transient-in-principle (fix PATH and retry), so AgentCrashError.
             raise AgentCrashError(f"agent {agent!r}: failed to start ({spec.display}): {exc}") from exc
 
-        sup = _supervise(proc, runner=self.runner, idle_timeout_s=inv.idle_timeout_s, control_file=control_file, on_event=inv.on_event)
+        stderr_buf = _start_stderr_reader(proc) if spec.capture_stderr else None
+        sup = _supervise(
+            proc, runner=self.runner, idle_timeout_s=inv.idle_timeout_s, control_file=control_file, on_event=inv.on_event, stderr_buf=stderr_buf
+        )
         duration = time.monotonic() - start
 
         # The control sidecar is the SOLE verdict. No sidecar => error; the engine
