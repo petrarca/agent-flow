@@ -96,6 +96,7 @@ FlowDef(name="p", nodes=[
             inputs={"REPORT": "{run_dir}/tech-stack.md"},
             gate="require_file", gate_args={"relpath": "tech-stack.md"}),
     NodeDef(name="tech-stack-verify", agent="tech-stack-verifier",
+            inputs={"REPORT": "{run_dir}/tech-stack.md"},
             depends_on=["tech-stack"], criticality="degrade",
             gate="rerun_on_signal", gate_args={"target": "tech-stack"}),
 ])

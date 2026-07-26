@@ -188,6 +188,7 @@ flow = FlowDef(
         NodeDef(
             name="tech-stack-verify",
             agent="tech-stack-verifier",
+            inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
             depends_on=["tech-stack"],
             criticality="degrade",
             gate="rerun_on_signal",
