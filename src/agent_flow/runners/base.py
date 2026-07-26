@@ -301,7 +301,27 @@ class RunnerBase(Protocol):
     the same thing whether it arrived on stdout (subprocess) or SSE (remote) — so
     `parse_event` lives here and is shared by both transport sub-protocols.
 
+    THE VERDICT PROTOCOL. How the agent is TOLD to report its outcome is
+    runtime-specific and belongs to the runner:
+
+      - `build_verdict_preamble(agent, control_file, result_schema) -> str`
+        (OPTIONAL): the completion-protocol instruction block prepended to the
+        prompt. A sidecar-style runner returns the "write CONTROL_FILE" block; a
+        structured-output runner returns a "return your final structured output"
+        block. Pure/stateless — no I/O. When a runner does NOT implement it, the
+        executor falls back to the shared `build_control_preamble` (sidecar).
+
+    HARVESTING the verdict is deliberately NOT a runner method — it is a
+    POST-COMPLETION step that needs STATE the executor holds (the sidecar path,
+    or the HTTP response + client + session id). The executor owns the state and
+    the fetch. Only the runtime-specific INTERPRETATION of an already-fetched
+    remote response (e.g. opencode's `info.structured`) becomes a stateless
+    `parse_verdict(response) -> dict` on the remote runner — same `parse_*` family
+    as `parse_event`. The subprocess sidecar is plain JSON needing no
+    interpretation, so no `parse_verdict` there.
+
     OPTIONAL (a runner may implement them; callers use getattr/hasattr):
+      - `build_verdict_preamble(...)`: see above.
       - `preflight_checks(agent_dir) -> list[Check]`: runtime pre-conditions.
       - `info(agent_dir=None) -> AgentRunnerInfo`: best-effort diagnostics.
     """

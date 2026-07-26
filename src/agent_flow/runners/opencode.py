@@ -45,6 +45,20 @@ class OpenCodeRunner:
             needs_endpoint=False,
         )
 
+    def build_verdict_preamble(self, agent: str, control_file: str, result_schema: dict | None = None) -> str:
+        """The completion-protocol instruction block: write the control sidecar.
+
+        opencode agents report their verdict by writing a JSON control file with
+        the Write tool. This delegates to the shared `build_control_preamble`
+        helper — the sidecar instruction is runtime-agnostic (any runtime with a
+        Write tool + filesystem), so opencode simply reuses it. The subprocess
+        AND remote opencode runners share this preamble; they differ only in how
+        the executor reads the file back (off disk vs over the file API).
+        """
+        from agent_flow.core.control_protocol import build_control_preamble
+
+        return build_control_preamble(agent, control_file, result_schema)
+
     def build_command(self, inv: AgentInvocation) -> LaunchSpec:
         # opencode identity lives in the agent .md; we pass --agent + work order.
         # --auto auto-approves permissions not explicitly denied: a headless,

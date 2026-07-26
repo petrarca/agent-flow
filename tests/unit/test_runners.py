@@ -51,6 +51,26 @@ def test_opencode_spec():
     assert spec.needs_endpoint is False
 
 
+def test_opencode_build_verdict_preamble_matches_control_preamble():
+    # The runner's verdict preamble IS the shared sidecar preamble — opencode
+    # delegates to build_control_preamble, so the output must be identical.
+    from agent_flow.core.control_protocol import build_control_preamble
+
+    runner = OpenCodeRunner()
+    schema = {"type": "object", "properties": {"answer": {"type": "string"}}}
+    got = runner.build_verdict_preamble("my-agent", "/tmp/run/my-node.control.json", schema)
+    expected = build_control_preamble("my-agent", "/tmp/run/my-node.control.json", schema)
+    assert got == expected
+    assert "CONTROL_FILE: /tmp/run/my-node.control.json" in got
+    assert "my-agent" in got
+
+
+def test_opencode_build_verdict_preamble_no_schema():
+    runner = OpenCodeRunner()
+    got = runner.build_verdict_preamble("a", "/tmp/x.control.json")
+    assert "CONTROL_FILE: /tmp/x.control.json" in got
+
+
 def test_runner_specs_dedup():
     # runner_specs() returns one spec per distinct runner (aliases collapse).
     names = [s.name for s in runner_specs()]

@@ -395,14 +395,20 @@ class SubprocessExecutor(AgentExecutor):
         control_file.unlink(missing_ok=True)
 
         # Compose the final prompt. Order:
-        #   [control preamble] [compose_prompt: run-wide context+instructions + prompt]
-        # The preamble is subprocess-specific (it tells the agent to write the
-        # sidecar) so it is prepended HERE; everything else comes from the neutral
-        # compose_prompt helper. A result schema, if supplied, is embedded in the
-        # preamble block.
+        #   [verdict preamble] [compose_prompt: run-wide context+instructions + prompt]
+        # HOW the agent is told to report its verdict is the RUNNER's protocol
+        # (build_verdict_preamble). The runner returns the instruction block; the
+        # executor prepends it. A runner that does not implement it falls back to
+        # the shared sidecar preamble (build_control_preamble) — identical output
+        # for opencode, which simply delegates to that helper. A result schema, if
+        # supplied, is embedded in the preamble block.
         schema = coerce_schema(inv.result_schema)
         schema_dict = schema.to_json_schema() if schema is not None else None
-        preamble = build_control_preamble(agent, str(control_file), schema_dict)
+        build_preamble = getattr(self.runner, "build_verdict_preamble", None)
+        if callable(build_preamble):
+            preamble = build_preamble(agent, str(control_file), schema_dict)
+        else:
+            preamble = build_control_preamble(agent, str(control_file), schema_dict)
         full_prompt = preamble + "\n\n" + compose_prompt(inv)
 
         agent_dir = inv.agent_dir or ""
