@@ -680,87 +680,30 @@ Needs sign-off before implementation.
 
 ---
 
-## Verified against opencode serve 1.18.4 (live)
+## Verified against opencode serve 1.18.4
 
-Empirically probed against a running `opencode serve` (health, session create,
-sync prompt, both SSE streams, wait, abort, delete). Findings that settle the
-open questions:
+The opencode serve API was probed live to settle the open questions. Full
+findings — health, the blocking sync prompt (completion + result + telemetry in
+one response), directory routing, both SSE streams, the unimplemented `wait`,
+the three verdict-retrieval options (sidecar / file API / structured output),
+and agent-discovery caching — are in
+[`../../research/opencode-serve-api.md`](../../research/opencode-serve-api.md).
 
-### The sync prompt IS the completion mechanism — no SSE needed for the MVP
+Decisions that flow from those findings:
 
-`POST /session/:id/message` with `{"agent":"...","parts":[{"type":"text",
-"text":"..."}]}` **blocks until the agent loop fully completes** (~3–5 s in
-tests) and returns the whole result in one JSON payload:
-
-```json
-{
-  "info": {
-    "role": "assistant",
-    "finish": "stop",
-    "error": null,
-    "cost": 0,
-    "tokens": {"total": 15087, "input": 3, "output": 5, "reasoning": 0,
-               "cache": {"write": 15079, "read": 0}},
-    "modelID": "...", "providerID": "...", "sessionID": "...", "id": "..."
-  },
-  "parts": [ {"type": "step-start"}, {"type": "text", "text": "pong"},
-             {"type": "step-finish"} ]
-}
-```
-
-This single blocking response gives **completion + result + telemetry +
-error** at once. The hardest part of the earlier design (an SSE threading model
-to detect `session.idle`) is therefore **not needed for the MVP**:
-
-```
-ServeExecutor.run():
-  session_id = POST /session?directory=<agent_dir>        (create)
-  resp = POST /session/:id/message?directory=<agent_dir>  (BLOCKS until done)
-  # resp.info.error → runtime failure;  resp.info.tokens/cost → telemetry
-  read sidecar from run_dir                                (agent already wrote it)
-  assemble_result + check_content_status
-  DELETE /session/:id                                      (cleanup)
-```
-
-Timeout: enforce a client-side HTTP timeout (`inv.idle_timeout_s`) on the
-blocking call; on fire, `POST /session/:id/abort` and raise `AgentTimeoutError`.
-
-`on_event` live display (optional, post-MVP): subscribe to the legacy global
-`/event` stream and filter by `properties.sessionID`. Nice-to-have, not needed
-for correctness — the blocking response already carries the outcome.
-
-### SSE stream findings (for the optional live-display path)
-
-- **Legacy global `GET /event`** — works, emits `session.idle` (completion),
-  `message.part.updated`, `session.status`, `session.diff`. Global: one stream
-  for all sessions, filter by `properties.sessionID`. This is the stream to use
-  if/when live events are wired.
-- **v2 per-session `GET /api/session/:id/event`** — only carries **durable**
-  events, and only when the prompt was sent via the **v2** endpoint
-  (`POST /api/session/:id/prompt`). Emits `session.next.*` (prompt.admitted,
-  step.started, step.ended/failed) but **not `session.idle`**. A legacy-prompt
-  session produces nothing here. Not usable alongside the legacy sync prompt.
-- **`POST /api/session/:id/wait`** ("block until idle") returns **503
-  ServiceUnavailableError "not available yet"** in 1.18.4 — declared but
-  unimplemented. Do not rely on it.
-
-### Decision: legacy sync prompt + legacy global event stream
-
-Use the **legacy** API throughout: `POST /session/:id/message` (blocking) for
-run + result + telemetry, and — only if live display is added later — the legacy
-global `/event` stream for `on_event`. The v2 surface is inconsistent in this
-build (empty per-session stream for legacy prompts, unimplemented `wait`).
-
-### Session cleanup — verified
-
-`DELETE /session/:id` returns 200 and works. Call it after each `run()`
-completes. Cheap; keeps opencode's SQLite DB from accumulating probe/run
-sessions.
-
-### Health — verified
-
-`GET /global/health` → `{"healthy":true,"version":"1.18.4"}`. Immediate,
-unauthenticated. Use for `ServeClient`'s first-use reachability check.
+- **Completion**: the blocking `POST /session/:id/message` returns completion +
+  result + telemetry + error in one payload — no SSE threading needed for the
+  basic run-to-completion flow.
+- **API surface**: use the **legacy** API (`/session/:id/message` blocking; the
+  global `/event` stream only if live `on_event` display is later added). The v2
+  per-session stream is empty for legacy prompts and `wait` is unimplemented in
+  1.18.4.
+- **Verdict**: only the sidecar-on-shared-filesystem path is runtime-agnostic;
+  `/file/content` read-back and inline `info.structured` are opencode-specific
+  enhancements — which is exactly why the verdict protocol belongs to the runner
+  (see above).
+- **Timeout**: client-side HTTP timeout on the blocking call; on fire,
+  `POST /session/:id/abort`.
 
 ---
 
