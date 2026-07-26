@@ -76,6 +76,33 @@ def stub_runner() -> type[StubRunner]:
     return StubRunner
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _stop_prefect_ephemeral_server():
+    """Stop Prefect's temporary subprocess server BEFORE the interpreter exits.
+
+    The `prefect` integration param spins Prefect's ephemeral ASGI server, which
+    registers its own `stop()` via `atexit`. That atexit runs AFTER pytest has
+    already closed the captured stdout/stderr, so its "Stopping temporary server"
+    log write hits a closed stream and prints a `ValueError: I/O operation on
+    closed file` logging-error block (harmless, but noisy — and it looks like a
+    failure). Stopping the server here, during session teardown while the streams
+    are still open, makes the later atexit `stop()` a no-op and keeps shutdown
+    clean. No-op when Prefect is absent (unit-only runs) or was never started.
+    """
+    yield
+    try:
+        from prefect.server.api.server import SubprocessASGIServer
+    except Exception:  # noqa: BLE001 - prefect not installed: nothing to stop
+        return
+    # Stop every started instance (keyed by port); stop() is idempotent and
+    # clears the process, so the atexit-registered stop() then does nothing.
+    for server in list(getattr(SubprocessASGIServer, "_instances", {}).values()):
+        try:
+            server.stop()
+        except Exception:  # noqa: BLE001 - best-effort teardown; never fail the session
+            pass
+
+
 def pytest_collection_modifyitems(config, items):  # noqa: ARG001
     integration_root = Path(__file__).parent / "integration"
     for item in items:
