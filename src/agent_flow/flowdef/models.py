@@ -53,7 +53,8 @@ class NodeDef(BaseModel):
 
     # In-process execution: a registered agent-impl name (registry.agent_impl).
     # When set, the node runs the agent as a direct in-process call (no
-    # subprocess/sidecar) via InProcessExecutor; `agent` stays as the label.
+    # subprocess/sidecar) via InProcessExecutor. If `agent` is omitted it
+    # defaults to `name` (the common case where name == agent == impl_ref).
     impl_ref: str | None = None
 
     # Per-node runtime overrides.
@@ -63,12 +64,11 @@ class NodeDef(BaseModel):
 
     @model_validator(mode="after")
     def _one_run_source(self) -> NodeDef:
-        # impl_ref check first: gives a clear message before the XOR check fires.
+        # When impl_ref is set and agent is omitted, default agent to name.
+        # This is the common case (name == agent == impl_ref); the explicit agent=
+        # form is still accepted when you want a different label or mock_agent key.
         if self.impl_ref is not None and not self.agent:
-            raise ValueError(
-                f"node {self.name!r}: `impl_ref` requires `agent` to be set — `impl_ref` selects HOW"
-                " the agent runs (in-process), `agent` is its name/label; they are not alternatives"
-            )
+            self.agent = self.name
         if bool(self.agent) == bool(self.run_ref):
             raise ValueError(f"node {self.name!r}: set exactly one of `agent` or `run_ref`")
         if self.exports is not None and self.export_ref is not None:

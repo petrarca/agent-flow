@@ -123,8 +123,10 @@ def inv_params(inv: AgentInvocation) -> dict:
 #              (separate dict from mock_agent). Does NOT need to match `agent`
 #              or `name` — it just must match the string passed to agent_impl().
 #
-# Keeping name == agent == impl_ref (as done here) is the simplest convention
-# and avoids confusion; diverge only when there is a real reason to.
+# When `agent` is omitted alongside `impl_ref`, it defaults to `name` — so the
+# common case (name == agent == impl_ref) only needs name= + impl_ref=. Set
+# `agent` explicitly only when you need a different label or a different
+# mock_agent lookup key.
 #
 # classify publishes its typed fields downstream via `exports` so respond can
 # template {category}/{urgency} into its work order.
@@ -133,8 +135,7 @@ FLOW = FlowDef(
     nodes=[
         NodeDef(
             name="classify",
-            agent="classify",  # matches @REGISTRY.agent_impl("classify")
-            impl_ref="classify",  # resolved from registry by this key
+            impl_ref="classify",  # agent= defaults to name= ("classify")
             inputs={"TICKET": "{ticket}"},
             result_schema="Classification",
             exports={"category": "category", "urgency": "urgency"},
@@ -142,8 +143,7 @@ FLOW = FlowDef(
         ),
         NodeDef(
             name="respond",
-            agent="respond",  # matches @REGISTRY.agent_impl("respond")
-            impl_ref="respond",
+            impl_ref="respond",  # agent= defaults to name= ("respond")
             depends_on=["classify"],
             inputs={"CATEGORY": "{category}", "URGENCY": "{urgency}"},
             result_schema="DraftReply",
