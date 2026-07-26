@@ -73,9 +73,15 @@ tiny protocol:
 ```python
 class AgentRunner(Protocol):
     name: str
-    def build_command(self, inv: AgentInvocation) -> list[str]: ...  # how to launch one agent
-    def parse_event(self, line: str) -> Event: ...                   # liveness/telemetry from stdout
+    def build_command(self, inv: AgentInvocation) -> LaunchSpec: ...  # argv + diagnosis-safe display (prompt elided)
+    def parse_event(self, line: str) -> Event: ...                    # liveness/telemetry from stdout
+    def info(self, agent_dir=None) -> AgentRunnerInfo: ...            # preflight: is the runtime available?
 ```
+
+`LaunchSpec` carries two things the executor needs but must not conflate: `argv`
+(the exact list passed to `Popen`) and `display` (a prompt-elided, human-safe
+one-liner for error messages — only the runner knows which part of the argv is the
+huge prompt payload).
 
 Everything else — supervision, kill, sidecar reading, telemetry, the DAG — is
 runtime-agnostic and written once. `AgentInvocation` carries the agent **name**
