@@ -47,11 +47,12 @@ pipeline comes down to five capabilities. agent-flow delivers each directly:
 
 5. **A unified programming model for *external* agents.** General workflow
    engines (Prefect, Airflow, Dagster, …) can certainly *run* a graph, but they
-   offer no agent programming model — no notion of an agent's prompt, injected
-   context, typed result, control verdict, or the re-run semantics an
-   agent pipeline needs; you build all of that yourself on top of raw tasks. The
-   frameworks that *do* provide that model — **PydanticAI (Graph)**, **LangGraph**,
-   and similar — run the agents **in-process**: the node *is* an LLM/tool call in
+   offer no programming model for integrating such agentic tools (like OpenCode)
+   — no notion of an agent's prompt, injected context, typed result, control
+   verdict, or the re-run semantics an agent pipeline needs; you build all of that
+   yourself on top of raw tasks. The frameworks that *do* provide that model —
+   **PydanticAI (Graph)**, **LangGraph**, and similar — run the agents
+   **in-process**: the node *is* an LLM/tool call in
    your Python process. agent-flow gives the same unified model (nodes with typed
    input/output, a controlled context/instruction plane, gates, bounded re-runs)
    but for agents that run as **external processes** — full coding agents like
