@@ -96,7 +96,7 @@ flow = FlowDef(
             agent="hello-analyst",
             inputs={"REPORT": "{run_dir}/hello.md"},
             gate="require_file",              # a built-in gate, by name
-            gate_args={"relpath": "hello.md"},  # re-try if the report didn't land
+            gate_args={"path": "{run_dir}/hello.md"},  # re-try if the report didn't land
         ),
     ],
 )
@@ -163,9 +163,9 @@ reference it by name — see [recipes.md](recipes.md) and
   substituted before the value is handed to the agent — so the agent receives an
   absolute `REPORT` path and writes exactly there. (Absolute matters — see the
   gotcha in [writing-agents.md](writing-agents.md).)
-- The **gate** `require_file` (via `gate_args={"relpath": "hello.md"}`) looks
-  under the same `run_dir` automatically: a bare relative path is joined onto
-  `run_dir`. You can also give `"{run_dir}/hello.md"` — both resolve to the same
+- The **gate** `require_file` (via `gate_args={"path": "{run_dir}/hello.md"}`) checks
+  the same file the agent was told to write. Use the explicit `{run_dir}/...` form
+  so `path=` matches the node's `inputs=` value exactly — both resolve to the same
   file, and both may use run params (`"{product_key}.md"`). Equivalent; use
   whichever reads best.
 
@@ -214,7 +214,7 @@ the first:
 ```python
 flow = FlowDef(name="hello", nodes=[
     NodeDef(name="hello", agent="hello-analyst", inputs={"REPORT": "{run_dir}/hello.md"},
-            gate="require_file", gate_args={"relpath": "hello.md"}),
+            gate="require_file", gate_args={"path": "{run_dir}/hello.md"}),
     NodeDef(
         name="hello-verify", agent="hello-verifier",
         depends_on=["hello"],

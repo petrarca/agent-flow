@@ -59,11 +59,11 @@ reference them **by name** with `gate_args` — no registration, no import:
 
 | Gate | `gate_args` | What it does |
 |------|-------------|--------------|
-| `require_file` | `relpath` (required, templatable), `on_missing` (optional `Directive`) | The agent reported ok but didn't write its artifact -> `Restart` the node (bounded by `max_cycles`). `relpath` resolves `{param}` templates against the run params, e.g. `"{product_key}-report.md"`. |
-| `rerun_on_signal` | `target` (required), `control_file` (optional) | The node's control sidecar set `rerun_required` -> `GoTo(target)`, a **fixed** earlier node (then the flow re-flows forward). The classic "verifier re-runs its analyst". |
-| `rerun_on_named` | `control_file` (optional) | Same `rerun_required` signal, but routes to **whichever** node the sidecar names (first valid backward target). For a coherence check that may bounce to any upstream stage. |
+| `require_file` | `path` (required, templatable), `on_missing` (optional `Directive`) | The agent reported ok but didn't write its artifact -> `Restart` the node (bounded by `max_cycles`). `path` supports `{param}` templates (e.g. `"{run_dir}/report.md"`). A bare filename without a leading `/` or `{run_dir}` is treated as relative to `run_dir` — use `"{run_dir}/..."` to keep it consistent with the node's `inputs=` value. |
+| `rerun_on_signal` | `target` (required), `control_file` (optional) | The node's control sidecar set `rerun_required` -> `GoTo(target)`, a **fixed** earlier node (then the flow re-flows forward). The classic "verifier re-runs its analyst". `control_file` defaults to `<node>.control.json` under `run_dir` (same `run_dir` rule as `require_file` — not the process cwd). |
+| `rerun_on_named` | `control_file` (optional) | Same `rerun_required` signal, but routes to **whichever** node the sidecar names (first valid backward target). For a coherence check that may bounce to any upstream stage. Same `control_file` / `run_dir` default as `rerun_on_signal`. |
 
-Signatures: `require_file(ctx, *, relpath, on_missing=None)`,
+Signatures: `require_file(ctx, *, path, on_missing=None)`,
 `rerun_on_signal(ctx, *, target, control_file=None)`,
 `rerun_on_named(ctx, *, control_file=None)`. All three auto-populate the
 directive's one-time `instruction`. A node with **no** gate behaves as

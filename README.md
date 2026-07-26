@@ -183,7 +183,7 @@ flow = FlowDef(
             agent="tech-stack-analyst",
             inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
             gate="require_file",
-            gate_args={"relpath": "tech-stack.md"},
+            gate_args={"path": "{run_dir}/tech-stack.md"},
         ),
         NodeDef(
             name="tech-stack-verify",

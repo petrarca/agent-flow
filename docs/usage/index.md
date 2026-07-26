@@ -70,6 +70,6 @@ from agent_flow import agent_node, build_flow
 
 nodes = [agent_node("hello", "hello-agent",
                     inputs={"REPORT": "{run_dir}/hello.md"},
-                    gate_ref="require_file", gate_args={"relpath": "hello.md"})]
+                    gate_ref="require_file", gate_args={"path": "{run_dir}/hello.md"})]
 build_flow(nodes, name="hello")(runtime="opencode")  # no run_dir -> a temp dir (logged)
 ```

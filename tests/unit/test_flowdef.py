@@ -43,11 +43,11 @@ def test_flowdef_to_json_roundtrip():
 
 
 def test_compile_agent_node():
-    flow = FlowDef(name="f", nodes=[NodeDef(name="a", agent="x", gate="require_file", gate_args={"relpath": "r.md"})])
+    flow = FlowDef(name="f", nodes=[NodeDef(name="a", agent="x", gate="require_file", gate_args={"path": "r.md"})])
     nodes = compile_flow(flow, FlowRegistry())
     assert len(nodes) == 1
     n = nodes[0]
-    assert n.name == "a" and n.agent == "x" and n.gate_ref == "require_file" and n.gate_args == {"relpath": "r.md"}
+    assert n.name == "a" and n.agent == "x" and n.gate_ref == "require_file" and n.gate_args == {"path": "r.md"}
 
 
 def test_compile_custom_run_ref():

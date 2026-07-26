@@ -141,35 +141,49 @@ Gate = Callable[[GateContext], Directive]
 # they are ordinary gates a consumer may use, wrap, or ignore.
 
 
-def require_file(ctx: GateContext, *, relpath: str, on_missing: Directive | None = None) -> Directive:
-    """Gate: require a (non-empty) file under run_dir; else re-run the node.
+def require_file(ctx: GateContext, *, path: str, on_missing: Directive | None = None) -> Directive:
+    """Gate: require a (non-empty) file to exist after the node runs; else re-run.
 
-    A gate is `(ctx, **config) -> Directive`. Config here: `relpath` (the file to
-    require) and optional `on_missing`. `relpath` may template run params via
-    `{name}` (e.g. "{run_dir}/{product_key}.md"), resolved against `ctx.params` —
-    the SAME params the node's `run` saw — so a run-time-dependent path still
-    resolves. File present -> Continue; missing -> `on_missing` (default Restart,
-    i.e. give the agent another bounded try).
+    A gate is `(ctx, **config) -> Directive`. Config:
+      path       the file to check. Supports `{param}` templating against the
+                 same run params the node saw (e.g. `"{run_dir}/report.md"`,
+                 `"{product_repos_root}/{product_key}/report.md"`).
+                 A bare filename without a leading `/` or `{run_dir}` (e.g.
+                 `"report.md"`) is treated as relative to `run_dir` — it is
+                 joined onto `ctx.run_dir`, NOT the process working directory.
+                 `run_dir` is the artifact directory for this run (passed as
+                 `run_dir=` to `run_flow`/`build_flow`; defaults to a temp dir).
+                 Use `"{run_dir}/report.md"` explicitly so `path=` stays
+                 consistent with the node's `inputs={"REPORT": ...}` value.
+      on_missing optional directive to return when the file is absent (default:
+                 Restart with an explanatory instruction).
 
-    Referenced from a node as gate="require_file", gate_args={"relpath": "..."}.
+    File present and non-empty -> Continue; absent or empty -> on_missing.
+
+    Referenced from a node as gate="require_file", gate_args={"path": "..."}.
     """
     from agent_flow.core import produced
 
-    rel = _resolve_relpath(relpath, ctx)
-    if produced(ctx.run_dir / rel):
+    resolved = _resolve_path(path, ctx)
+    if produced(ctx.run_dir / resolved):
         return Continue()
-    return on_missing if on_missing is not None else Restart(instruction=f"The required file is missing: {rel}. Produce it.")
+    return on_missing if on_missing is not None else Restart(instruction=f"The required file is missing: {resolved}. Produce it.")
 
 
 def rerun_on_signal(ctx: GateContext, *, target: str, control_file: str | None = None) -> Directive:
     """Gate: re-run a FIXED `target` node when the sidecar asks for a re-run.
 
-    Config: `target` (which node to jump back to) and optional `control_file`.
-    Reads `rerun_required` from the current node's control sidecar (default
-    `<node>.control.json`); if non-empty -> GoTo(target) (bounded by the walker),
-    else Continue. The named values are only a truthy signal; the destination is
-    the fixed `target`. The common verifier case (always bounces to its one
-    subject). For a variable destination, use `rerun_on_named`.
+    Config:
+      target        which node to jump back to (required).
+      control_file  path to the control sidecar to read. Bare filename or
+                    absolute path. When bare (no leading `/`), resolved relative
+                    to `run_dir` (the run artifact dir, NOT the process cwd).
+                    Default: `<node-name>.control.json` under `run_dir`.
+
+    Reads `rerun_required` from the sidecar; if non-empty -> GoTo(target)
+    (bounded by the walker), else Continue. The common verifier case (always
+    bounces to its one fixed subject). For a variable destination use
+    `rerun_on_named`.
 
     Referenced as gate="rerun_on_signal", gate_args={"target": "..."}.
     """
@@ -184,6 +198,12 @@ def rerun_on_signal(ctx: GateContext, *, target: str, control_file: str | None =
 
 def rerun_on_named(ctx: GateContext, *, control_file: str | None = None) -> Directive:
     """Gate: re-run WHICHEVER node the sidecar's `rerun_required` names.
+
+    Config:
+      control_file  path to the control sidecar to read. Bare filename or
+                    absolute path. When bare (no leading `/`), resolved relative
+                    to `run_dir` (the run artifact dir, NOT the process cwd).
+                    Default: `<node-name>.control.json` under `run_dir`.
 
     Unlike `rerun_on_signal` (fixed target), routes to the node named in the
     sidecar — for a final coherence check that may bounce to any upstream stage.
@@ -203,22 +223,17 @@ def rerun_on_named(ctx: GateContext, *, control_file: str | None = None) -> Dire
     return Continue()
 
 
-def _resolve_relpath(relpath: str, ctx: GateContext) -> str:
-    """Best-effort `{name}` expansion for a gate's file path, from run params.
+def _resolve_path(path: str, ctx: GateContext) -> str:
+    """Expand `{param}` placeholders in a gate path from run params.
 
-    Exposes `{run_dir}` too (like agent_node's input templating), so the SAME
-    path template works whether written as "report.md" or "{run_dir}/report.md":
-    a bare relative path is joined onto ctx.run_dir by the caller, and an
-    absolute "{run_dir}/…" path collapses to the same location (Path join drops
-    the run_dir prefix when the right-hand side is already absolute).
-
-    Uses `ctx.params` (the same run-time values a node's `run` sees) rather than
-    the node's static declaration, since only params are known at gate-eval time.
-    A missing placeholder is left literal (no KeyError) so an unrelated `{...}`
-    in the path does not crash the gate.
+    `{run_dir}` is always available (mirrors agent_node input templating).
+    The CALLER joins a bare (non-absolute) result onto ctx.run_dir — so
+    `"report.md"` and `"{run_dir}/report.md"` both resolve to the same file
+    under run_dir. run_dir is NOT the process cwd; it is the artifact directory
+    for this run. Missing placeholders are left literal (no crash).
     """
     tmpl = {**ctx.params, "run_dir": str(ctx.run_dir)}
     try:
-        return relpath.format(**tmpl)
+        return path.format(**tmpl)
     except KeyError, IndexError:
-        return relpath
+        return path

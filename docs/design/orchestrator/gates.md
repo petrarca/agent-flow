@@ -69,9 +69,9 @@ factories you call:
 
 ```python
 # "did the agent actually produce its artifact?" -> Restart if missing (bounded).
-# relpath may template run params, e.g. "{product_key}-report.md".
+# path may template run params, e.g. "{product_key}-report.md".
 NodeDef(name="tech-stack", agent="tech-stack-analyst",
-        gate="require_file", gate_args={"relpath": "tech-stack.md"})
+        gate="require_file", gate_args={"path": "{run_dir}/tech-stack.md"})
 
 # "did this (verifier) node signal a re-run of an earlier node?" -> GoTo(target).
 NodeDef(name="verify", agent="tech-stack-verifier", depends_on=["tech-stack"],
@@ -81,14 +81,28 @@ NodeDef(name="verify", agent="tech-stack-verifier", depends_on=["tech-stack"],
 NodeDef(name="coherence", agent="coherence-check", gate="rerun_on_named")
 ```
 
-Their signatures are `require_file(ctx, *, relpath, on_missing=None)`,
+Their signatures are `require_file(ctx, *, path, on_missing=None)`,
 `rerun_on_signal(ctx, *, target, control_file=None)`, and
-`rerun_on_named(ctx, *, control_file=None)`. `require_file` reads `produced()`,
-resolving `{name}` in `relpath` against `ctx.params`; `rerun_on_signal` reads the
-node's sidecar `rerun_required` and returns `GoTo(target)` for a FIXED target when
-the field is set; `rerun_on_named` reads the same field but routes to the node it
-NAMES (first valid backward target). All three auto-populate the directive's
-`instruction`. They are ordinary gates you may use, wrap, compose, or ignore.
+`rerun_on_named(ctx, *, control_file=None)`.
+
+`require_file`: `path` is resolved via `{param}` templating against `ctx.params`
+(same values the node's `run` saw); `{run_dir}` is always available. A bare
+filename without a leading `/` or `{run_dir}` (e.g. `"report.md"`) is treated as
+**relative to `run_dir`** — it is joined onto `ctx.run_dir`, NOT onto the process
+working directory. `run_dir` is the artifact directory for the run (passed as
+`run_dir=` to `run_flow`/`build_flow`; defaults to a temp dir). Use the explicit
+`"{run_dir}/report.md"` form to make the intent obvious and keep `path=` visually
+consistent with the node's `inputs={"REPORT": "{run_dir}/report.md"}` value.
+
+`rerun_on_signal` reads `rerun_required` from the control sidecar and returns
+`GoTo(target)` for a FIXED target when the field is set; `rerun_on_named` reads
+the same field but routes to the node it NAMES (first valid backward target).
+Both default `control_file` to `<node-name>.control.json` under `run_dir` —
+the same `run_dir` rule as `require_file`: bare filename = relative to `run_dir`,
+NOT the process cwd. You rarely need to override `control_file`; it is there for
+the edge case where a node's agent writes its sidecar under a non-default name.
+All three auto-populate the directive's `instruction`. They are ordinary gates
+you may use, wrap, compose, or ignore.
 
 **A real agent must be TOLD `rerun_required` exists to use it.** The injected
 [control-file protocol](control-file.md) mentions the field, but a specific

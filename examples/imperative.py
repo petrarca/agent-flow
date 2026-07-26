@@ -58,7 +58,7 @@ def _analyst(name: str, agent: str, report: str, *, depends_on=(), parallel_grou
         depends_on=depends_on,
         parallel_group=parallel_group,
         gate_ref="require_file",
-        gate_args={"relpath": report},
+        gate_args={"path": "{run_dir}/" + report},
         registry=REGISTRY,
     )
 

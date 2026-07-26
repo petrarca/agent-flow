@@ -61,7 +61,7 @@ node — the library imposes no adjacency.
 nodes = [
     agent_node("tech-stack", "tech-stack-analyst",
                inputs={"REPORT": "{run_dir}/tech-stack.md"},
-               gate_ref="require_file", gate_args={"relpath": "tech-stack.md"}),
+               gate_ref="require_file", gate_args={"path": "{run_dir}/tech-stack.md"}),
     agent_node("tech-stack-verify", "tech-stack-verifier",
                depends_on=("tech-stack",), criticality="degrade",
                gate_ref="rerun_on_signal", gate_args={"target": "tech-stack"}),

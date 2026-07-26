@@ -109,7 +109,7 @@ FLOW = FlowDef(
             depends_on=["tech-stack-verify"],
             parallel_group="analysis",
             gate="require_file",
-            gate_args={"relpath": "domain.md"},
+            gate_args={"path": "{run_dir}/domain.md"},
         ),
         NodeDef(
             name="architecture",
@@ -118,7 +118,7 @@ FLOW = FlowDef(
             depends_on=["tech-stack-verify"],
             parallel_group="analysis",
             gate="require_file",
-            gate_args={"relpath": "architecture.md"},
+            gate_args={"path": "{run_dir}/architecture.md"},
         ),
         NodeDef(
             name="domain-verify",

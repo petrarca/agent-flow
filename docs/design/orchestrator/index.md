@@ -112,7 +112,7 @@ from agent_flow import agent_node, build_flow
 nodes = [
     agent_node("tech-stack", "tech-stack-analyst",
                inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
-               gate_ref="require_file", gate_args={"relpath": "tech-stack.md"}),
+               gate_ref="require_file", gate_args={"path": "{run_dir}/tech-stack.md"}),
     # a "verifier" is just ANOTHER node that can jump the flow back:
     agent_node("tech-stack-verify", "tech-stack-verifier",
                depends_on=("tech-stack",), criticality="degrade",

@@ -56,7 +56,7 @@ NodeDef(
     criticality="degrade",                       # blocking (default) | degrade
     max_cycles=1,
     gate="require_file",                         # a gate BY NAME (built-in or your own)
-    gate_args={"relpath": "tech-stack.md"},      # config for the gate
+    gate_args={"path": "tech-stack.md"},      # config for the gate
     result_schema="TechStack",                   # a schema BY NAME (registry)
     exports={"stack": "detected_stack"},         # result->params map (or export_ref="name")
     impl_ref="classify",                          # OPTIONAL: run in-process (registry.agent_impl)

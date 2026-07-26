@@ -107,7 +107,7 @@ reuses `build_run_config` and `preflight` in its own Tier-2 CLI).
 
 ```python
 agent_node("hello", "hello-analyst", inputs={"REPORT": "{run_dir}/hello.md"},
-           gate_ref="require_file", gate_args={"relpath": "hello.md"})
+           gate_ref="require_file", gate_args={"path": "{run_dir}/hello.md"})
 ```
 
 Built-in gates are referenced **by name** (`gate_ref="require_file"` +
@@ -124,7 +124,7 @@ step it checks, with a gate that can send the flow back:
 ```python
 nodes = [
     agent_node("hello", "hello-analyst", inputs={"REPORT": "{run_dir}/hello.md"},
-               gate_ref="require_file", gate_args={"relpath": "hello.md"}),
+               gate_ref="require_file", gate_args={"path": "{run_dir}/hello.md"}),
     agent_node("hello-verify", "hello-verifier",
                depends_on=("hello",),
                inputs={"REPORT": "{run_dir}/hello.md"},
