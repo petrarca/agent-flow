@@ -29,11 +29,11 @@ def main() -> None:
 
 ```bash
 # generic settings as flags + DOMAIN params via -p/--param KEY=VALUE:
-python -m my_pkg.flow run -p product_key=my-product -p repos_root=/tmp/repos \
+python -m my_pkg.pipeline run -p product_key=my-product -p repos_root=/tmp/repos \
     --runtime opencode --run-dir "{repos_root}/{product_key}/output" -i "cite a source for every finding"
 
 # or put the generic settings in a YAML config file:
-python -m my_pkg.flow run --config run.yml -p product_key=my-product
+python -m my_pkg.pipeline run --config run.yml -p product_key=my-product
 ```
 
 ```yaml

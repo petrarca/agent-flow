@@ -12,7 +12,7 @@ referenced by name. run_cli takes the FlowDef directly and compiles it.
 Run:
     python -m examples.declarative run -p product_key=acme --runtime mock
     python -m examples.declarative run -p product_key=acme --runtime opencode
-    python -m examples.declarative nodes list
+    python -m examples.declarative flow nodes
 """
 
 from __future__ import annotations

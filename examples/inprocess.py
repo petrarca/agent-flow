@@ -23,7 +23,7 @@ Two ways to attach an in-process impl are shown:
 
 Because every node is in-process, this example runs the flow PROGRAMMATICALLY via
 `run_flow` — there is no runtime to select, no agent-dir, and the opencode
-pre-flight (which the CLI `run_cli` applies) does not apply. `nodes list`-style
+pre-flight (which the CLI `run_cli` applies) does not apply. `flow nodes`-style
 introspection is still available via `compile_flow` if you want it.
 
 Run:

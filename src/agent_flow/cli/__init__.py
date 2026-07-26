@@ -12,7 +12,7 @@ terminal output with rich/typer. Split by concern:
                   `print_preflight_results`).
   - app.py      — `run_cli`: builds the multi-command Typer app and wires each
                   command module (cli/commands/) via register(app, ctx).
-  - commands/   — one module per command: run.py (`run`), nodes.py (`nodes`).
+  - commands/   — one module per command: run.py (`run`), flow.py (`flow`).
 
 The public names are re-exported here so `from agent_flow.cli import ...` (and
 `from agent_flow import ...`) stay stable regardless of the internal layout.

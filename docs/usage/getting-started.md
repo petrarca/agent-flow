@@ -135,7 +135,7 @@ agents.
 **Prefer a CLI?** Hand the same `flow` (and `registry`) to `run_cli` instead of
 calling `run_flow` — you get a `run` command with flags (`-p KEY=VALUE`,
 `--mock-agents`, `--run-dir`, `--start-from`, `--only`, live display) and a
-`nodes list` command that prints the graph. It needs the `[cli]` extra:
+`flow nodes` command that prints the graph. It needs the `[cli]` extra:
 
 ```python
 # flow.py
@@ -235,7 +235,7 @@ its own status. If it should be able to ask for `hello` to be redone, see
 
 - [writing-agents.md](writing-agents.md) — what your agent `.md` needs to do
   (the control-file contract, from an agent-author's point of view).
-- [recipes.md](recipes.md) — the `run_cli` CLI (`run` / `nodes list`, flags,
+- [recipes.md](recipes.md) — the `run_cli` CLI (`run` / `flow nodes`, flags,
   `--start-from`/`--only`), gates, re-run loops, parallel steps, typed output,
   live events, passing a run-wide brief, and dropping to a lower tier for full
   control.

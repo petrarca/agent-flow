@@ -19,7 +19,7 @@ The same pipeline is authored declaratively in examples/declarative.py.
 Run:
     python -m examples.imperative run -p product_key=acme --runtime mock
     python -m examples.imperative run -p product_key=acme --runtime opencode
-    python -m examples.imperative nodes list
+    python -m examples.imperative flow nodes
 """
 
 from __future__ import annotations

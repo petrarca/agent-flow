@@ -1,10 +1,9 @@
-"""The `nodes` command group — introspect the pipeline's nodes / graph.
+"""The `flow` command group — introspect the pipeline's flow / graph.
 
-`nodes list` prints the pipeline's nodes in EXECUTION ORDER (via plan_groups),
+`flow nodes` prints the pipeline's nodes in EXECUTION ORDER (via plan_groups),
 so you can discover node/group names to pass to `run --only` / `run --start-from`
-and see which node runs which agent. "node" is the stable primitive whether the
-graph is viewed as a DAG or, with gates/jump-backs, a state machine — so this
-group survives either framing and can grow (`nodes show`, `nodes export`).
+and see which node runs which agent. `flow` is the info-about-the-flow group
+(`run` stays the top-level execute verb); it can grow (`flow show`, `flow export`).
 
 --json is intentionally not provided yet — see petrarca/agent-flow#9 (the
 dataclass-vs-pydantic modeling decision it depends on).
@@ -17,19 +16,19 @@ from agent_flow.cli.context import RunCliContext
 
 
 def register(app, ctx: RunCliContext) -> None:
-    """Attach the `nodes` sub-group (with `list`) to `app`."""
+    """Attach the `flow` sub-group (with `nodes`) to `app`."""
     import typer
 
-    nodes_app = typer.Typer(no_args_is_help=True, help="Inspect the pipeline's nodes / graph.")
+    flow_app = typer.Typer(no_args_is_help=True, help="Inspect the pipeline's flow / graph.")
 
-    @nodes_app.command("list")
-    def list_(
+    @flow_app.command("nodes")
+    def nodes(
         with_details: bool = typer.Option(False, "--with-details", help="show extra columns (criticality, max cycles, gate, schema, exports)"),
     ) -> None:
         """List the pipeline's nodes in execution order."""
         _print_nodes_table(ctx.build_nodes(), ctx.name, details=with_details, console=get_console())
 
-    app.add_typer(nodes_app, name="nodes")
+    app.add_typer(flow_app, name="flow")
 
 
 def _print_nodes_table(nodes, name: str, *, details: bool, console) -> None:

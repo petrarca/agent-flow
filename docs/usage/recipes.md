@@ -29,7 +29,7 @@ flow = FlowDef(name="my-pipeline", agent_dir="{repo}/pipelines/tech", nodes=[
 run_flow(flow, product_key="acme", runtime="opencode")
 ```
 
-Via the CLI (adds `run` / `nodes list`, `-p/--param`, `--config`, etc.):
+Via the CLI (adds `run` / `flow nodes`, `-p/--param`, `--config`, etc.):
 
 ```python
 def main():
@@ -38,8 +38,8 @@ def main():
 ```
 
 ```bash
-python -m my_pkg.flow run -p product_key=acme --runtime opencode
-python -m my_pkg.flow nodes list          # inspect the pipeline (node -> agent, deps, gate)
+python -m my_pkg.pipeline run -p product_key=acme --runtime opencode
+python -m my_pkg.pipeline flow nodes      # inspect the pipeline (node -> agent, deps, gate)
 ```
 
 ## Require a step actually produced its file
@@ -154,8 +154,8 @@ shapes.
 Per-invocation entry points (CLI or `run_flow`):
 
 ```bash
-python -m my_pkg.flow run --start-from tech-stack   # begin here, run forward (skip upstream)
-python -m my_pkg.flow run --only tech-stack         # run ONLY this node/group, then stop
+python -m my_pkg.pipeline run --start-from tech-stack   # begin here, run forward (skip upstream)
+python -m my_pkg.pipeline run --only tech-stack         # run ONLY this node/group, then stop
 ```
 
 Both assume the skipped nodes' outputs already exist. `--start-from` and `--only`

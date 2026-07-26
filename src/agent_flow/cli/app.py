@@ -8,8 +8,8 @@ module-level singleton) — so commands receive their config via a `RunCliContex
 rather than importing a global.
 
 Commands today:
-  - `run`   — execute the pipeline (all the generic run flags + -p/--param).
-  - `nodes` — inspect the pipeline's nodes / graph (`nodes list`).
+  - `run`  — execute the pipeline (all the generic run flags + -p/--param).
+  - `flow` — inspect the pipeline's flow / graph (`flow nodes`).
 
 The rendering helpers (event_printer, NodeProgressPrinter, print_results_table,
 print_preflight_results, get_console) live in the sibling cli modules and are
@@ -46,7 +46,7 @@ def run_cli(
         <run.yml> for the same settings (lowest source), and repeatable
         -p/--param KEY=VALUE for DOMAIN params. Precedence: CLI flag > env
         (AGENT_FLOW_*) > .env > --config YAML > default.
-      - `nodes list` — the pipeline's nodes in execution order (name, agent,
+      - `flow nodes` — the pipeline's nodes in execution order (name, agent,
         group, deps), to discover --only/--start-from targets.
 
     `default_agent_dir` / `default_run_dir` supply the pipeline's own fallbacks
@@ -71,7 +71,7 @@ def run_cli(
 
     typer = require_extra("typer", "cli", "the run_cli command")
 
-    from agent_flow.cli.commands import nodes as nodes_cmd
+    from agent_flow.cli.commands import flow as flow_cmd
     from agent_flow.cli.commands import run as run_cmd
     from agent_flow.cli.context import RunCliContext
 
@@ -121,6 +121,6 @@ def run_cli(
         pass
 
     run_cmd.register(app, ctx)
-    nodes_cmd.register(app, ctx)
+    flow_cmd.register(app, ctx)
 
     app()

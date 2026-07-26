@@ -20,7 +20,7 @@ The Tier-3 pipeline built imperatively: `agent_node(...)` per node, wired with
 ```bash
 task example:imperative:mock PRODUCT=acme      # mock agents, no tokens
 task example:imperative PRODUCT=acme           # real opencode + model
-python -m examples.imperative nodes list       # inspect the flow
+python -m examples.imperative flow nodes       # inspect the flow
 ```
 
 ## declarative.py — the same flow as a `FlowDef`
@@ -34,7 +34,7 @@ resolves a deterministic stand-in per agent name at compile time.
 
 ```bash
 task example:declarative:mock PRODUCT=acme
-python -m examples.declarative nodes list
+python -m examples.declarative flow nodes
 ```
 
 ## custom_flow.py — Tier-2, your own flow

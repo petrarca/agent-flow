@@ -20,7 +20,7 @@ def run_flow(flow_def: FlowDef, *, registry=None, run_dir: str = "", start_from:
     is given, compiles the FlowDef to nodes, builds the flow with the FlowDef's
     flow-wide settings (agent_dir/backend/shared_*/llm_concurrency), and runs it.
     Returns the {node: NodeOutcome} result. `params` are the run params (e.g.
-    product_key=…, runtime=…). For the CLI (run/nodes list), use run_cli(flow_def).
+    product_key=…, runtime=…). For the CLI (run/flow nodes), use run_cli(flow_def).
     """
     from agent_flow.engine import build_flow
 
