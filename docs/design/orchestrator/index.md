@@ -134,6 +134,7 @@ build_flow(nodes, name="tech")(product_key="acme", runtime="opencode")  # no run
 | Input plane | [input-plane.md](input-plane.md) | The prompt channels (ingested context + inline instructions, global & per-node) + persona; templating; the CLI brief; run-context + `exports` (result->params) |
 | Result schema | [result-schema.md](result-schema.md) | Typed agent output; Pydantic-optional; opt-in consumer convenience |
 | Backend | [backend.md](backend.md) | `FlowBackend` seam; InProcessBackend (default, in-process) and PrefectBackend (opt-in); deployment modes |
+| Mock agent | [mock-agent.md](mock-agent.md) | `mock_agent` — a deterministic stand-in for a real agent via the `--mock-agents` substitution MODE (not a runtime); `MockExecutor` (sibling `AgentExecutor`) + `MockAgentContext` tools; structured-interface simulation, no LLM |
 | CLI & events | [cli-events.md](cli-events.md) | `Event`/`on_event`, `--show-events` projection, the Typer/rich CLI |
 
 ## Prototype status

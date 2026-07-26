@@ -1,4 +1,4 @@
-# Agent FLOW
+# Agent flow
 
 Deterministic orchestration of coding-agent pipelines. `agent-flow` replaces the
 fragile "LLM orchestrator agent" pattern — where a model is asked to sequence the
