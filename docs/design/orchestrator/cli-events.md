@@ -35,6 +35,11 @@ agent a node runs.
 Per-node **duration** is timed where the node runs (`NodeOutcome.duration_s`) and
 carried through the flow result (`dict[str, NodeOutcome]`), so the results table
 shows Node | Agent | Outcome | Duration without the CLI reconstructing timing.
+The **Agent** cell is runtime-qualified `<runtime>:<agent>` (e.g.
+`opencode:tech-stack-analyst`, `inproc:classify`, `mock:verifier`): each executor
+stamps its runtime onto `AgentResult.runtime`, which flows to `NodeOutcome.runtime`
+and is joined with the agent name via the canonical `qualified_agent()` helper.
+This makes partial mocking and in-process nodes visible at a glance.
 
 The default CLI view (`NodeProgressPrinter`) is deliberately **line-based**, not a
 repainting `rich.Live`/TUI: a Live table fights the backends' threaded task

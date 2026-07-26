@@ -8,12 +8,16 @@ from agent_flow.cli.console import get_console
 def print_results_table(results, *, title: str = "Pipeline results", agents: dict[str, str] | None = None, console=None) -> None:
     """Print an end-of-run node -> outcome table (agent label + per-node duration).
 
-    `results` maps node name -> NodeOutcome (status + duration_s). A bare status
-    string is also accepted (duration blank) so older callers still work.
-    `agents` optionally maps node name -> agent label for an informal Agent
-    column; omitted -> no Agent column.
+    `results` maps node name -> NodeOutcome (status + duration_s + runtime). A
+    bare status string is also accepted (duration/runtime blank) so older callers
+    still work. `agents` optionally maps node name -> agent name; when present,
+    the Agent column shows the RUNTIME-QUALIFIED label "<runtime>:<agent>" (e.g.
+    "opencode:my-agent", "inproc:some-agent", "mock:other-agent"), the runtime
+    taken from each NodeOutcome. Omit `agents` -> no Agent column.
     """
     from rich.table import Table
+
+    from agent_flow.runners.executor import qualified_agent
 
     console = console or get_console()
     agents = agents or {}
@@ -29,9 +33,11 @@ def print_results_table(results, *, title: str = "Pipeline results", agents: dic
     for name, outcome in results.items():
         status = getattr(outcome, "status", outcome)
         duration = getattr(outcome, "duration_s", None)
+        runtime = getattr(outcome, "runtime", "")
         style = {"ok": "green", "degraded": "yellow"}.get(status, "white")
         dur = f"{duration:.1f}s" if isinstance(duration, (int, float)) else ""
-        row = [name] + ([agents.get(name, "")] if show_agent else []) + [f"[{style}]{status}[/{style}]", dur]
+        label = qualified_agent(runtime, agents.get(name, ""))
+        row = [name] + ([label] if show_agent else []) + [f"[{style}]{status}[/{style}]", dur]
         table.add_row(*row)
     console.print(table)
 

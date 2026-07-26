@@ -54,6 +54,7 @@ def test_executor_writes_sidecar_and_assembles(tmp_path):
     res = ex.run(_inv(tmp_path))
     assert res.control["status"] == "ok"
     assert res.control["result"] == {"languages": ["Python"]}
+    assert res.runtime == "mock"  # the executor stamps its runtime label
     # sidecar written to disk (MockRuntime surrounding), same default path.
     sidecar = tmp_path / "n.control.json"
     assert json.loads(sidecar.read_text())["result"] == {"languages": ["Python"]}

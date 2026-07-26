@@ -44,7 +44,7 @@ AgentImpl = Callable[[AgentInvocation], Any]
 class InProcessExecutor(AgentExecutor):
     """AgentExecutor that runs an agent as a direct in-process call."""
 
-    def __init__(self, impl: AgentImpl, *, name: str = "inprocess") -> None:
+    def __init__(self, impl: AgentImpl, *, name: str = "inproc") -> None:
         if not callable(impl):
             raise TypeError(f"InProcessExecutor: impl must be callable, got {type(impl).__name__!r}")
         self.impl = impl
@@ -61,7 +61,9 @@ class InProcessExecutor(AgentExecutor):
         # may already carry its own). AgentResult is frozen; use replace().
         if not result.duration_s:
             result = dc_replace(result, duration_s=duration)
-        return result
+        # Stamp the runtime label authoritatively (this executor knows how the
+        # agent ran; an impl's own AgentResult does not get to override it).
+        return dc_replace(result, runtime=self.name)
 
 
 def adapt_result(raw: Any, inv: AgentInvocation) -> AgentResult:

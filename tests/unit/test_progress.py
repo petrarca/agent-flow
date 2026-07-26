@@ -7,6 +7,7 @@ emission itself is covered in integration (it needs the Prefect task).
 
 from agent_flow.cli import NodeProgressPrinter, print_results_table
 from agent_flow.engine import NodeOutcome
+from agent_flow.runners.executor import qualified_agent
 
 
 class _CaptureConsole:
@@ -66,3 +67,24 @@ def test_results_table_accepts_bare_status_strings():
     con = _CaptureConsole()
     print_results_table({"a": "ok"}, console=con)
     assert con.lines
+
+
+def test_results_table_renders_runtime_qualified_agent():
+    # The Agent column shows "<runtime>:<agent>", runtime taken from the outcome.
+    # Use a real rich Console capturing to text so we assert on rendered cells.
+    from rich.console import Console
+
+    con = Console(record=True, width=120)
+    results = {"a": NodeOutcome(status="ok", duration_s=1.0, runtime="opencode")}
+    print_results_table(results, agents={"a": "analyst"}, console=con)
+    assert "opencode:analyst" in con.export_text()
+
+
+def test_qualified_agent_formats():
+    # Canonical label format (single source of truth for the ':' separator).
+    assert qualified_agent("opencode", "my-agent") == "opencode:my-agent"
+    assert qualified_agent("inproc", "x") == "inproc:x"
+    assert qualified_agent("mock", "y") == "mock:y"
+    # Degenerate inputs fall back to the non-empty side (no dangling separator).
+    assert qualified_agent("", "bare") == "bare"
+    assert qualified_agent("mock", "") == "mock"

@@ -77,6 +77,23 @@ def test_inprocess_executor_calls_impl_and_adapts(tmp_path):
     assert isinstance(res.result_obj, Classification)
     assert res.completion == "completed"
     assert res.duration_s >= 0.0
+    assert res.runtime == "pydantic"  # the executor stamps its own name
+
+
+def test_inprocess_executor_default_runtime_label(tmp_path):
+    # The default in-process runtime label is "inproc".
+    res = InProcessExecutor(lambda inv: {"status": "ok"}).run(_inv(run_dir=tmp_path))
+    assert res.runtime == "inproc"
+
+
+def test_inprocess_executor_stamps_runtime_over_impl_result(tmp_path):
+    # An impl returning a bare AgentResult (own runtime) does NOT override the
+    # executor's authoritative label — the executor stamps it.
+    def impl(inv):
+        return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.5, runtime="bogus", control={"status": "ok"})
+
+    res = InProcessExecutor(impl).run(_inv(run_dir=tmp_path))
+    assert res.runtime == "inproc"
 
 
 def test_inprocess_executor_writes_no_sidecar(tmp_path):

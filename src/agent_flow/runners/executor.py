@@ -39,6 +39,26 @@ from dataclasses import dataclass, field
 
 from agent_flow.runners.base import AgentInvocation
 
+# Canonical separator for a runtime-qualified agent label: "<runtime>:<agent>"
+# (e.g. "opencode:my-agent", "inproc:some-agent", "mock:some-agent"). A colon is
+# unambiguous — neither runtime names nor agent names use one, unlike "/" which
+# can appear in path-like names. Defined ONCE here; render via qualified_agent().
+RUNTIME_AGENT_SEP = ":"
+
+
+def qualified_agent(runtime: str, agent: str) -> str:
+    """Format a runtime-qualified agent label, e.g. "opencode:my-agent".
+
+    Falls back to the bare agent when runtime is empty (a hand-written `run`
+    node has no runtime), and to the bare runtime when agent is empty. The
+    single source of truth for the label format (see RUNTIME_AGENT_SEP).
+    """
+    if not runtime:
+        return agent
+    if not agent:
+        return runtime
+    return f"{runtime}{RUNTIME_AGENT_SEP}{agent}"
+
 
 class AgentTimeoutError(RuntimeError):
     """Raised when an agent goes STALE: no event and no sidecar for
@@ -80,6 +100,11 @@ class AgentResult:
     agent: str
     exit_code: int | None
     duration_s: float
+    # The executor's runtime label — the canonical name of HOW this agent ran:
+    # a subprocess runtime ("opencode" / "claude"), "inproc", or "mock". Stamped
+    # by each executor (its own `name`) via assemble_result. Empty only when a
+    # result is built without going through an executor (e.g. bare unit tests).
+    runtime: str = ""
     control: dict = field(default_factory=dict)  # status envelope (status/reason/rerun_required/result)
     # Telemetry (subprocess: harvested from the event stream; in-process: from the SDK usage).
     tokens: int = 0
@@ -138,6 +163,7 @@ class AgentExecutor(abc.ABC):
         cost: float = 0.0,
         events: int = 0,
         completion: str = "completed",
+        runtime: str = "",
     ) -> "AgentResult":
         """Build an AgentResult from a control envelope, validating result_schema.
 
@@ -155,6 +181,7 @@ class AgentExecutor(abc.ABC):
             agent=inv.agent,
             exit_code=exit_code,
             duration_s=duration_s,
+            runtime=runtime,
             control=control,
             tokens=tokens,
             cost=cost,

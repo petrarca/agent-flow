@@ -267,7 +267,10 @@ def agent_node(
             )
             executor = MockExecutor(_mock_behaviour, work_order=resolved_inputs, tmpl=tmpl)
         elif impl is not None:
-            executor = InProcessExecutor(impl, name=runtime)
+            # In-process runs are labeled "inproc" (their canonical runtime), NOT
+            # the `runtime` string — that names a SUBPROCESS runtime and does not
+            # describe an in-process call.
+            executor = InProcessExecutor(impl)
         else:
             executor = get_executor(runtime)
         result = executor.run(inv)
@@ -288,6 +291,7 @@ def agent_node(
         # e.g. ctx.result["_result_obj"].languages. None when no schema was given.
         return {
             **result.control,
+            "_runtime": result.runtime,
             "_tokens": result.tokens,
             "_cost": result.cost,
             "_completion": result.completion,

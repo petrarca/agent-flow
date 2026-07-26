@@ -389,6 +389,7 @@ class SubprocessExecutor(AgentExecutor):
             cost=sup.cost,
             events=sup.events,
             completion=sup.completion,
+            runtime=self.name,  # the runner's name, e.g. "opencode"
         )
 
         # Subprocess-only failure routing (only when there is no usable verdict):

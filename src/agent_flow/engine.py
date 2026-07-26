@@ -230,12 +230,17 @@ class NodeOutcome:
                  walker to deliver to the TARGET node's next run. Empty otherwise.
     duration_s   wall-clock seconds the node took (set by build_flow's task; 0.0
                  when produced by interpret directly, e.g. in unit tests).
+    runtime      the canonical runtime label of HOW the node's agent ran
+                 ("opencode" / "claude" / "inproc" / "mock"). Empty for a
+                 hand-written `run` node (no agent) or when the node errored
+                 before producing a result.
     """
 
     status: str
     goto: str | None = None
     instruction: str = ""
     duration_s: float = 0.0
+    runtime: str = ""
 
 
 def _make_node_emitter(on_node_event: Callable[[str, str, str | None, str], None] | None) -> Callable[[str, str, str | None, str], None]:
@@ -333,6 +338,9 @@ def interpret(
         # set, else None) — surfaced as GateContext.obj so gates/exports read it
         # directly instead of digging the `_result_obj` key out of `result`.
         obj = result.get("_result_obj") if isinstance(result, dict) else None
+        # The runtime label the executor stamped (agent nodes only; empty for a
+        # hand-written run node). Carried onto every settled NodeOutcome below.
+        runtime = result.get("_runtime", "") if isinstance(result, dict) else ""
         directive = (
             gate(GateContext(result=result, obj=obj, node=node, run_dir=run_dir, cycles=cycles, params=eff_params, agent_dir=agent_dir))
             if gate
@@ -361,12 +369,12 @@ def interpret(
             # instruction on the outcome so the walker can deliver it to the TARGET
             # node's next run.
             log(f"node {node.name}: gate -> GoTo {directive.node} ({directive.instruction})")
-            outcome = NodeOutcome(status="ok", goto=directive.node, instruction=directive.instruction)
+            outcome = NodeOutcome(status="ok", goto=directive.node, instruction=directive.instruction, runtime=runtime)
             _fire_hook(registry, "after_node", node, log, node, outcome)
             return outcome
 
         # Continue, or an exhausted Restart.
-        outcome = NodeOutcome(status="ok")
+        outcome = NodeOutcome(status="ok", runtime=runtime)
         _fire_hook(registry, "after_node", node, log, node, outcome)
         return outcome
 

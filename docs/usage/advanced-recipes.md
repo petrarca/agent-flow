@@ -412,11 +412,17 @@ agent label and elapsed time, then an end-of-run table:
 check tech-stack ok (tech-stack-analyst) 15.2s
     > domain running (domain-analyst)
 ...
-┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┓
-┃ Node        ┃ Agent              ┃ Outcome ┃ Duration ┃
-┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━┩
-│ tech-stack  │ tech-stack-analyst │ ok      │    15.2s │
+┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┓
+┃ Node        ┃ Agent                       ┃ Outcome ┃ Duration ┃
+┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━┩
+│ tech-stack  │ opencode:tech-stack-analyst │ ok      │    15.2s │
 ```
+
+The Agent column is **runtime-qualified**: `<runtime>:<agent>` — the runtime
+being how the node actually ran (`opencode` / `claude` for a subprocess runtime,
+`inproc` for an in-process impl, `mock` for a `--mock-agents` substitution). With
+partial mocking, real and mocked nodes are told apart at a glance
+(`opencode:analyst` vs `mock:verifier`).
 
 Pass `--show-events/-v` instead for the raw per-event firehose (one projected
 line per agent event — `tool edit … (+12/-3)`, text, `step done (N tokens)`) —

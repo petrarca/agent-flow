@@ -118,7 +118,7 @@ class MockExecutor(AgentExecutor):
             control_file = run_dir / f"{base}.control.json"
         control_file.write_text(json.dumps(control))
 
-        result = self.assemble_result(inv, control, exit_code=0, duration_s=duration, completion="completed")
+        result = self.assemble_result(inv, control, exit_code=0, duration_s=duration, completion="completed", runtime=self.name)
         # Shared content-status policy: raise AgentContentFailedError for any
         # non-ok/non-verified status — identical to the subprocess path. Without
         # this, a mock returning {"status":"error"} would silently look like
