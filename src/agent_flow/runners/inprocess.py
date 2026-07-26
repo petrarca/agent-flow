@@ -33,7 +33,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace as dc_replace
 from typing import Any
 
-from agent_flow.core.schema import coerce_schema
 from agent_flow.runners.base import AgentInvocation
 from agent_flow.runners.executor import AgentExecutor, AgentResult
 
@@ -77,43 +76,17 @@ def adapt_result(raw: Any, inv: AgentInvocation) -> AgentResult:
     if isinstance(raw, AgentResult):
         return raw
 
-    schema = coerce_schema(inv.result_schema)
-
-    # A pydantic model instance: serialize to a payload dict, validate via the
-    # declared result_schema (if any). result_obj is the SCHEMA-VALIDATED instance
-    # or None — same contract as the subprocess path, which only populates
-    # result_obj via schema.validate(). The model_dump() payload is always in
-    # control["result"] regardless, so the gate can read it either way.
+    # A pydantic model instance (model_dump) or a plain Mapping: wrap into a
+    # status-"ok" control envelope and hand it to the SHARED result-assembly tail
+    # (AgentExecutor.assemble_result), so schema validation / result_obj /
+    # result_valid / result_errors are identical to the subprocess & mock paths.
     dump = getattr(raw, "model_dump", None)
     if callable(dump):
         payload = dump()
-        control = {"status": "ok", "agent": inv.agent, "result": payload}
-        outcome = schema.validate(payload) if schema is not None else None
-        return AgentResult(
-            agent=inv.agent,
-            exit_code=0,
-            duration_s=0.0,
-            control=control,
-            completion="completed",
-            result_valid=outcome.valid if outcome is not None else True,
-            result_obj=outcome.obj if outcome is not None else None,
-            result_errors=outcome.errors if outcome is not None else (),
-        )
-
-    # A plain mapping payload.
-    if isinstance(raw, Mapping):
+    elif isinstance(raw, Mapping):
         payload = dict(raw)
-        control = {"status": "ok", "agent": inv.agent, "result": payload}
-        outcome = schema.validate(payload) if schema is not None else None
-        return AgentResult(
-            agent=inv.agent,
-            exit_code=0,
-            duration_s=0.0,
-            control=control,
-            completion="completed",
-            result_valid=outcome.valid if outcome is not None else True,
-            result_obj=outcome.obj if outcome is not None else None,
-            result_errors=outcome.errors if outcome is not None else (),
-        )
+    else:
+        raise TypeError(f"in-process agent impl returned unsupported type {type(raw).__name__}; expected AgentResult, a pydantic model, or a Mapping")
 
-    raise TypeError(f"in-process agent impl returned unsupported type {type(raw).__name__}; expected AgentResult, a pydantic model, or a Mapping")
+    control = {"status": "ok", "agent": inv.agent, "result": payload}
+    return AgentExecutor.assemble_result(inv, control, exit_code=0, duration_s=0.0, completion="completed")

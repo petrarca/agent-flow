@@ -28,10 +28,11 @@ def register(app, ctx: RunCliContext) -> None:
         config: str = typer.Option("", "--config", "-c", help="YAML run config (generic settings)"),
         param: list[str] | None = typer.Option(None, "--param", "-p", help="domain param KEY=VALUE (repeatable)"),  # noqa: B008 - Typer idiom
         runtime: str | None = typer.Option(None, help="real out-of-process runner, e.g. 'opencode'"),
-        mock_agents: bool = typer.Option(
-            False,
-            "--mock-agents",
-            help="mock mode: run nodes whose agent has a registered mock_agent deterministically (no tokens); others still run for real",
+        mock_agents: bool | None = typer.Option(
+            None,
+            "--mock-agents/--no-mock-agents",
+            help="mock mode: run nodes whose agent has a registered mock_agent deterministically (no tokens); others still run for real. "
+            "--no-mock-agents forces it off (overriding AGENT_FLOW_MOCK_AGENTS).",
         ),
         backend: str | None = typer.Option(
             None, "--backend", help="execution backend: inprocess (default, no Prefect) | prefect (opt-in run UI/scale)"
@@ -69,7 +70,7 @@ def register(app, ctx: RunCliContext) -> None:
         cfg = build_run_config(
             config_file=config or None,
             runtime=runtime,
-            mock_agents=True if mock_agents else None,
+            mock_agents=mock_agents,  # None (env/config wins) | True | False (explicit)
             backend=backend,
             run_dir=run_dir or (ctx.default_run_dir or None),
             agent_dir=agent_dir or (ctx.default_agent_dir or None),

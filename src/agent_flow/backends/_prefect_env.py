@@ -4,11 +4,11 @@ Fixes the intermittent `sqlite3.OperationalError: database is locked` seen with
 Prefect's ephemeral (temporary-server) mode. Causes and fixes:
 
   1. A shared/global PREFECT_HOME whose SQLite file is contended. -> pin a
-     project-local PREFECT_HOME so this prototype owns its own database.
+     project-local PREFECT_HOME so this run owns its own database.
   2. SQLite's default busy timeout is too short under the brief write burst at
      server startup. -> raise the connection busy timeout.
   3. Client-side telemetry/metrics write to the same DB during startup and race
-     the flow's first writes. -> disable them (not needed for a local prototype).
+     the flow's first writes. -> disable them (not needed for a local run).
 
 These are set as environment variables because Prefect reads its settings from
 the environment at import time; setting them here (before any `prefect` import)

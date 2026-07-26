@@ -21,7 +21,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 # LEAN CORE. The default install is what you need to declare a pipeline and run
-# it in-process on the default LocalBackend, with typed params/results and config
+# it in-process on the default InProcessBackend, with typed params/results and config
 # (incl. YAML) — no execution-backend or display dependency:
 #   - pydantic + pydantic-settings: typed agent `result` payloads AND the typed
 #     run-parameters / RunConfig model (declared, required-checked, validated).
@@ -31,9 +31,9 @@ dynamic = ["version"]
 #   - python-dotenv: .env loading. jsonschema: plain-dict result-schema validation.
 #
 # The heavy/optional pieces are EXTRAS, matching the runtime seams:
-#   - [prefect]: the opt-in PrefectBackend (the default LocalBackend needs none).
+#   - [prefect]: the opt-in PrefectBackend (the default InProcessBackend needs none).
 #   - [cli]:     rich + typer for run_cli and the human-facing display helpers.
-# A programmatic consumer of build_flow (LocalBackend) needs neither.
+# A programmatic consumer of build_flow (InProcessBackend) needs neither.
 dependencies = [
     "python-dotenv>=1.0.0",
     "pydantic>=2.0",
@@ -44,7 +44,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Execution backend: the opt-in Prefect backend (--backend prefect). The default
-# local backend is Prefect-free, so this is only needed for the run UI / scale.
+# in-process backend is Prefect-free, so this is only needed for the run UI / scale.
 prefect = ["prefect>=3.0.0"]
 # CLI + human-facing display: the reusable run_cli and the rich-rendered live
 # events / status tables. Not needed to drive build_flow programmatically.

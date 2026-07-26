@@ -200,12 +200,13 @@ def render_event(ev: Event) -> str:
 
 
 def _project_event(raw: str) -> str:
-    """Back-compat shim: render a raw opencode line via the neutral path.
+    """Render a raw opencode stdout line via the neutral path — TEST HELPER ONLY.
 
-    The opencode wire-shape knowledge now lives in OpenCodeRunner.parse_event;
-    this only re-parses a raw line through it and styles the result, so callers
-    (and tests) that still pass a raw string keep working. The LIVE path uses the
-    runner-filled Event directly and never touches this.
+    The opencode wire-shape knowledge lives in OpenCodeRunner.parse_event; this
+    re-parses a raw line through it and styles the result. The LIVE path uses the
+    runner-filled Event directly and never touches this — the only callers are in
+    tests/unit/test_events.py (raw-line rendering assertions). Kept private
+    (leading underscore) for that reason; do not use it on the hot path.
     """
     from agent_flow.runners import OpenCodeRunner
 

@@ -1,15 +1,25 @@
-"""Agent runners — the swappable backend for EXECUTING one agent.
+"""Agent runners + the execution seam.
 
-This package is the runner SEAM. The neutral contract (the `AgentRunner`
-Protocol + the `Event` / `AgentInvocation` / `AgentRunnerInfo` data types) lives
-in `base.py`; each concrete runtime is a sibling module (`opencode.py`,
-`mock.py`, `claude_code.py`). The registry + `get_runner` factory live here.
+Two seams live under this package:
 
-The seam is a `typing.Protocol` (structural), not an ABC: a runner matches by
-SHAPE and does not inherit. There is no shared implementation to hoist —
-build_command and parse_event are entirely runtime-specific — so a Protocol is
-the right tool. (The execution-backend seam, which DOES share group-orchestration
-logic, uses an ABC base instead.)
+  - `AgentExecutor` (ABC, `executor.py`) — the high-level "run one invocation ->
+    AgentResult" seam. Concrete kinds: `SubprocessExecutor` (in
+    `core/agent_runtime.py`), `InProcessExecutor` (`inprocess.py`), and
+    `MockExecutor` (`mock_exec.py`). It owns the shared result-assembly tail and
+    status policy (`assemble_result` / `check_content_status`).
+  - `AgentRunner` (Protocol, `base.py`) — the LOW-LEVEL subprocess wire adapter
+    (`build_command` + `parse_event`) that `SubprocessExecutor` composes. The
+    neutral contract (`Event` / `AgentInvocation` / `AgentRunnerInfo`) lives in
+    `base.py`; each concrete runtime is a sibling module (`opencode.py`,
+    `claude_code.py`). The registry + `get_runner` / `get_executor` factories live
+    here.
+
+`AgentRunner` is a `typing.Protocol` (structural), not an ABC: a runner matches
+by SHAPE and does not inherit — build_command/parse_event are entirely
+runtime-specific, so there is nothing to hoist. `AgentExecutor` IS an ABC because
+its kinds share real logic (result assembly + status policy). Mock is not a
+runner: it is the `MockExecutor`, selected by the `--mock-agents` mode, never
+present in `RUNNERS`.
 """
 
 from __future__ import annotations

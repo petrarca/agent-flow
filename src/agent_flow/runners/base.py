@@ -25,9 +25,10 @@ Two execution seams consume these types:
       Owned by SubprocessExecutor; NOT the public seam.
       - build_command(inv) -> argv
       - parse_event(line)  -> Event (liveness + telemetry)
-      Each concrete runtime (opencode.py, mock.py, claude_code.py) implements
-      exactly these two methods. A Protocol (structural, not ABC) because there
-      is no shared implementation to hoist.
+      Each concrete runtime (opencode.py, claude_code.py) implements exactly
+      these two methods. A Protocol (structural, not ABC) because there is no
+      shared implementation to hoist. (Mock is not a runner — it is MockExecutor,
+      selected by the --mock-agents mode.)
 
 The control sidecar is SubprocessExecutor's PRIVATE mechanism — it is written
 by CLI agents via their Write tool and read by SubprocessExecutor. It is not

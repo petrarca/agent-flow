@@ -23,8 +23,10 @@ one schema library. Two ways to supply a schema:
     `BaseModel` and yields validated instances.
 
 This is deliberately unlike frameworks that weld an output schema to one
-in-process LLM call: here the schema rides over ANY runner (opencode subprocess,
-Claude Code CLI, mock), because it only touches the prompt and the control file.
+in-process LLM call: here validation is the shared executor tail
+(`AgentExecutor.assemble_result`), so it rides over ANY execution model — an
+opencode/Claude Code subprocess, an in-process agent, or a `--mock-agents`
+stand-in — touching only the prompt and the control file.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+import jsonschema
 from pydantic import BaseModel
 
 
@@ -80,13 +83,11 @@ class JsonSchema:
         return self._schema
 
     def validate(self, data: Any) -> ValidationOutcome:
-        import jsonschema
-
-        try:
-            jsonschema.validate(instance=data, schema=self._schema)
-        except jsonschema.ValidationError as exc:
-            return ValidationOutcome(valid=False, errors=(str(exc.message),))
-        return ValidationOutcome(valid=True)
+        # Collect ALL errors (not just the first) for parity with PydanticSchema,
+        # so a gate reading `result_errors` sees the full picture either way.
+        validator = jsonschema.Draft202012Validator(self._schema)
+        errors = tuple(e.message for e in validator.iter_errors(data))
+        return ValidationOutcome(valid=not errors, errors=errors)
 
 
 def coerce_schema(schema: ResultSchema | dict | type | None) -> ResultSchema | None:

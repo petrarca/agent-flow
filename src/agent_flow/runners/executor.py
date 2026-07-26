@@ -85,7 +85,8 @@ class AgentResult:
     tokens: int = 0
     cost: float = 0.0
     events: int = 0
-    # How the run terminated: "completed" | "sidecar" | "stale" | "hard_cap".
+    # How the run terminated: "completed" | "sidecar" | "stale" (subprocess
+    # supervision values; in-process/mock always use "completed").
     completion: str = "completed"
     # Result-schema validation outcome (only meaningful when a result_schema was
     # supplied). result_valid is True when no schema was given (nothing to fail).

@@ -129,7 +129,7 @@ _OPENCODE_TOOL_TARGET_KEYS = ("filePath", "command", "pattern", "url", "path", "
 _OPENCODE_TOOL_META_KEYS = (("matches", "matches"), ("count", "matches"), ("exit", "exit"))
 
 
-def _opencode_tool_view(part: dict) -> tuple[str, str, str]:
+def _opencode_tool_view(part: dict) -> tuple[str, str, str, str, int, int]:
     """Map an opencode `tool` part onto the neutral tool fields.
 
     Returns (title, detail, status, diff, added, removed). This is pure field
