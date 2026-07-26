@@ -42,6 +42,31 @@ python -m my_pkg.pipeline run -p product_key=acme --runtime opencode
 python -m my_pkg.pipeline flow nodes      # inspect the pipeline (node -> agent, deps, gate)
 ```
 
+## Built-in gates
+
+A **gate** runs after a node's agent and returns a directive that steers the flow
+(`Continue` / `Restart` / `GoTo` / `Stop`). Three gates cover what almost every
+pipeline needs; they are **pre-seeded into every `FlowRegistry`**, so you
+reference them **by name** with `gate_args` — no registration, no import:
+
+| Gate | `gate_args` | What it does |
+|------|-------------|--------------|
+| `require_file` | `relpath` (required, templatable), `on_missing` (optional `Directive`) | The agent reported ok but didn't write its artifact -> `Restart` the node (bounded by `max_cycles`). `relpath` resolves `{param}` templates against the run params, e.g. `"{product_key}-report.md"`. |
+| `rerun_on_signal` | `target` (required), `control_file` (optional) | The node's control sidecar set `rerun_required` -> `GoTo(target)`, a **fixed** earlier node (then the flow re-flows forward). The classic "verifier re-runs its analyst". |
+| `rerun_on_named` | `control_file` (optional) | Same `rerun_required` signal, but routes to **whichever** node the sidecar names (first valid backward target). For a coherence check that may bounce to any upstream stage. |
+
+Signatures: `require_file(ctx, *, relpath, on_missing=None)`,
+`rerun_on_signal(ctx, *, target, control_file=None)`,
+`rerun_on_named(ctx, *, control_file=None)`. All three auto-populate the
+directive's one-time `instruction`. A node with **no** gate behaves as
+`Continue()`. To write your own gate, see [Hook your own logic](#hook-your-own-logic-flowregistry)
+below; for the full directive/`GateContext` reference see the
+[gates design doc](../design/orchestrator/gates.md).
+
+> The `rerun_*` gates only fire if the agent actually sets `rerun_required` in
+> its control sidecar — the agent's own `.md` must be told when to set it (the
+> injected control-file protocol makes the field available, but not the policy).
+
 ## Require a step actually produced its file
 
 Gates are referenced by name; config is data. The built-in `require_file`
