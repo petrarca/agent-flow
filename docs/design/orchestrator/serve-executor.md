@@ -160,14 +160,13 @@ Key event types for `ServeExecutor`:
 | `session.next.step.ended` | One LLM step done; carries `cost` + `tokens` for telemetry harvest |
 | `message.part.updated` | Tool state transition — maps to `on_event` callback |
 
-**`session.idle` is the only reliable completion signal.** It arrives after
-normal completion, after errors, and after abort. After `session.idle` inspect
-`info.error` on the prompt response for the actual failure.
-
-**Note:** The v2 API (`/api/session/:id/event?after=<seq>`) provides a
-per-session SSE stream with replay. Prefer this for `ServeExecutor` — no
-global fan-out, no sessionID filtering needed, and reconnects can replay missed
-events from a sequence number.
+> **Superseded by live testing — see "Verified against opencode serve 1.18.4".**
+> The MVP does not consume the SSE stream at all: the blocking sync prompt
+> (`POST /session/:id/message`) returns completion + result + telemetry + error
+> in one response. The global `/event` stream (with `session.idle`) is only
+> relevant for the optional, post-MVP `on_event` live-display path. The v2
+> per-session stream is NOT usable with the legacy sync prompt (it carries only
+> durable events from v2-initiated prompts).
 
 ### Error signal from abort
 
@@ -242,16 +241,17 @@ fields).
 
 ## Timeout and abort
 
-`ServeExecutor` enforces `inv.idle_timeout_s` as a **wall-clock deadline** from
-session creation. If the deadline fires before `session.idle` arrives:
+`ServeExecutor` enforces `inv.idle_timeout_s` as a **client-side HTTP timeout**
+on the blocking `POST /session/:id/message` call. If it fires:
 
 1. Call `POST /session/:id/abort`
-2. Wait briefly for `session.idle` on the SSE stream (up to 5 s)
-3. Raise `AgentTimeoutError`
+2. Raise `AgentTimeoutError`
 
 This differs from `SubprocessExecutor`'s liveness model (idle = no event for N
-seconds). For the serve model a wall-clock cap is simpler and correct — the
-daemon owns the agent loop, not agent-flow.
+seconds). For the serve model a wall-clock cap on the blocking call is simpler
+and correct — the daemon owns the agent loop, not agent-flow. (Verified: the
+sync prompt blocks until the loop completes, so the HTTP timeout is the natural
+deadline.)
 
 ---
 
@@ -527,83 +527,92 @@ Needs sign-off before implementation.
 
 ---
 
+## Verified against opencode serve 1.18.4 (live)
+
+Empirically probed against a running `opencode serve` (health, session create,
+sync prompt, both SSE streams, wait, abort, delete). Findings that settle the
+open questions:
+
+### The sync prompt IS the completion mechanism — no SSE needed for the MVP
+
+`POST /session/:id/message` with `{"agent":"...","parts":[{"type":"text",
+"text":"..."}]}` **blocks until the agent loop fully completes** (~3–5 s in
+tests) and returns the whole result in one JSON payload:
+
+```json
+{
+  "info": {
+    "role": "assistant",
+    "finish": "stop",
+    "error": null,
+    "cost": 0,
+    "tokens": {"total": 15087, "input": 3, "output": 5, "reasoning": 0,
+               "cache": {"write": 15079, "read": 0}},
+    "modelID": "...", "providerID": "...", "sessionID": "...", "id": "..."
+  },
+  "parts": [ {"type": "step-start"}, {"type": "text", "text": "pong"},
+             {"type": "step-finish"} ]
+}
+```
+
+This single blocking response gives **completion + result + telemetry +
+error** at once. The hardest part of the earlier design (an SSE threading model
+to detect `session.idle`) is therefore **not needed for the MVP**:
+
+```
+ServeExecutor.run():
+  session_id = POST /session?directory=<agent_dir>        (create)
+  resp = POST /session/:id/message?directory=<agent_dir>  (BLOCKS until done)
+  # resp.info.error → runtime failure;  resp.info.tokens/cost → telemetry
+  read sidecar from run_dir                                (agent already wrote it)
+  assemble_result + check_content_status
+  DELETE /session/:id                                      (cleanup)
+```
+
+Timeout: enforce a client-side HTTP timeout (`inv.idle_timeout_s`) on the
+blocking call; on fire, `POST /session/:id/abort` and raise `AgentTimeoutError`.
+
+`on_event` live display (optional, post-MVP): subscribe to the legacy global
+`/event` stream and filter by `properties.sessionID`. Nice-to-have, not needed
+for correctness — the blocking response already carries the outcome.
+
+### SSE stream findings (for the optional live-display path)
+
+- **Legacy global `GET /event`** — works, emits `session.idle` (completion),
+  `message.part.updated`, `session.status`, `session.diff`. Global: one stream
+  for all sessions, filter by `properties.sessionID`. This is the stream to use
+  if/when live events are wired.
+- **v2 per-session `GET /api/session/:id/event`** — only carries **durable**
+  events, and only when the prompt was sent via the **v2** endpoint
+  (`POST /api/session/:id/prompt`). Emits `session.next.*` (prompt.admitted,
+  step.started, step.ended/failed) but **not `session.idle`**. A legacy-prompt
+  session produces nothing here. Not usable alongside the legacy sync prompt.
+- **`POST /api/session/:id/wait`** ("block until idle") returns **503
+  ServiceUnavailableError "not available yet"** in 1.18.4 — declared but
+  unimplemented. Do not rely on it.
+
+### Decision: legacy sync prompt + legacy global event stream
+
+Use the **legacy** API throughout: `POST /session/:id/message` (blocking) for
+run + result + telemetry, and — only if live display is added later — the legacy
+global `/event` stream for `on_event`. The v2 surface is inconsistent in this
+build (empty per-session stream for legacy prompts, unimplemented `wait`).
+
+### Session cleanup — verified
+
+`DELETE /session/:id` returns 200 and works. Call it after each `run()`
+completes. Cheap; keeps opencode's SQLite DB from accumulating probe/run
+sessions.
+
+### Health — verified
+
+`GET /global/health` → `{"healthy":true,"version":"1.18.4"}`. Immediate,
+unauthenticated. Use for `ServeClient`'s first-use reachability check.
+
+---
+
 ## Open questions
 
-### 1. SSE threading model — the hardest part
+### Runtime name / execution mode split
 
-`ServeExecutor.run()` is called from multiple threads simultaneously (one per
-parallel node). The global `/event` stream is one HTTP connection per daemon.
-Two options:
-
-**Option A — `ServeClient` owns one shared SSE reader thread.**
-`ServeClient` starts a single background daemon thread that reads the global
-`/event` stream and dispatches each event to a `sessionID → queue` registry.
-Each `ServeExecutor.run()` call registers its session ID before sending the
-prompt and dequeues from its own `queue.Queue` to detect `session.idle`.
-
-```
-ServeClient (shared)
-  ├── _sse_thread (daemon) ── reads /event ──► dispatches to per-session queues
-  ├── _session_queues: dict[sessionID, Queue]
-  └── register(sessionID) / unregister(sessionID)
-
-ServeExecutor.run():
-  q = client.register(session_id)
-  POST /session/:id/message  (blocks HTTP)  ← in its own thread
-  wait on q for session.idle or timeout     ← in the calling thread
-  client.unregister(session_id)
-```
-
-Problem: the sync prompt blocks the calling thread waiting for HTTP response.
-But `session.idle` arrives on SSE before the HTTP response is sent (or
-concurrently). Need to handle both: HTTP response for telemetry, SSE queue for
-`session.idle` as the authoritative completion signal. The HTTP call and the
-SSE wait must run concurrently → needs a second thread per invocation or an
-async model.
-
-**Option B — use the v2 per-session SSE stream.**
-`GET /api/session/:id/event` is scoped to one session — no fan-out, no shared
-reader. Each `ServeExecutor.run()` opens its own SSE connection for its session
-and reads until `session.idle`. No shared state in `ServeClient` for the event
-path.
-
-```
-ServeExecutor.run():
-  session_id = POST /api/session               (create)
-  prompt_thread = Thread(POST /api/session/:id/prompt)
-  sse_thread = Thread(GET /api/session/:id/event → collect until idle)
-  both.join(timeout=idle_timeout_s)
-  read sidecar
-```
-
-Cleaner isolation, no shared state. The cost is one extra HTTP connection per
-active node invocation — acceptable since the serve model is only used when
-concurrency is high enough to warrant it.
-
-**Recommended: Option B** — simpler, no shared mutable state, naturally
-parallel. The v2 API stability question (see below) is the only blocker.
-
-### 2. v2 vs legacy API
-
-The v2 per-session event stream (`/api/session/:id/event?after=<seq>`) is
-cleaner for `ServeExecutor`. But the v2 prompt endpoint
-(`/api/session/:id/prompt` + `/api/session/:id/wait`) has a different request
-shape from the legacy sync prompt. Start with the **legacy sync prompt**
-(`POST /session/:id/message`) for the prompt call (well-tested, predictable
-blocking behaviour) and the **v2 event stream** for completion detection.
-Mixing the two is fine — they share the same session ID space.
-
-### 3. Session cleanup
-
-Sessions accumulate in opencode's SQLite DB (`~/.local/share/opencode/opencode.db`).
-Options:
-- `DELETE /session/:id` after each `run()` completes (clean, but adds a round-trip)
-- Rely on opencode's own `OPENCODE_DISABLE_PRUNE=false` retention policy
-- Accept growth — opencode's DB is append-only and the data is small per session
-
-Recommendation: do nothing initially; add explicit cleanup if DB size becomes
-a problem in practice.
-
-### 4. Runtime name / execution mode split
-
-See "To be discussed" above.
+See "To be discussed" above (Option B — `opencode-remote` — leaning).
