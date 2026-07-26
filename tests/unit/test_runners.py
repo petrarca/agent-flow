@@ -6,10 +6,15 @@ from pathlib import Path
 import pytest
 
 from agent_flow.runners import (
+    MODE_PROCESS,
+    TRANSPORT_SUBPROCESS,
     AgentInvocation,
     OpenCodeRunner,
     get_runner,
+    register,
+    runner_specs,
 )
+from agent_flow.runners.base import RunnerSpec
 
 
 def _inv(**kw) -> AgentInvocation:
@@ -29,9 +34,72 @@ def test_get_runner_unknown_raises():
 
 
 def test_mock_is_not_a_runner():
-    # Mock is a MODE (--mock-agents), not a runtime; it must not be in RUNNERS.
+    # Mock is a MODE (--mock-agents), not a runtime; it must not be registered.
     with pytest.raises(ValueError):
         get_runner("mock")
+
+
+# --- RunnerSpec + registry ----------------------------------------------------
+
+
+def test_opencode_spec():
+    spec = get_runner("opencode").spec()
+    assert spec.runtime == "opencode"
+    assert spec.mode == MODE_PROCESS
+    assert spec.transport == TRANSPORT_SUBPROCESS
+    assert spec.name == "opencode"
+    assert spec.needs_endpoint is False
+
+
+def test_runner_specs_dedup():
+    # runner_specs() returns one spec per distinct runner (aliases collapse).
+    names = [s.name for s in runner_specs()]
+    assert "opencode" in names
+    assert len(names) == len(set(names))  # no duplicate primary names
+
+
+class _DummyRunner:
+    """A minimal runner with aliases, for registry tests."""
+
+    def spec(self) -> RunnerSpec:
+        return RunnerSpec(
+            runtime="dummy",
+            mode=MODE_PROCESS,
+            transport=TRANSPORT_SUBPROCESS,
+            name="dummy",
+            aliases=("dummy-alias",),
+        )
+
+    def parse_event(self, raw):  # pragma: no cover - not exercised here
+        raise NotImplementedError
+
+    def build_command(self, inv):  # pragma: no cover
+        raise NotImplementedError
+
+
+def test_register_indexes_name_and_aliases():
+    runner = register(_DummyRunner())
+    try:
+        assert get_runner("dummy") is runner
+        assert get_runner("dummy-alias") is runner
+    finally:
+        # clean up the global registry so other tests are unaffected
+        from agent_flow.runners import _REGISTRY
+
+        _REGISTRY.pop("dummy", None)
+        _REGISTRY.pop("dummy-alias", None)
+
+
+def test_register_duplicate_name_raises():
+    register(_DummyRunner())
+    try:
+        with pytest.raises(ValueError):
+            register(_DummyRunner())  # "dummy" already registered
+    finally:
+        from agent_flow.runners import _REGISTRY
+
+        _REGISTRY.pop("dummy", None)
+        _REGISTRY.pop("dummy-alias", None)
 
 
 def test_opencode_build_command_shape():

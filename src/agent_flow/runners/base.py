@@ -242,12 +242,90 @@ class LaunchSpec:
     capture_stderr: bool = False
 
 
-@runtime_checkable
-class AgentRunner(Protocol):
-    """Strategy for one agent-execution backend.
+# Execution transports. A runner declares HOW an executor talks to it:
+#   "subprocess" — spawn a CLI process, stream stdout (SubprocessExecutor).
+#   "http-sse"   — POST to a running daemon, stream SSE events (ServeExecutor).
+# The transport decides WHICH executor a runner pairs with; the registry reads it
+# from the runner's spec so executor selection never string-matches names.
+TRANSPORT_SUBPROCESS = "subprocess"
+TRANSPORT_HTTP_SSE = "http-sse"
 
-    REQUIRED: `build_command` (-> LaunchSpec) + `parse_event` (stdout line ->
-    Event). Everything else (supervision, kill, sidecar, DAG) is runner-agnostic.
+# Execution modes — the human-facing axis orthogonal to the agent runtime:
+#   "process" — spawn a fresh CLI process per invocation.
+#   "remote"  — run against a shared, already-running daemon over the network.
+MODE_PROCESS = "process"
+MODE_REMOTE = "remote"
+
+
+@dataclass(frozen=True)
+class RunnerSpec:
+    """Static, declared self-description of a runner — identity + requirements.
+
+    Every runner returns one from `spec()`. This is the STATIC identity of a
+    runner (always available, never does I/O, never fails), as opposed to
+    `AgentRunnerInfo` from `info()` which is BEST-EFFORT runtime introspection
+    (version/resolved-model, may be None, may fail). The registry, preflight, and
+    executor selection all read this instead of parsing names or guessing from
+    suffixes.
+
+    runtime         the agent runtime family — "opencode", "goose", "crush",
+                    "claude". Two runners of the same runtime (process + remote)
+                    share this and their per-runtime knowledge module.
+    mode            "process" | "remote" — the execution axis (MODE_*).
+    transport       "subprocess" | "http-sse" — how an executor talks to this
+                    runner (TRANSPORT_*). Decides which executor it pairs with.
+    needs_endpoint  True when the runner requires a serve_url (a daemon endpoint).
+                    Preflight and executor construction read this generically —
+                    no "-remote" suffix matching anywhere.
+    name            the primary registry key (e.g. "opencode", "opencode-remote").
+    aliases         additional registry keys resolving to the same runner
+                    (e.g. ("opencode-http",) for the remote runner).
+    """
+
+    runtime: str
+    mode: str
+    transport: str
+    name: str
+    needs_endpoint: bool = False
+    aliases: tuple[str, ...] = ()
+
+
+@runtime_checkable
+class RunnerBase(Protocol):
+    """Common base for ALL runners regardless of transport.
+
+    Carries the two things every runner must answer independently of how it is
+    launched: its static `spec()` (identity + requirements) and `parse_event`
+    (turn one unit of the runtime's event stream into a neutral Event). The event
+    vocabulary is the SAME across transports — an opencode `session.idle` means
+    the same thing whether it arrived on stdout (subprocess) or SSE (remote) — so
+    `parse_event` lives here and is shared by both transport sub-protocols.
+
+    OPTIONAL (a runner may implement them; callers use getattr/hasattr):
+      - `preflight_checks(agent_dir) -> list[Check]`: runtime pre-conditions.
+      - `info(agent_dir=None) -> AgentRunnerInfo`: best-effort diagnostics.
+    """
+
+    def spec(self) -> RunnerSpec:
+        """Return this runner's static identity + requirements."""
+        ...
+
+    def parse_event(self, raw: object) -> Event:
+        """Parse one unit of the runtime's event stream into a neutral Event.
+
+        `raw` is a stdout line (str) for a subprocess runner or an already-decoded
+        event dict for an http-sse runner — the runner knows its own shape.
+        """
+        ...
+
+
+@runtime_checkable
+class AgentRunner(RunnerBase, Protocol):
+    """Subprocess-transport runner: build an argv, parse stdout lines.
+
+    REQUIRED (on top of RunnerBase): `build_command` (-> LaunchSpec). Everything
+    else (supervision, kill, sidecar, DAG) is runner-agnostic and owned by
+    SubprocessExecutor.
 
     OPTIONAL (a runner may implement them; callers use getattr/hasattr):
       - `preflight_checks(agent_dir) -> list[Check]`: runtime pre-conditions this

@@ -21,7 +21,7 @@ import shlex
 import shutil
 from pathlib import Path
 
-from agent_flow.runners.base import AgentInvocation, AgentRunnerInfo, Event, LaunchSpec
+from agent_flow.runners.base import MODE_PROCESS, TRANSPORT_SUBPROCESS, AgentInvocation, AgentRunnerInfo, Event, LaunchSpec, RunnerSpec
 
 # Regex to extract key=value pairs for `error` and `ref` from an opencode
 # stderr ERROR line.  opencode's logfmt formatter (logging.ts) quotes values
@@ -34,6 +34,16 @@ class OpenCodeRunner:
     """opencode: named agents via --agent; NDJSON event stream via --format json."""
 
     name = "opencode"
+
+    def spec(self) -> RunnerSpec:
+        """Static identity: the opencode runtime, process mode, subprocess transport."""
+        return RunnerSpec(
+            runtime="opencode",
+            mode=MODE_PROCESS,
+            transport=TRANSPORT_SUBPROCESS,
+            name=self.name,
+            needs_endpoint=False,
+        )
 
     def build_command(self, inv: AgentInvocation) -> LaunchSpec:
         # opencode identity lives in the agent .md; we pass --agent + work order.

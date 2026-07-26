@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import shlex
 
-from agent_flow.runners.base import AgentInvocation, Event, LaunchSpec
+from agent_flow.runners.base import MODE_PROCESS, TRANSPORT_SUBPROCESS, AgentInvocation, Event, LaunchSpec, RunnerSpec
 
 
 class ClaudeCodeRunner:
@@ -41,6 +41,21 @@ class ClaudeCodeRunner:
     """
 
     name = "claude"
+
+    def spec(self) -> RunnerSpec:
+        """Static identity: claude runtime, process mode, subprocess transport.
+
+        Claude Code has no serve/daemon mode (headless is subprocess-per-call or
+        an in-process SDK), so there is no remote variant — needs_endpoint stays
+        False and no http-sse runner exists for it.
+        """
+        return RunnerSpec(
+            runtime="claude",
+            mode=MODE_PROCESS,
+            transport=TRANSPORT_SUBPROCESS,
+            name=self.name,
+            needs_endpoint=False,
+        )
 
     def build_command(self, inv: AgentInvocation) -> LaunchSpec:  # pragma: no cover
         # NOTE: unlike opencode, Claude puts the prompt right after `-p` (NOT the
