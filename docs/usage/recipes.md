@@ -178,7 +178,7 @@ Inject a directive / rules into every agent:
 
 ```python
 FlowDef(name="p",
-        shared_instructions="Experimental code-graph support is available; use it where it helps.",
+        shared_instructions="Follow the team's coding standards and cite a source for every finding.",
         shared_context=["{repos_root}/rules/security.md"],
         nodes=[...])
 ```

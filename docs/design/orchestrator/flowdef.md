@@ -1,9 +1,9 @@
 ---
 type: Concept
 title: FlowDef — the declarative pipeline surface
-description: FlowDef/NodeDef as serializable pipeline data; the FlowRegistry (gates/exports/runs/schemas by name); compile_flow/run_flow; how it layers over the runtime Node.
+description: FlowDef/NodeDef as serializable pipeline data; the FlowRegistry (gates/exports/runs/schemas/agent_impls/mock_agents by name); compile_flow/run_flow; how it layers over the runtime Node.
 tags: [agent-flow, flowdef, nodedef, registry, declarative, compile]
-timestamp: 2026-07-25T08:54:40Z
+timestamp: 2026-07-26T00:00:00Z
 ---
 
 # FlowDef — the declarative surface
@@ -59,6 +59,7 @@ NodeDef(
     gate_args={"relpath": "tech-stack.md"},      # config for the gate
     result_schema="TechStack",                   # a schema BY NAME (registry)
     exports={"stack": "detected_stack"},         # result->params map (or export_ref="name")
+    impl_ref="classify",                          # OPTIONAL: run in-process (registry.agent_impl)
     instructions="…", context=["rules/*.md"],    # per-node prompt channels
     model=None, idle_timeout_s=None, agent_dir=None,
 )
@@ -66,7 +67,9 @@ NodeDef(
 
 A node runs **either** an `agent` (the standard "run one agent" node) **or** a
 `run_ref` (a registered custom run — see below) — exactly one. `exports` and
-`export_ref` are mutually exclusive.
+`export_ref` are mutually exclusive. `impl_ref` is not an alternative to `agent`:
+it selects HOW the (named) agent runs — in-process rather than as a subprocess —
+so it requires `agent` to be set (see "In-process & mock execution" below).
 
 ## FlowDef
 
@@ -85,7 +88,7 @@ FlowDef(
 
 Validation runs at construction: unique node names, every `depends_on` names a
 known node. `compile_flow` additionally checks that every referenced gate /
-result_schema / run_ref / export_ref exists in the registry.
+result_schema / run_ref / export_ref / impl_ref exists in the registry.
 
 ## The FlowRegistry — names resolve to code
 
@@ -125,6 +128,27 @@ A node references a gate by name: `gate="rerun_to", gate_args={"target": "…"}`
   the code lives in the registry.
 - `@registry.schema("name")` — a result schema (pydantic model / JSON-schema
   dict / `ResultSchema`) referenced by `NodeDef(result_schema="name")`.
+
+### In-process & mock execution
+
+Two more registration kinds control HOW an agent runs, not what it does:
+
+- `@registry.agent_impl("name")` — an **in-process** agent: a Python callable
+  `(inv) -> AgentResult | pydantic model | dict` referenced by
+  `NodeDef(impl_ref="name")`. The node then runs as a direct call via
+  `InProcessExecutor` (no subprocess, no sidecar) instead of spawning a runtime;
+  `agent` stays as the label. See [node_builder.md](node_builder.md).
+- `@registry.mock_agent("name")` — a deterministic, no-token **stand-in** for the
+  agent named `name`, used only under the `--mock-agents` mode
+  (`mock_agents=True`). When the mode is on, any node whose `agent` matches runs
+  the behaviour via `MockExecutor` instead of its normal executor; mocks are keyed
+  by AGENT name, so one registration covers every node running that agent. Nodes
+  without a registered mock still run for real (partial mocking). See
+  [mock-agent.md](mock-agent.md).
+
+`compile_flow` threads the registry onto each compiled agent node so a
+`mock_agent` can be resolved by agent name at run time (this is why `run_flow` /
+`run_cli` take the same `registry`).
 
 ### Observing hooks — cross-cutting, never steer flow
 

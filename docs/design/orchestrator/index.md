@@ -90,7 +90,8 @@ TIER 3  DECLARATIVE          declare Nodes -> build_flow() -> a runnable flow ca
 TIER 2  PRIMITIVES           call run_agent() as the leaf of YOUR OWN Prefect flow
               │ uses
 TIER 1  ENGINE CORE          run_agent(): spawn + liveness-supervise + kill + sidecar verdict
-        AgentRunner seam (opencode / mock / …); gates; control protocol; schema seam
+        AgentExecutor seam (Subprocess / InProcess / Mock); AgentRunner wire
+        adapter (opencode / claude / …); gates; control protocol; schema seam
               │ invokes
         AGENT RUNTIME        opencode agents (.md) — external, unchanged
 ```
@@ -107,16 +108,15 @@ it. Pipelines differ only in their Tier-3 declaration.
 
 ```python
 from agent_flow import agent_node, build_flow
-from agent_flow.gates import require_file, rerun_on_signal
 
 nodes = [
     agent_node("tech-stack", "tech-stack-analyst",
                inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
-               gate=require_file("tech-stack.md")),
+               gate_ref="require_file", gate_args={"relpath": "tech-stack.md"}),
     # a "verifier" is just ANOTHER node that can jump the flow back:
     agent_node("tech-stack-verify", "tech-stack-verifier",
                depends_on=("tech-stack",), criticality="degrade",
-               gate=rerun_on_signal(target="tech-stack")),
+               gate_ref="rerun_on_signal", gate_args={"target": "tech-stack"}),
 ]
 build_flow(nodes, name="tech")(product_key="acme", runtime="opencode")  # no run_dir -> temp dir under <temp>/agent-flow/
 ```
@@ -137,10 +137,12 @@ build_flow(nodes, name="tech")(product_key="acme", runtime="opencode")  # no run
 | Mock agent | [mock-agent.md](mock-agent.md) | `mock_agent` — a deterministic stand-in for a real agent via the `--mock-agents` substitution MODE (not a runtime); `MockExecutor` (sibling `AgentExecutor`) + `MockAgentContext` tools; structured-interface simulation, no LLM |
 | CLI & events | [cli-events.md](cli-events.md) | `Event`/`on_event`, `--show-events` projection, the Typer/rich CLI |
 
-## Prototype status
+## Status
 
-Implemented and tested in this repo: Tiers 1–3, gates + ready gates, node_builder,
-control-file contract + protocol injection, result-schema seam, live events +
-CLI, bounded re-runs and cross-node jump-back. Two runnable examples
-(`examples/custom_flow.py` = Tier 2, `examples` = Tier 3), both
-green on the mock runner and on real opencode.
+Implemented and tested: Tiers 1–3, gates + ready gates, node_builder,
+control-file contract + protocol injection, result-schema seam, the
+`AgentExecutor` seam (Subprocess / InProcess / Mock), the `--mock-agents`
+substitution mode, live events + CLI, bounded re-runs and cross-node jump-back.
+Runnable examples: `examples/custom_flow.py` (Tier 2), `examples/imperative.py`
+and `examples/declarative.py` (Tier 3), and `examples/inprocess.py` (in-process
+agents) — all green under `--mock-agents` and on real opencode.

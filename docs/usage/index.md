@@ -67,8 +67,9 @@ backend rationale:
 
 ```python
 from agent_flow import agent_node, build_flow
-from agent_flow.gates import require_file
 
-nodes = [agent_node("hello", "hello-agent", inputs={"REPORT": "{run_dir}/hello.md"}, gate=require_file("hello.md"))]
-build_flow(nodes, name="hello")(runtime="mock")  # no run_dir -> a temp dir (logged)
+nodes = [agent_node("hello", "hello-agent",
+                    inputs={"REPORT": "{run_dir}/hello.md"},
+                    gate_ref="require_file", gate_args={"relpath": "hello.md"})]
+build_flow(nodes, name="hello")(runtime="opencode")  # no run_dir -> a temp dir (logged)
 ```

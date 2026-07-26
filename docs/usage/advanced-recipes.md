@@ -30,7 +30,7 @@ def main() -> None:
 ```bash
 # generic settings as flags + DOMAIN params via -p/--param KEY=VALUE:
 python -m my_pkg.flow run -p product_key=my-product -p repos_root=/tmp/repos \
-    --runtime opencode --run-dir "{repos_root}/{product_key}/output" -i "use code-graph"
+    --runtime opencode --run-dir "{repos_root}/{product_key}/output" -i "cite a source for every finding"
 
 # or put the generic settings in a YAML config file:
 python -m my_pkg.flow run --config run.yml -p product_key=my-product
@@ -43,7 +43,7 @@ run_dir: "{repos_root}/{product_key}/output"
 agent_dir: /work/pipelines/tech-assessment
 llm_concurrency: 2
 instructions: |
-  Experimental code-graph support is available; use it alongside RAG.
+  Follow the team's coding standards and cite a source for every finding.
 node_instructions:            # per-node steering, appended last to that node
   analyst: "Weight the security assessment heavily."
 ```
@@ -104,14 +104,14 @@ reuses `build_run_config` and `preflight` in its own Tier-2 CLI).
 ## Check that a step actually produced its file
 
 ```python
-from agent_flow.gates import require_file
-
 agent_node("hello", "hello-analyst", inputs={"REPORT": "{run_dir}/hello.md"},
-           gate=require_file("hello.md"))
+           gate_ref="require_file", gate_args={"relpath": "hello.md"})
 ```
 
-If the control sidecar says `ok` but `hello.md` is missing or empty, the node is
-re-run (bounded by `max_cycles`, default 1). See
+Built-in gates are referenced **by name** (`gate_ref="require_file"` +
+`gate_args={...}`); the `gate=` param takes only a bare callable you wrote. If the
+control sidecar says `ok` but `hello.md` is missing or empty, the node is re-run
+(bounded by `max_cycles`, default 1). See
 [gates.md](../design/orchestrator/gates.md).
 
 ## A verifier that can trigger a re-run
@@ -120,16 +120,14 @@ There's no built-in "verifier" concept — it's a plain node that depends on the
 step it checks, with a gate that can send the flow back:
 
 ```python
-from agent_flow.gates import require_file, rerun_on_signal
-
 nodes = [
     agent_node("hello", "hello-analyst", inputs={"REPORT": "{run_dir}/hello.md"},
-               gate=require_file("hello.md")),
+               gate_ref="require_file", gate_args={"relpath": "hello.md"}),
     agent_node("hello-verify", "hello-verifier",
                depends_on=("hello",),
                inputs={"REPORT": "{run_dir}/hello.md"},
                criticality="degrade",           # a failed check shouldn't halt the run
-               gate=rerun_on_signal(target="hello")),
+               gate_ref="rerun_on_signal", gate_args={"target": "hello"}),
 ]
 ```
 
@@ -165,12 +163,12 @@ build_flow(nodes, name="my-pipeline", shared_instructions=brief)
 ```
 
 ```bash
-python my_flow.py run --instructions "Experimental code-graph support is available; use it alongside RAG where sensible."
+python my_flow.py run --instructions "Follow the team's coding standards and cite a source for every finding."
 ```
 
-(Wire `--instructions`/`-i` yourself with Typer/argparse, as the tech-assessment
-example does — see `examples/declarative.py`.) It's injected into
-**every** agent's prompt, after the control protocol. See
+(`--instructions`/`-i` is already wired by `run_cli` — no need to add it
+yourself; see `examples/declarative.py`.) It's injected into **every** agent's
+prompt, after the control protocol. See
 [input-plane.md](../design/orchestrator/input-plane.md).
 
 ## Give one node an extra, specific instruction
@@ -222,7 +220,7 @@ before it — to iterate on a late stage without re-running the expensive upstre
 # re-run only extractor -> summary -> …, steering the extractor for this pass:
 python my_flow.py run -p product_key=acme \
   --start-from extractor \
-  --instruct extractor="re-derive the RAG counts; the na bucket looked off"
+  --instruct extractor="re-derive the counts; the na bucket looked off"
 ```
 
 ```python
@@ -253,7 +251,7 @@ after it either. `--start-from` runs *from* a group *to the end*; `--only` runs
 # re-run ONLY the extractor, nothing before or after it:
 python my_flow.py run -p product_key=acme \
   --only extractor \
-  --instruct extractor="re-derive the RAG counts; the na bucket looked off"
+  --instruct extractor="re-derive the counts; the na bucket looked off"
 ```
 
 ```python
@@ -302,7 +300,7 @@ resulting string as `run_agent(shared_context=...)`.)
 schema = {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}
 agent_node("tech-stack", "tech-stack-analyst", result_schema=schema)
 
-# Or, with the `pydantic` extra:
+# Or, with a Pydantic model (pydantic is a core dependency — always available):
 from pydantic import BaseModel
 from agent_flow import PydanticSchema
 
@@ -365,7 +363,7 @@ def gate(ctx):
         return Restart() if len(ctx.obj.languages) < 2 else Continue()
 
     if not ctx.result["_result_valid"]:                 # schema check failed
-        return Restart(note=f"invalid result: {ctx.result['_result_errors']}")
+        return Restart(instruction=f"invalid result: {ctx.result['_result_errors']}")
 
     data = ctx.result.get("result", {})                 # dict/no-schema case
     return Restart() if not data.get("summary") else Continue()

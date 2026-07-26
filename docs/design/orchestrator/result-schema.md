@@ -61,17 +61,24 @@ agent_node("tech-stack", "tech-stack-analyst",
 
 Frameworks like Pydantic AI weld an output type to *their* in-process LLM call
 (`agent.run_sync(output_type=…)`). Here the schema only touches the **prompt**
-(injection) and the **control file** (validation), so it rides over ANY runner —
-opencode subprocess, Claude Code CLI, mock — because the runtime abstraction
-(`AgentRunner`) is preserved. The core depends only on the `ResultSchema`
-protocol, not on any one schema library, so a raw JSON-schema dict is a
-first-class alternative to a Pydantic model.
+(injection) and the **control file** (validation), so it rides over ANY execution
+model — an opencode/Claude Code subprocess, an in-process agent, or a
+`--mock-agents` stand-in — because validation is the shared executor tail, not
+tied to a runner. The core depends only on the `ResultSchema` protocol, not on
+any one schema library, so a raw JSON-schema dict is a first-class alternative to
+a Pydantic model.
 
 ## Where it lives
 
 `src/agent_flow/core/schema.py` (`ResultSchema`, `JsonSchema`, `ValidationOutcome`,
-`coerce_schema`), `src/agent_flow/core/schema_pydantic.py` (`PydanticSchema`), and
-the injection/validation in `core/agent_runtime.py` `run_agent`. All of these
-types are re-exported at the top level, so consumers import them as
-`from agent_flow import PydanticSchema` (etc.); the `core.schema_pydantic` path is
+`coerce_schema`) and `src/agent_flow/core/schema_pydantic.py` (`PydanticSchema`).
+**Injection** into the prompt is subprocess-specific (`SubprocessExecutor` embeds
+the schema in the control preamble, `core/agent_runtime.py`). **Validation** is
+the shared `AgentExecutor.assemble_result` in `src/agent_flow/runners/executor.py`
+— used by `SubprocessExecutor`, `MockExecutor`, and (via `adapt_result`)
+`InProcessExecutor` — so typed output behaves identically across execution
+models, and `result_obj`/`result_valid`/`result_errors` are populated only by
+that validation. All of these types are re-exported at the top level, so
+consumers import them as `from agent_flow import PydanticSchema` (etc.); the
+`core.schema_pydantic` path is
 the internal location.

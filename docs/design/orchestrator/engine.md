@@ -44,8 +44,11 @@ Node(
 control files + relative-path base; NOT a cwd and NOT where agents live),
 `cycles`, `params` (domain inputs, threaded from the flow call), and the
 engine-plumbing fields `agent_dir` (default dir where agent definitions live →
-opencode `--dir`; per-node override on `agent_node`), `on_event_factory`, and
-`shared_instructions` (all typed, not `params` keys — see
+opencode `--dir`; per-node override on `agent_node`), `on_event_factory`,
+`shared_instructions`, `shared_context`, `node_instructions` (run-time per-node
+instructions from `--instruct`/config), and `one_time_instruction` (the
+single-attempt instruction a gate's `Restart`/`GoTo` delivers to the target
+node's next run) — all typed, not `params` keys — see
 [input-plane](input-plane.md) and [cli-events](cli-events.md)). `on_event_factory`
 is deliberately named differently from `run_agent`'s Tier-1 `on_event` callback
 — at Tier 3 the agent name is not known until inside a node's `run`, so this is
@@ -75,7 +78,7 @@ callback: `blocking` → `NodeBlocked`; `degrade` → status `degraded`.
 
 ## `build_flow` — compile to a runnable flow callable
 
-`build_flow(nodes, *, name, llm_tag, llm_concurrency, on_event_factory, on_node_event, shared_instructions, shared_context, agent_dir, node_instructions, backend="inprocess")`
+`build_flow(nodes, *, name, llm_tag, llm_concurrency, on_event_factory, on_node_event, shared_instructions, shared_context, agent_dir, node_instructions, backend="inprocess", registry=None)`
 returns a plain callable `f(run_dir="", start_from="", only="", **params) -> dict[str, NodeOutcome]`.
 It:
 

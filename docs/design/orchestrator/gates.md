@@ -13,16 +13,19 @@ the agent produced (files on disk, the control `result`) and returns a
 **directive** that steers the flow. This is the seam that keeps domain knowledge
 — "what a report is, when a re-run is needed" — out of the engine.
 
-A gate is any callable `(GateContext) -> Directive`. A node with **no** gate
-behaves as if it returned `Continue()` — absent means continue.
+A gate is a callable `(ctx, **config) -> Directive`, where the node's `gate_args`
+supply the config (bound with `functools.partial` at resolve time, so after
+binding the engine calls it with just `ctx`). A gate with no per-node config is
+simply `(ctx) -> Directive`. A node with **no** gate behaves as if it returned
+`Continue()` — absent means continue.
 
 ## Directives (the closed set)
 
 | Directive | Effect |
 |---|---|
 | `Continue()` | proceed to the next node (the default). |
-| `Restart(note="")` | re-run THIS node's agent, bounded by `max_cycles`. |
-| `GoTo(node, note="")` | resume the flow at a named node — self (= Restart) or an **earlier** node (bounded cross-node jump-back, see [engine](engine.md)). |
+| `Restart(instruction="")` | re-run THIS node's agent, bounded by `max_cycles`. The optional `instruction` is injected verbatim into the target's next run. |
+| `GoTo(node, instruction="")` | resume the flow at a named node — self (= Restart) or an **earlier** node (bounded cross-node jump-back, see [engine](engine.md)). |
 | `Stop(reason="")` | abort the whole pipeline (e.g. a blocking-criticality failure). |
 
 The closed union makes flow control discoverable and typo-proof: a reader sees
@@ -59,30 +62,33 @@ time).
 
 ## Ready-made gates (optional conveniences)
 
-The two checks almost every pipeline writes, shipped so you don't hand-roll a
-closure:
+The three checks almost every pipeline writes, shipped and pre-seeded into every
+`FlowRegistry` so you don't hand-roll a closure. They are `(ctx, **config)` gates
+referenced BY NAME + `gate_args` (or `gate_ref`/`gate_args` on `agent_node`), not
+factories you call:
 
 ```python
-from agent_flow.gates import require_file, rerun_on_signal, rerun_on_named
-
 # "did the agent actually produce its artifact?" -> Restart if missing (bounded).
-# May template run params: require_file("{product_key}-report.md").
-gate = require_file("tech-stack.md")
+# relpath may template run params, e.g. "{product_key}-report.md".
+NodeDef(name="tech-stack", agent="tech-stack-analyst",
+        gate="require_file", gate_args={"relpath": "tech-stack.md"})
 
 # "did this (verifier) node signal a re-run of an earlier node?" -> GoTo(target).
-gate = rerun_on_signal(target="tech-stack")
+NodeDef(name="verify", agent="tech-stack-verifier", depends_on=["tech-stack"],
+        gate="rerun_on_signal", gate_args={"target": "tech-stack"})
 
-# same signal, but route to WHICHEVER node the sidecar names (e.g. a final
-# coherence check that may bounce to any upstream stage) -> GoTo(named).
-gate = rerun_on_named()
+# same signal, but route to WHICHEVER node the sidecar names -> GoTo(named).
+NodeDef(name="coherence", agent="coherence-check", gate="rerun_on_named")
 ```
 
-`require_file` reads `produced()`, resolving `{name}` in its path argument
-against `ctx.params`; `rerun_on_signal` reads the node's sidecar
-`rerun_required` and returns `GoTo(target)` for a FIXED target when the field is
-set. `rerun_on_named` reads the same field but routes to the node it NAMES (first
-valid backward target). All are ordinary gates you may use, wrap, compose, or
-ignore.
+Their signatures are `require_file(ctx, *, relpath, on_missing=None)`,
+`rerun_on_signal(ctx, *, target, control_file=None)`, and
+`rerun_on_named(ctx, *, control_file=None)`. `require_file` reads `produced()`,
+resolving `{name}` in `relpath` against `ctx.params`; `rerun_on_signal` reads the
+node's sidecar `rerun_required` and returns `GoTo(target)` for a FIXED target when
+the field is set; `rerun_on_named` reads the same field but routes to the node it
+NAMES (first valid backward target). All three auto-populate the directive's
+`instruction`. They are ordinary gates you may use, wrap, compose, or ignore.
 
 **A real agent must be TOLD `rerun_required` exists to use it.** The injected
 [control-file protocol](control-file.md) mentions the field, but a specific

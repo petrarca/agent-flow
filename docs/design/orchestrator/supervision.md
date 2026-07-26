@@ -82,8 +82,9 @@ runtime-agnostic and written once. `AgentInvocation` carries the agent **name**
 and its resolved **instructions** separately, so a runner materialises identity
 its own way: opencode via `--agent`; a runner without named agents (Claude Code)
 via `--append-system-prompt`. A runtime with no structured stream returns
-`Event.none()` and relies purely on sidecar + idle-timer + exit code — which the
-`MockRunner` already proves.
+`Event.none()` and relies purely on sidecar + idle-timer + exit code — the
+domain-free test stub `core/_mock_agent.py` (driven as a subprocess only in
+supervision tests) exercises exactly that stale/kill path.
 
 **The honest limit — abstract the runtime, NOT the agents.** The mechanism
 (spawn/supervise/parse/sidecar) is fully abstractable. The *content* — agent
@@ -121,7 +122,14 @@ neutral view to one readable line when `--show-events` is on.
 
 ## Where it lives
 
-`src/agent_flow/core/agent_runtime.py` (`run_agent`, `_supervise`, `AgentResult`)
-and the `src/agent_flow/runners/` package: `base.py` (`AgentRunner`, `Event`),
-`opencode.py` (`OpenCodeRunner`), `mock.py` (`MockRunner`), and `__init__.py`
-(`get_runner`).
+`src/agent_flow/core/agent_runtime.py` holds `SubprocessExecutor` (spawn +
+`_supervise` + kill + sidecar read) and the `run_agent` shim that delegates to
+it. The `src/agent_flow/runners/` package holds the seam types: `executor.py`
+(`AgentExecutor` ABC, `AgentResult`, the shared `assemble_result` /
+`check_content_status`, and the `AgentTimeoutError` / `AgentContentFailedError` /
+`AgentCrashError` classes), `base.py` (`AgentRunner`, `AgentInvocation`, `Event`,
+`compose_prompt`), `opencode.py` (`OpenCodeRunner`), and `__init__.py`
+(`get_runner` / `get_executor`). Mock is not a runner: `MockExecutor`
+(`runners/mock_exec.py`) is a sibling executor selected by the `--mock-agents`
+mode, and `core/_mock_agent.py` is only a domain-free subprocess stub for
+supervision tests.

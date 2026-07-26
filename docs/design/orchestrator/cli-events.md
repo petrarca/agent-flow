@@ -48,8 +48,9 @@ default.
 
 `_supervise` catches `KeyboardInterrupt` and kills the agent's process group
 (SIGTERM→SIGKILL) before re-raising, so Ctrl-C never orphans an opencode process
-(or its MCP children). `run_cli` catches it at the top, prints a short
-`Interrupted` line, and exits 130 (standard SIGINT code) — not a raw traceback.
+(or its MCP children). The `run` command (`cli/commands/run.py`) catches it,
+prints a short `Interrupted` line, and exits 130 (standard SIGINT code) — not a
+raw traceback.
 
 ## The event hook (render-agnostic core)
 
@@ -141,10 +142,11 @@ the `cli` package turns those into terminal output.
 `src/agent_flow/runners/base.py` (`Event` with the neutral display fields
 `kind`/`title`/`detail`/`status`/`diff`/`added`/`removed`; each runtime's
 `parse_event` fills them; re-exported as `agent_flow.runners.Event`),
-`agent_runtime` (the `on_event` callback, Ctrl-C process-group kill), `engine.py`
-(`RunContext.on_event_factory`, `build_flow(on_event_factory=, on_node_event=)`,
-`NodeOutcome.duration_s`), and the `src/agent_flow/cli/` package:
-`events.py` (`event_printer`, `render_event`, `render_diff`), `progress.py`
-(`NodeProgressPrinter`), `tables.py` (`print_results_table`,
-`print_preflight_results`), `console.py` (`get_console`), and `app.py`
+`core/agent_runtime.py` (the `on_event` callback wiring in `_supervise`, Ctrl-C
+process-group kill), `engine.py` (`RunContext.on_event_factory`,
+`build_flow(on_event_factory=, on_node_event=)`, `NodeOutcome.duration_s`), and
+the `src/agent_flow/cli/` package: `events.py` (`event_printer`, `render_event`,
+`render_diff`), `progress.py` (`NodeProgressPrinter`), `tables.py`
+(`print_results_table`, `print_preflight_results`), `console.py` (`get_console`),
+`commands/run.py` (the `run` command: flags, Ctrl-C handling), and `app.py`
 (`run_cli`).

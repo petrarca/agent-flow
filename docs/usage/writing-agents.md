@@ -99,7 +99,8 @@ should be rare — only for a genuinely unusable report.
 
 Replace `"hello"` with the name of the node you want redone (the pipeline's
 `agent_node(name=...)` — see [getting-started.md](getting-started.md)). The
-corresponding node also needs a `rerun_on_signal(target="hello")` gate — see
+corresponding node also needs a `rerun_on_signal` gate targeting it
+(`gate="rerun_on_signal", gate_args={"target": "hello"}`) — see
 [recipes.md](recipes.md#a-verifier-that-can-trigger-a-re-run).
 
 ## Gotcha: use absolute paths for files

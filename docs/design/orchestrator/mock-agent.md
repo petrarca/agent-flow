@@ -178,10 +178,9 @@ candidate for reuse elsewhere:
   layer is out-of-process-only.
 
 Keeping the sidecar mechanics entirely in the MockRuntime (never in the behavior
-contract or `ctx`) is what keeps the interface clean: the same inner behavior
-could later be routed to a thinner, in-process wrapper that simply skips the
-control-file step. That would be a **routing decision, not a contract change** —
-see "Later: reuse for in-process" below.
+contract or `ctx`) is what keeps the interface clean: the same inner behavior is
+reused unchanged whether the node it substitutes is a subprocess node or an
+in-process (`impl`) node — see "Scope: both seams covered" below.
 
 ## The mock mode
 
@@ -199,11 +198,11 @@ registered `mock_agent`. Mock mode substitutes where a mock exists; it does not
 force determinism on nodes you did not mock.
 
 Because the mode substitutes execution regardless of *how* a node would otherwise
-run, it covers **both** seams uniformly — a subprocess node and (later) an
-in-process node are intercepted the same way, by the same registered `mock_agent`.
-This is the DX win: one registration, one flag, both seams. (In-process
-interception is out of scope for the initial implementation — see "Later: reuse
-for in-process" — but the mode is the mechanism that will carry it.)
+run, it covers **both** seams uniformly — a subprocess node and an in-process
+(`impl`) node are intercepted the same way, by the same registered `mock_agent`.
+When mock mode is on and a `mock_agent` exists for a node's agent, it **wins over
+that node's `impl`** too. This is the DX win: one registration, one flag, both
+seams.
 
 ### Where it plugs in
 
@@ -214,12 +213,16 @@ decision:
 
 ```
 node.run:
-  if mock_agents and registry.has_mock_agent(node.agent):
-      executor = MockExecutor(registry)          # substitute, regardless of impl/runtime
+  # mock resolved by AGENT NAME from the registry, then baked onto the executor
+  # (like an in-process impl) — the executor itself needs no registry.
+  behaviour = registry.get_mock_agent(node.agent) if (mock_agents and registry
+              and registry.has_mock_agent(node.agent)) else None
+  if behaviour is not None:
+      executor = MockExecutor(behaviour, work_order=resolved_inputs, tmpl=tmpl)   # wins over impl
   elif impl is not None:
       executor = InProcessExecutor(impl)          # normal in-process
   else:
-      executor = get_executor(runtime)            # normal subprocess: opencode / claude / codex
+      executor = get_executor(runtime)            # normal subprocess: opencode / claude / …
 ```
 
 Two clean-ups follow from mock no longer being a runtime:
@@ -271,10 +274,13 @@ AgentExecutor (ABC)               shared: control-dict -> AgentResult, schema va
 ```
 
 The defining difference from `InProcessExecutor` (both call a Python callable
-without a subprocess): `MockExecutor`'s resolution key is `mock_agent`, its return
-contract is a **control envelope**, it constructs and passes the **`ctx` tools**,
-and it performs the out-of-process runner's surrounding by **writing the control
-sidecar to disk** (the MockRuntime role, complementary to opencode).
+without a subprocess): the behaviour is registered as a `mock_agent` (resolved by
+agent name in `node_builder`, then handed to the executor), its return contract
+is a **control envelope**, it constructs and passes the **`ctx` tools**, and it
+performs the out-of-process runner's surrounding by **writing the control sidecar
+to disk** (the MockRuntime role, complementary to opencode). The behaviour must
+return a dict envelope (or `None` → a bare `ok`); `_coerce_envelope` defaults the
+`status` to `ok`, stamps the `agent`, and rejects any non-dict return.
 
 ### Registration (mirrors `agent_impl` / gates / exports)
 
@@ -283,7 +289,7 @@ sidecar to disk** (the MockRuntime role, complementary to opencode).
 ```python
 @REGISTRY.mock_agent("name")   # decorator
 def behavior(inv, ctx): ...
-# + get_mock_agent(name) / has_mock_agents()
+# + get_mock_agent(name) / has_mock_agent(name)
 ```
 
 Because behaviors live on the `FlowRegistry` that `run_cli` / `run_flow` already
@@ -328,19 +334,18 @@ injection of your own code. The `--mock-agents` mode is the option when you want
 the option when the node is in-process and you would rather just provide a
 different callable.
 
-### Scope: in-process interception deferred
+### Scope: both seams covered
 
-The `--mock-agents` mode is *defined* to cover both seams (subprocess and
-in-process), and the two-layer split makes that clean: the **inner behavior**
-(`mock_agent(inv, ctx) -> envelope`) is agnostic to how it is invoked; only the
-**surrounding** differs — for a subprocess node the MockRuntime writes a sidecar,
-for an in-process node a thinner wrapper would skip it.
+The `--mock-agents` mode covers **both** seams. The two-layer split makes that
+clean: the **inner behavior** (`mock_agent(inv, ctx) -> envelope`) is agnostic to
+how it is invoked; the **surrounding** is the same `MockExecutor` either way — it
+runs the behaviour in-process and writes the sidecar. Because the mode-check in
+`node_builder` sits *ahead* of the `impl` branch, a registered `mock_agent` wins
+over both a subprocess node and an in-process (`impl`) node when mock mode is on.
 
-For the **initial implementation**, only the out-of-process (subprocess) case is
-built: `--mock-agents` intercepts no-`impl` nodes. Intercepting in-process
-(`impl`) nodes with the same mode is a **routing addition, not a contract change**,
-and is deliberately out of scope now. The contract is shaped so it drops in later
-without touching `mock_agent`, `MockAgentContext`, or the envelope.
+The one thing the current `MockExecutor` always does — write a control sidecar to
+disk — is harmless for an in-process node (the file simply isn't consulted by the
+in-process path), so no separate wrapper is needed.
 
 ## What is deleted, and the one subprocess piece that survives
 
@@ -387,21 +392,28 @@ the CLI preflight), as the in-process example already does. (Note: with partial
 mocking, un-mocked nodes still need their real runner + agent-dir — the preflight
 relaxation applies only to the mocked ones.)
 
-## Prototype status
+## Status
 
-Design only. Not yet implemented. Scope when built:
+Implemented. What shipped:
 
 - `MockExecutor` + `MockAgentContext` (`runners/mock_exec.py`) — the MockRuntime
-  and its tools; the shared result-assembly tail hoisted onto the `AgentExecutor`
+  and its tools; the shared result-assembly tail and status policy
+  (`assemble_result` / `check_content_status`) hoisted onto the `AgentExecutor`
   ABC base.
 - `FlowRegistry.mock_agent` registration trio (`mock_agent` / `get_mock_agent` /
   `has_mock_agent`).
-- The `--mock-agents` / `mock_agents=True` mode: the CLI flag, the run param, and
-  the `node_builder` mode-check that routes to `MockExecutor` when a `mock_agent`
-  is registered (subprocess nodes only in this phase).
-- Removal of `mock` from the runtime axis: delete `MockRunner`, drop `"mock"` from
-  `RUNNERS`, and simplify `get_executor` back to "runtime -> subprocess runner".
-- The domain-free supervise/kill subprocess stub (replacing the `_mock_agent.py`
-  domain switch).
-- Migration of the example behaviors to registered `mock_agent`s, and the
-  producer -> consumer example.
+- The `--mock-agents` / `mock_agents=True` mode: the CLI flag, the run param
+  (threaded alongside `runtime`, not into domain params), and the `node_builder`
+  mode-check that routes to `MockExecutor` when a `mock_agent` is registered for
+  the node's agent.
+- Removal of `mock` from the runtime axis: `MockRunner` deleted, `"mock"` dropped
+  from `RUNNERS`; `get_executor` stays runner-only (mock routing is in
+  `node_builder`, not `get_executor`).
+- The domain-free `--sleep`/`--emit` subprocess stub (`core/_mock_agent.py`,
+  replacing the old domain switch), used only by supervision tests via a
+  test-local `StubRunner`.
+- Migration of the example behaviors to registered `mock_agent`s
+  (`examples/mock_agents.py`), and the token-free example runs (`--mock-agents`).
+
+Unit + integration tests cover the executor, the context tools, the registry
+trio, mode routing, the shared status policy, and the bounded re-run loop.

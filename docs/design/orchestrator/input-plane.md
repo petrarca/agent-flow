@@ -52,8 +52,8 @@ Plus a **separate** channel that is NOT part of this prompt:
   `RunContext.shared_instructions`. It is deliberately a typed build-time value,
   **not** a `params` key — so it stays off the task-serialization path and out of
   the domain grab-bag (same precedent as [`on_event_factory`](cli-events.md)).
-  Example: *"Experimental code-graph support is available; use it alongside RAG
-  where it makes sense."*
+  Example: *"Follow the team's coding standards and cite a source for every
+  finding."*
 - **(4) per-node context** — `agent_node(context=["…"])`, file SOURCES injected
   for one node only. Same "inject content, not a pointer" idea, scoped to a step.
 - **(5) per-node instructions** — `agent_node(instructions="…")`, inline text,
@@ -91,7 +91,7 @@ agent_node("tech-stack", "tech-stack-analyst",
 ```bash
 # run-wide brief from the CLI, injected into every agent:
 python -m examples.declarative run -p product_key=acme --runtime opencode \
-  -i "Experimental code-graph support is available; use it alongside RAG."
+  -i "Follow the team's coding standards and cite a source for every finding."
 ```
 
 ## Reserved param names
@@ -99,20 +99,25 @@ python -m examples.declarative run -p product_key=acme --runtime opencode \
 `agent_node`'s `run` callable reads a few well-known keys back out of `params`
 (the same bag `{name}` templating draws from) to apply run-wide knobs per node:
 
-- `runtime` — `"opencode"` | `"mock"` (which `AgentRunner` to use).
+- `runtime` — the out-of-process runner to use, e.g. `"opencode"` (a real
+  `AgentRunner`; Claude Code is stubbed). Mock is NOT a runtime value — see
+  `mock_agents` below.
+- `mock_agents` — the `--mock-agents` substitution MODE (bool): route any node
+  whose agent has a registered `mock_agent` through `MockExecutor` instead of its
+  runner. Nodes without one still run for real (partial mocking).
 - `model` — provider/model string; empty/absent -> the runner omits `--model` so
   the runtime resolves it from its own config (never a hardcoded default).
 - `idle_timeout_s` — liveness timeout in seconds (string in `params`, since
   `params` values are templating strings; coerced back to `int`).
 
-`run_cli` injects `runtime`/`model`/`idle_timeout_s` into `params` from the
-corresponding `RunConfig` settings (CLI flags / `AGENT_FLOW_*` env), so every
-`agent_node` picks them up automatically. A per-node `agent_node(model=...,
+`run_cli` injects `runtime`/`mock_agents`/`model`/`idle_timeout_s` into `params`
+from the corresponding `RunConfig` settings (CLI flags / `AGENT_FLOW_*` env), so
+every `agent_node` picks them up automatically. A per-node `agent_node(model=...,
 idle_timeout_s=...)` always overrides the run-wide value.
 
 **Consequence:** a domain `params_model` should avoid fields named `runtime`,
-`model`, or `idle_timeout_s` unless it genuinely means the same thing — they are
-effectively reserved names in the params bag.
+`mock_agents`, `model`, or `idle_timeout_s` unless it genuinely means the same
+thing — they are effectively reserved names in the params bag.
 
 ## Run-context: params can also flow FROM a node
 
@@ -185,8 +190,12 @@ differently.
 
 ## Where it lives
 
-`src/agent_flow/core/control_protocol.py` (block 1), `core.agent_runtime.run_agent`
-(composes 1 + 2 + the caller prompt), `node_builder.agent_node` (composes 4 + 5 + 6
-and forwards 2/3), the `RunContext.shared_instructions` / `RunContext.node_instructions`
-/ `build_flow(node_instructions=)` plumbing in `engine.py`, and the CLI
-`--instruct` + config `node_instructions:` handling in `cli/app.py` / `run_config.py`.
+`src/agent_flow/core/control_protocol.py` (block 1, the control preamble —
+prepended by `SubprocessExecutor` in `core/agent_runtime.py`, subprocess-only).
+`runners/base.compose_prompt` prepends the run-wide blocks 2 + 3 onto the
+per-node prompt. `node_builder.agent_node` composes 4 + 5 + 6 + the work order
+(7) via `resolve_work_order`. The `RunContext.shared_instructions` /
+`shared_context` / `node_instructions` / `one_time_instruction` plumbing lives in
+`engine.py` (`build_flow`); the CLI `--instruct` + config `node_instructions:`
+handling lives in `cli/commands/run.py`, with the `node_instructions` field on
+`run_config.py`.

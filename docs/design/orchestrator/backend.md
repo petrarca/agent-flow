@@ -110,8 +110,9 @@ with no server and no SQLite.
 ## Where it lives
 
 - `src/agent_flow/backends/` — the seam: `base.py` (`FlowBackend` ABC),
-  `local.py` (`InProcessBackend`, default), `prefect.py` (`PrefectBackend`,
-  lazy-import), `_prefect_env.py` (`bootstrap`, the three Prefect modes, owned by
-  PrefectBackend), and `__init__.py` (`get_backend` factory + registry).
+  `inprocess.py` (`InProcessBackend`, default; named for the mechanism, not a
+  location), `prefect.py` (`PrefectBackend`, lazy-import), `_prefect_env.py`
+  (`bootstrap`, the three Prefect modes, owned by PrefectBackend), and
+  `__init__.py` (the `get_backend(name, *, llm_tag="llm")` factory + registry).
 - `src/agent_flow/engine.py` (`build_flow`) — dispatches execution through the
   selected backend; contains no Prefect code itself.

@@ -9,10 +9,12 @@ timestamp: 2026-07-23T07:51:35Z
 # The control file (status sidecar)
 
 The control file is the **one thing the library reads back from an agent**. As
-its final action, an agent writes a JSON file to `CONTROL_FILE`; `run_agent`
-reads it to determine the verdict. It is the universal status contract —
-identical across every runtime — so success does not depend on parsing any
-vendor-specific event schema.
+its final action, a subprocess agent writes a JSON file to `CONTROL_FILE`;
+`SubprocessExecutor` reads it to determine the verdict. It is the universal
+status contract — identical across every runtime — so success does not depend on
+parsing any vendor-specific event schema. The same envelope is produced under the
+`--mock-agents` mode, where `MockExecutor` writes it to the same path directly
+(see "Two writers, one contract" below).
 
 ## Shape: minimal envelope + opaque `result`
 
@@ -64,12 +66,11 @@ in `result` and is opaque.
 ## Protocol injection — the contract lives in ONE place
 
 Agents do **not** restate the control-file shape in their `.md`. The library
-builds the completion-protocol block (`build_control_preamble`) and `run_agent`
-injects it into the prompt automatically whenever a `control_file` is set. It
-carries:
+builds the completion-protocol block (`build_control_preamble`) and
+`SubprocessExecutor` injects it into the prompt automatically whenever a
+`control_file` is set. It carries:
 
-- a `CONTROL_FILE: <path>` line (so both LLM agents and the mock agent locate the
-  sidecar), and
+- a `CONTROL_FILE: <path>` line (so the subprocess agent locates the sidecar), and
 - the exact envelope shape to write, plus (optionally) the
   [result schema](result-schema.md) to conform to.
 
@@ -85,9 +86,31 @@ it in the shared preamble is necessary but not sufficient: an agent still only
 knows to set it if its own `.md` says so for its specific task (naming which
 step to re-run). See `examples/.opencode/agent/*-verifier.md`.
 
+## Two writers, one contract
+
+The sidecar has two producers, and the envelope shape and verdict rule are
+identical for both:
+
+- A **subprocess agent** (opencode, …) writes it via its Write tool, told where
+  by the injected `CONTROL_FILE` preamble; `SubprocessExecutor` reads it back.
+- A **`mock_agent`** (under `--mock-agents`) simply *returns* the envelope, and
+  `MockExecutor` persists it to the same default path (`<node|agent>.control.json`
+  under `run_dir`) — no preamble, no prompt-parsing. See
+  [mock-agent.md](mock-agent.md).
+
+Both funnel the status through the same shared policy
+(`AgentExecutor.check_content_status`), so a bad status behaves identically
+regardless of which executor produced the envelope. (Distinct from the test-only
+subprocess stub `core/_mock_agent.py`, which *does* read `CONTROL_FILE` from the
+prompt — it exists only to exercise subprocess supervision.)
+
 ## Where it lives
 
 `src/agent_flow/core/control_protocol.py` (`build_control_preamble`, also
 re-exported as `agent_flow.build_control_preamble`),
 `src/agent_flow/core/report_signals.py` (`rerun_from_sidecar`, `produced`), and
-the verdict logic in `src/agent_flow/core/agent_runtime.py`.
+the verdict/status policy shared across executors in
+`src/agent_flow/runners/executor.py` (`AgentExecutor.assemble_result` /
+`check_content_status`), invoked by `SubprocessExecutor`
+(`src/agent_flow/core/agent_runtime.py`) and `MockExecutor`
+(`src/agent_flow/runners/mock_exec.py`).
