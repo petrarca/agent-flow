@@ -10,9 +10,11 @@ timestamp: 2026-07-23T08:54:40Z
 
 These how-tos use the **imperative** surface — `agent_node` / `build_flow` and
 gate callables — which sits below the declarative [FlowDef](../design/orchestrator/flowdef.md).
-For the recommended FlowDef recipes, see [recipes.md](recipes.md); this page is
-for when you build runtime nodes directly, write your own flow, or need the
-lower-level detail. Each assumes you've read [getting-started.md](getting-started.md).
+Each assumes you've read [getting-started.md](getting-started.md).
+
+> For defining and running a declarative FlowDef pipeline, built-in gates,
+> custom registry logic, and run-wide brief/context:
+> see [recipes.md](recipes.md).
 
 ## Run a pipeline from the CLI (no bespoke command)
 
