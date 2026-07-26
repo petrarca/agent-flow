@@ -6,10 +6,10 @@ stages and inevitably hangs, loops, or "loses the thread" — with a **determini
 engine** that runs your agents as a graph and supervises each one as an external
 process.
 
-## The problem it solves
+## Why agent-flow
 
-Chaining coding agents (opencode, Claude Code, …) into a reliable pipeline runs
-into four recurring problems. agent-flow addresses each directly:
+Turning a set of coding agents (OpenCode, Claude Code, …) into a dependable
+pipeline comes down to five capabilities. agent-flow delivers each directly:
 
 1. **Deterministic orchestration.** The control flow is **plain Python the engine
    executes** — a directed graph with dependencies and parallel fan-out, plus
@@ -19,7 +19,7 @@ into four recurring problems. agent-flow addresses each directly:
    orchestrator cannot hang or improvise the sequence. Given the same inputs, the same stages
    run in the same order.
 
-2. **Reliable execution of a subprocess agent.** A CLI agent (opencode, Claude
+2. **Reliable execution of a subprocess agent.** A CLI agent (OpenCode, Claude
    Code, …) can hang, crash, or misreport, and nothing durable normally tells you
    which. agent-flow supervises it by **liveness** (not a fixed wall-clock cap) —
    killed only when it goes *silent*, with clean process-group termination — and
@@ -38,12 +38,27 @@ into four recurring problems. agent-flow addresses each directly:
    values can even be published by one node for downstream nodes (`exports`).
 
 4. **Runtime- and backend-agnostic.** The subprocess executor's per-runtime wire
-   details are a further **`AgentRunner`** strategy — opencode today, Claude Code
+   details are a further **`AgentRunner`** strategy — OpenCode today, Claude Code
    and Codex next — where only "build the command" and "parse the event stream"
    differ. Separately, the **`FlowBackend`** decides *how the graph runs*: a
    Prefect-free **InProcessBackend** (default) or an opt-in **PrefectBackend**
    (`--backend prefect`). The flow, re-runs, gates, input plane, and display layer
    are written once and stay agnostic to both seams.
+
+5. **A unified programming model for *external* agents.** General workflow
+   engines (Prefect, Airflow, Dagster, …) can certainly *run* a graph, but they
+   offer no agent programming model — no notion of an agent's prompt, injected
+   context, typed result, control verdict, or the re-run semantics an
+   agent pipeline needs; you build all of that yourself on top of raw tasks. The
+   frameworks that *do* provide that model — **PydanticAI (Graph)**, **LangGraph**,
+   and similar — run the agents **in-process**: the node *is* an LLM/tool call in
+   your Python process. agent-flow gives the same unified model (nodes with typed
+   input/output, a controlled context/instruction plane, gates, bounded re-runs)
+   but for agents that run as **external processes** — full coding agents like
+   OpenCode and Claude Code, supervised as subprocesses. It fills the gap between
+   "a workflow engine that runs anything but knows nothing about agents" and "an
+   agent framework that knows agents but only in-process". (An in-process executor
+   is supported too, so an in-process agent can be a node in the same graph.)
 
 ## Feature shortlist
 
@@ -89,7 +104,7 @@ into four recurring problems. agent-flow addresses each directly:
   context files/globs, `{param}` templating, a per-run brief (`-i` / file), and
   per-node run-time instructions (`--instruct NODE=…` / config, additive last-word).
 - **Agent execution seam** — `AgentExecutor` (ABC). `SubprocessExecutor`'s
-  per-runtime wire details are an `AgentRunner` strategy (opencode today, Claude
+  per-runtime wire details are an `AgentRunner` strategy (OpenCode today, Claude
   Code stubbed) with per-runner preflight checks and an `AgentRunnerInfo` doctor
   view. An **in-process** agent (e.g. PydanticAI) skips the subprocess/sidecar
   entirely — a direct call returning a typed object into the same result
@@ -129,7 +144,7 @@ TIER 2  PRIMITIVES       call run_agent() as the leaf of YOUR OWN flow
 TIER 1  ENGINE CORE      run_agent(): spawn + liveness-supervise + kill + sidecar verdict
   (closest to the metal) runner-agnostic; backend-free
         │ invokes
-        AGENT RUNTIME    opencode agents (.md) — external, unchanged
+        AGENT RUNTIME    OpenCode agents (.md) — external, unchanged
 ```
 
 - **Tier 3 — declare the graph** (a `FlowDef`, or `agent_node` + `build_flow`):
@@ -297,8 +312,8 @@ tech-assessment Tier-3, each with a token-free `--mock-agents` mode), the
 `run_cli` flags/params, and writing agents that cooperate with agent-flow:
 **[`docs/usage/index.md`](docs/usage/index.md)**.
 
-> Run real-opencode runs from a normal shell **outside** an opencode session (a
-> nested opencode raises `UnknownError`).
+> Run real OpenCode runs from a normal shell **outside** an OpenCode session (a
+> nested OpenCode raises `UnknownError`).
 
 ## Develop
 
@@ -313,7 +328,7 @@ src/agent_flow/     the library
   core/             backend-free Tier-1 primitives (run_agent, control protocol,
                     result-schema, context ingestion, env)
   runners/          the agent-execution seam (AgentExecutor: Subprocess + InProcess + Mock)
-                    and the subprocess wire adapters (AgentRunner) — opencode, …
+                    and the subprocess wire adapters (AgentRunner) — OpenCode, …
   backends/         the graph-execution seam (FlowBackend) — inprocess (default), prefect (opt-in)
   cli/              run_cli + neutral event rendering + tables (the [cli] extra)
   engine, gates, node_builder, run_config, run_context, preflight, utils
