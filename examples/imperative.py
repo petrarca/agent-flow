@@ -26,10 +26,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent_flow import agent_node, load_env
+from agent_flow import FlowRegistry, agent_node, load_env
 from agent_flow.engine import Node
+from examples import mock_agents  # the flow-supplied mock behaviours (--mock-agents mode)
 
 load_env()
+
+# Registry carrying the mock_agent behaviours (resolved by agent name at run time).
+# Only invoked under --mock-agents; harmless otherwise.
+REGISTRY = FlowRegistry()
+mock_agents.register(REGISTRY)
 
 from pydantic import Field  # noqa: E402
 from pydantic_settings import BaseSettings  # noqa: E402
@@ -51,9 +57,9 @@ def _analyst(name: str, agent: str, report: str, *, depends_on=(), parallel_grou
         inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/" + report},
         depends_on=depends_on,
         parallel_group=parallel_group,
-        # If the agent reports ok but wrote no report, give it one more try.
         gate_ref="require_file",
         gate_args={"relpath": report},
+        registry=REGISTRY,
     )
 
 
@@ -63,10 +69,10 @@ def _verifier(name: str, agent: str, report: str, subject: str) -> Node:
         agent=agent,
         inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/" + report},
         depends_on=(subject,),
-        criticality="degrade",  # a failed verification should not stop the run
-        # If the verifier signals a re-run, jump the flow back to its analyst.
+        criticality="degrade",
         gate_ref="rerun_on_signal",
         gate_args={"target": subject},
+        registry=REGISTRY,
     )
 
 
@@ -85,7 +91,7 @@ def build_nodes() -> list[Node]:
 def main() -> None:
     from agent_flow.cli import run_cli
 
-    run_cli(build_nodes, name="assessment (imperative)", default_agent_dir=_EXAMPLES_DIR, params_model=AssessParams)
+    run_cli(build_nodes, name="assessment (imperative)", default_agent_dir=_EXAMPLES_DIR, params_model=AssessParams, registry=REGISTRY)
 
 
 if __name__ == "__main__":

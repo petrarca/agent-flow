@@ -15,7 +15,8 @@ Public API (the authoritative list is `__all__` below):
         # runners (subprocess wire adapters) + the execution seam
         AgentRunner, AgentInvocation, Event,
         AgentExecutor, InProcessExecutor, AgentImpl, get_executor, compose_prompt,
-        OpenCodeRunner, MockRunner, get_runner,
+        MockExecutor, MockAgentContext, MockAgent,  # --mock-agents mode
+        OpenCodeRunner, get_runner,
         # Tier 3: declare Nodes -> build_flow (the DAG engine)
         Node, NodeOutcome, RunContext, build_flow, NodeBlocked,
         plan_groups, interpret,
@@ -57,10 +58,7 @@ docs/design/orchestrator/ for the full design.
 from agent_flow.backends import FlowBackend, InProcessBackend, get_backend
 from agent_flow.cli import NodeProgressPrinter, event_printer, get_console, print_preflight_results, print_results_table, run_cli
 from agent_flow.core import (
-    AgentContentFailedError,
-    AgentCrashError,
     AgentResult,
-    AgentTimeoutError,
     JsonSchema,
     PydanticSchema,
     ResultSchema,
@@ -122,12 +120,15 @@ from agent_flow.runners import (
     AgentRunnerInfo,
     Event,
     InProcessExecutor,
-    MockRunner,
+    MockAgent,
+    MockAgentContext,
+    MockExecutor,
     OpenCodeRunner,
     compose_prompt,
     get_executor,
     get_runner,
 )
+from agent_flow.runners.executor import AgentContentFailedError, AgentCrashError, AgentTimeoutError
 from agent_flow.utils import default_temp_base, resolve_run_dir
 
 __all__ = [
@@ -144,9 +145,11 @@ __all__ = [
     "AgentExecutor",
     "InProcessExecutor",
     "AgentImpl",
+    "MockExecutor",
+    "MockAgentContext",
+    "MockAgent",
     "Event",
     "OpenCodeRunner",
-    "MockRunner",
     "get_runner",
     "get_executor",
     "compose_prompt",

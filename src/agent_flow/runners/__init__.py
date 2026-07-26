@@ -18,21 +18,21 @@ from agent_flow.runners.base import DEFAULT_IDLE_TIMEOUT_S, AgentInvocation, Age
 from agent_flow.runners.claude_code import ClaudeCodeRunner
 from agent_flow.runners.executor import AgentExecutor
 from agent_flow.runners.inprocess import AgentImpl, InProcessExecutor
-from agent_flow.runners.mock import MockRunner
+from agent_flow.runners.mock_exec import MockAgent, MockAgentContext, MockExecutor
 from agent_flow.runners.opencode import OpenCodeRunner
 
-# Registry — string (from the spec) -> runner instance (the subprocess WIRE
-# adapter). Selecting a runtime resolves to an AgentExecutor via get_executor.
+# Registry — runtime string -> runner instance (the subprocess WIRE adapter).
+# These are the REAL out-of-process runners. `mock` is deliberately NOT here: it
+# is not a runtime but a substitution MODE (--mock-agents / MockExecutor).
 RUNNERS: dict[str, AgentRunner] = {
     "opencode": OpenCodeRunner(),
-    "mock": MockRunner(),
     # "claude": ClaudeCodeRunner(),   # register when implemented
     # "codex":  CodexRunner(),
 }
 
 
 def get_runner(name: str) -> AgentRunner:
-    """Resolve a runner (subprocess wire adapter) by name — "opencode" | "mock"."""
+    """Resolve a runner (subprocess wire adapter) by name — e.g. "opencode"."""
     try:
         return RUNNERS[name]
     except KeyError:
@@ -40,12 +40,11 @@ def get_runner(name: str) -> AgentRunner:
 
 
 def get_executor(name: str) -> AgentExecutor:
-    """Resolve an AgentExecutor by runtime name (the "runtime" run param).
+    """Resolve an AgentExecutor for a runtime name (the "runtime" run param).
 
-    Today every registered runtime is subprocess-backed, so this wraps the named
-    runner in a SubprocessExecutor. In-process runtimes (e.g. PydanticAI) will
-    register their own executor kind here, keyed by the same "runtime" string —
-    so node/CLI selection is unchanged regardless of execution model.
+    `runtime` names a REAL out-of-process runner, so this wraps the named runner
+    in a SubprocessExecutor. Mock is NOT a runtime — it is the `--mock-agents`
+    mode, routed to MockExecutor in node_builder, and never reaches here.
     """
     # Imported lazily: SubprocessExecutor lives in core.agent_runtime (next to the
     # subprocess machinery), which imports this package — avoid an import cycle.
@@ -65,11 +64,13 @@ __all__ = [
     "AgentExecutor",
     "InProcessExecutor",
     "AgentImpl",
+    "MockExecutor",
+    "MockAgentContext",
+    "MockAgent",
     "Event",
     "compose_prompt",
     "DEFAULT_IDLE_TIMEOUT_S",
     "OpenCodeRunner",
-    "MockRunner",
     "ClaudeCodeRunner",
     "RUNNERS",
     "get_runner",

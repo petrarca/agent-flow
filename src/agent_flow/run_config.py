@@ -124,7 +124,16 @@ class RunConfig(BaseSettings):
         extra="ignore",
     )
 
-    runtime: str = Field(default="opencode", description="Agent runtime: 'opencode' (real) or 'mock' (no-token stub).")
+    runtime: str = Field(
+        default="opencode", description="Agent runtime: the real out-of-process runner (e.g. 'opencode'). Not a mock — see mock_agents."
+    )
+    mock_agents: bool = Field(
+        default=False,
+        description=(
+            "Substitution MODE (not a runtime): run each node whose agent has a registered mock_agent "
+            "via MockExecutor (deterministic, no tokens); nodes without one still run for real (partial mocking)."
+        ),
+    )
     backend: str = Field(
         default="inprocess",
         description="Execution backend: 'inprocess' (default; runs the DAG in this process, no Prefect) or 'prefect' (opt-in run UI/scale).",

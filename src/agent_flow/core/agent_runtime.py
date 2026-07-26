@@ -40,7 +40,7 @@ from agent_flow.core.control_protocol import build_control_preamble
 from agent_flow.core.schema import ResultSchema, coerce_schema
 from agent_flow.runners import AgentInvocation, AgentRunner, Event
 from agent_flow.runners.base import DEFAULT_IDLE_TIMEOUT_S, compose_prompt
-from agent_flow.runners.executor import AgentExecutor, AgentResult
+from agent_flow.runners.executor import AgentExecutor, AgentResult, AgentTimeoutError
 
 # Liveness supervision.
 #   IDLE = max silence (no runner event) before the agent is deemed STALE.
@@ -53,29 +53,6 @@ from agent_flow.runners.executor import AgentExecutor, AgentResult
 # The constant is defined in runners.base (it is a field default on
 # AgentInvocation) and re-imported here so existing `from ...agent_runtime import
 # DEFAULT_IDLE_TIMEOUT_S` references keep working.
-
-
-class AgentTimeoutError(RuntimeError):
-    """Raised when an agent goes STALE: no event and no sidecar for
-    `idle_timeout_s`. This is a liveness timeout, not a wall-clock one — an
-    actively-emitting agent is never killed regardless of elapsed time."""
-
-
-class AgentContentFailedError(RuntimeError):
-    """Raised when an agent reports a content failure via its control signal.
-
-    This is a genuine failure the agent diagnosed itself (e.g. could not parse
-    the report, missing required input). Retrying the same prompt will not help,
-    so the retry policy must NOT retry this class.
-    """
-
-
-class AgentCrashError(RuntimeError):
-    """Raised when an agent process exits non-zero with no error control signal.
-
-    This represents a process-level crash (CLI error, OOM, rate-limit 429, …).
-    It is transient and the retry policy SHOULD retry it.
-    """
 
 
 @dataclass
@@ -323,30 +300,22 @@ class SubprocessExecutor(AgentExecutor):
         if sidecar is None:
             sidecar = {"status": "error", "agent": agent, "reason": f"no control sidecar written (completion={sup.completion})"}
 
-        # Validate the result payload against the schema, if one was supplied. The
-        # outcome is ATTACHED (never raised) — a schema violation is a flow-control
-        # decision for the gate, not an engine failure.
-        outcome = schema.validate(sidecar.get("result", {})) if schema is not None else None
-
-        result = AgentResult(
-            agent=agent,
+        result = self.assemble_result(
+            inv,
+            sidecar,
             exit_code=proc.returncode,
             duration_s=duration,
-            control=sidecar,
             tokens=sup.tokens,
             cost=sup.cost,
             events=sup.events,
             completion=sup.completion,
-            result_valid=outcome.valid if outcome is not None else True,
-            result_obj=outcome.obj if outcome is not None else None,
-            result_errors=outcome.errors if outcome is not None else (),
         )
 
-        status = sidecar.get("status")
-        if sup.completion == "stale" and status not in ("ok", "verified"):
+        # Subprocess-only: stale (timed out with no sidecar) takes priority.
+        if sup.completion == "stale" and sidecar.get("status") not in ("ok", "verified"):
             raise AgentTimeoutError(f"agent {agent!r} went stale after {duration:.1f}s (no event/sidecar for {inv.idle_timeout_s}s)")
-        if status not in ("ok", "verified"):
-            raise AgentContentFailedError(f"agent {agent!r} reported status={status!r}: {sidecar.get('reason')}")
+        # Shared content-status policy — same check MockExecutor calls.
+        self.check_content_status(agent, sidecar)
         return result
 
 

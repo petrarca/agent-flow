@@ -15,7 +15,8 @@ class _Params(BaseSettings):
 
 
 class _Cfg:
-    runtime = "mock"
+    runtime = "opencode"
+    mock_agents = False
     backend = "inprocess"
     agent_dir = ""
     run_dir = ""

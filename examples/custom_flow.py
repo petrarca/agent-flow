@@ -48,7 +48,8 @@ from agent_flow import (  # noqa: E402
     AgentResult,
     run_agent,
 )
-from agent_flow.runners import MockRunner, OpenCodeRunner  # noqa: E402
+from agent_flow.runners import AgentInvocation, MockExecutor, OpenCodeRunner  # noqa: E402
+from agent_flow.runners.mock_exec import MockAgentContext  # noqa: E402
 
 # This example's own opencode project dir (holds .opencode/agent/*.md).
 _PACKAGE_DIR = Path(__file__).resolve().parent  # noqa: E402
@@ -110,6 +111,41 @@ STAGES: dict[str, StageConfig] = {
     "verify": StageConfig(name="verify", agent="verifier", timeout_s=600, retries=2),
     "extract": StageConfig(name="extract", agent="extractor", timeout_s=600, retries=2),
 }
+
+
+# --- Mock behaviours (--mock, no tokens) ------------------------------------
+# Tier-2 owns its flow, so it drives MockExecutor directly (rather than the Tier-3
+# --mock-agents node routing). One behaviour per stage agent; each reproduces the
+# real agent's observable side effects (files written) so the next stage can read.
+def _mock_analyst(inv: AgentInvocation, ctx: MockAgentContext) -> dict:
+    topic = ctx.input("TOPIC") or "unknown topic"
+    ctx.write_file(
+        ctx.input("OUTPUT") or "{run_dir}/analysis.md",
+        f"# Analysis: {topic}\n\n## Summary\nMock analysis of {topic}.\n\n## Key Points\n- a\n- b\n\n## Risks / Open Questions\n- none\n",
+    )
+    return {"status": "ok", "result": {}}
+
+
+def _mock_verifier(inv: AgentInvocation, ctx: MockAgentContext) -> dict:
+    report = ctx.input("REPORT") or "{run_dir}/analysis.md"
+    try:
+        text = ctx.read_file(report)
+    except FileNotFoundError:
+        text = ""
+    if "## Verification" not in text:
+        ctx.write_file(report, text + "\n## Verification\n- Status: verified\n- Issues found: 0\n")
+    return {"status": "verified", "result": {"issues_found": 0}}
+
+
+def _mock_extractor(inv: AgentInvocation, ctx: MockAgentContext) -> dict:
+    import json as _json
+
+    data = {"summary": "Mock-extracted summary.", "key_points": ["a", "b"], "verification": {"status": "verified", "issues_found": 0}}
+    ctx.write_file(ctx.input("OUTPUT") or "{run_dir}/analysis.json", _json.dumps(data, indent=2))
+    return {"status": "ok", "result": {"key_points": 2}}
+
+
+_MOCK_BEHAVIOURS = {"analyst": _mock_analyst, "verifier": _mock_verifier, "extractor": _mock_extractor}
 
 
 # Durable state — per-stage files (#9: TOCTOU-safe for parallel fan-out)
@@ -209,19 +245,27 @@ def run_stage(
     # Derive per-agent sidecar path (agent-specific so analyst and verifier
     # on the same report each have their own receipt).
     control_file = run_dir / f"{stage.agent}.control.json"
-    runner = OpenCodeRunner() if runtime == "opencode" else MockRunner()
-    result = run_agent(
-        agent=stage.agent,
-        prompt=prompt,  # control-file protocol is injected by run_agent
-        run_dir=run_dir,
-        # agent definitions live in this example's own .opencode/ (opencode --dir).
-        agent_dir=_PACKAGE_DIR,
-        runner=runner,
-        idle_timeout_s=stage.timeout_s,
-        model=model,
-        control_file=control_file,
-        on_event=on_event,
-    )
+    if runtime == "mock":
+        # Tier-2 mock: run the example-local behaviour via MockExecutor directly
+        # (no subprocess, no tokens). Builds the neutral invocation and lets the
+        # MockRuntime write the sidecar + assemble the result.
+        inv = AgentInvocation(agent=stage.agent, prompt=prompt, run_dir=run_dir, node=stage.name, model=model or "")
+        work_order = {k.split(":", 1)[0].strip(): k.split(":", 1)[1].strip() for k in prompt.splitlines() if ":" in k}
+        ex = MockExecutor(_MOCK_BEHAVIOURS[stage.agent], work_order=work_order, tmpl={"run_dir": str(run_dir)})
+        result = ex.run(inv, control_file=control_file)
+    else:
+        result = run_agent(
+            agent=stage.agent,
+            prompt=prompt,  # control-file protocol is injected by run_agent
+            run_dir=run_dir,
+            # agent definitions live in this example's own .opencode/ (opencode --dir).
+            agent_dir=_PACKAGE_DIR,
+            runner=OpenCodeRunner(),
+            idle_timeout_s=stage.timeout_s,
+            model=model,
+            control_file=control_file,
+            on_event=on_event,
+        )
     logger.info("stage %s ok in %.1fs -> %s", stage.name, result.duration_s, result.control)
     _save_stage(run_dir, stage.name, result)
     return result.control

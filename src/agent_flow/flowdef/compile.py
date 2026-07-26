@@ -108,6 +108,7 @@ def _compile_agent_node(nd: NodeDef, registry, schema) -> Node:
         idle_timeout_s=nd.idle_timeout_s,
         agent_dir=nd.agent_dir,
         impl=impl,
+        registry=registry,
     )
 
 

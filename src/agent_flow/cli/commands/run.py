@@ -27,7 +27,12 @@ def register(app, ctx: RunCliContext) -> None:
     def run(
         config: str = typer.Option("", "--config", "-c", help="YAML run config (generic settings)"),
         param: list[str] | None = typer.Option(None, "--param", "-p", help="domain param KEY=VALUE (repeatable)"),  # noqa: B008 - Typer idiom
-        runtime: str | None = typer.Option(None, help="opencode | mock"),
+        runtime: str | None = typer.Option(None, help="real out-of-process runner, e.g. 'opencode'"),
+        mock_agents: bool = typer.Option(
+            False,
+            "--mock-agents",
+            help="mock mode: run nodes whose agent has a registered mock_agent deterministically (no tokens); others still run for real",
+        ),
         backend: str | None = typer.Option(
             None, "--backend", help="execution backend: inprocess (default, no Prefect) | prefect (opt-in run UI/scale)"
         ),
@@ -64,6 +69,7 @@ def register(app, ctx: RunCliContext) -> None:
         cfg = build_run_config(
             config_file=config or None,
             runtime=runtime,
+            mock_agents=True if mock_agents else None,
             backend=backend,
             run_dir=run_dir or (ctx.default_run_dir or None),
             agent_dir=agent_dir or (ctx.default_agent_dir or None),
@@ -88,7 +94,12 @@ def register(app, ctx: RunCliContext) -> None:
             params.setdefault("model", cfg.model)
         params.setdefault("idle_timeout_s", str(cfg.idle_timeout_s))
         _print_run_summary(ctx.name, cfg, params, console, hide=runtime_fields)
-        _run_preflight(cfg.runtime, cfg.agent_dir, cfg.backend, console)
+        # Preflight validates the real runtime + agent-dir. Under full mock mode a
+        # flow may have no agent-dir; skip the runtime preflight then (partial
+        # mocking still needs the runner for un-mocked nodes, but we cannot tell
+        # here which nodes are mocked, so mock mode relaxes the check — see #11).
+        if not cfg.mock_agents:
+            _run_preflight(cfg.runtime, cfg.agent_dir, cfg.backend, console)
         if start_from and only:
             console.print(
                 "[red]--only and --start-from are mutually exclusive[/red] (--only runs a single group; --start-from runs from a group to the end)."
@@ -125,6 +136,7 @@ def _print_run_summary(name: str, cfg, params: dict, console, *, hide: set[str] 
     console.print(f"[bold]Resolved parameters[/bold] [dim]({name})[/dim]")
     settings = {
         "runtime": cfg.runtime,
+        "mock_agents": "on" if cfg.mock_agents else "off",
         "backend": cfg.backend,
         "agent_dir": cfg.agent_dir or "(none)",
         "run_dir": shown_run_dir,
@@ -237,7 +249,8 @@ def _build_and_run(
         registry=registry,
     )
     # start_from / only are per-INVOCATION forward-entry knobs (not persisted).
-    call_kwargs = {"run_dir": cfg.run_dir, "runtime": cfg.runtime, **params}
+    # Framework knobs travel alongside runtime/run_dir, not in domain params.
+    call_kwargs = {"run_dir": cfg.run_dir, "runtime": cfg.runtime, "mock_agents": cfg.mock_agents, **params}
     if start_from:
         call_kwargs["start_from"] = start_from
     if only:

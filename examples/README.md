@@ -1,9 +1,11 @@
 # examples
 
 Runnable demonstrations of building pipelines on the `agent-flow` library. Each
-example is a single file. The subprocess-based examples share one simulated agent
-set in `.opencode/agent/` (so they run with `--runtime mock` — no tokens — or
-`--runtime opencode`); the in-process example needs neither.
+example is a single file. The subprocess-based examples ship real opencode agents
+in `.opencode/agent/` (`--runtime opencode`) AND register deterministic
+`mock_agent` behaviours (see `mock_agents.py`), so they also run token-free with
+`--mock-agents` (custom_flow, a Tier-2 flow, uses `--runtime mock` for its own
+mock path). The in-process example needs neither.
 
 The subprocess examples build the same shape:
 
@@ -26,7 +28,9 @@ python -m examples.imperative nodes list       # inspect the flow
 The identical pipeline authored as pure DATA: a `FlowDef` of `NodeDef`s
 (serializable, no callables in the definition). Also shows **how to hook your
 own logic**: a custom deciding gate and an observing `after_node` hook, both
-registered on a `FlowRegistry` and referenced by name.
+registered on a `FlowRegistry` and referenced by name. The registry also carries
+the `mock_agent` behaviours (via `mock_agents.register`), so `--mock-agents`
+resolves a deterministic stand-in per agent name at compile time.
 
 ```bash
 task example:declarative:mock PRODUCT=acme

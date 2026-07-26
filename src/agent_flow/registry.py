@@ -63,6 +63,7 @@ class FlowRegistry:
         self._runs: dict[str, Callable[..., Any]] = {}  # custom run impls (NodeDef.run_ref)
         self._schemas: dict[str, Any] = {}  # result-schema impls (NodeDef.result_schema by name)
         self._agent_impls: dict[str, Callable[..., Any]] = {}  # in-process agent impls (NodeDef.impl_ref)
+        self._mock_agents: dict[str, Callable[..., Any]] = {}  # mock_agent behaviours (--mock-agents mode)
         # event -> list of (node_scope, hook). node_scope is None (all nodes) or a
         # frozenset of node names; ignored for group events.
         self._hooks: dict[str, list[tuple[frozenset[str] | None, Hook]]] = {e: [] for e in _EVENTS}
@@ -165,6 +166,29 @@ class FlowRegistry:
 
         return deco
 
+    def mock_agent(self, name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Register a MOCK AGENT behaviour `(inv, ctx) -> control_envelope`.
+
+        A deterministic, no-token stand-in for a real agent, enabled by the
+        `--mock-agents` mode (mock_agents=True). When the mode is on, a node whose
+        `agent` matches `name` runs this behaviour via MockExecutor instead of its
+        normal executor. The behaviour reads STRUCTURED inputs and may write files
+        via the `ctx` tools (MockAgentContext), and returns a control envelope
+        (`{status, result?, rerun_required?}`) — the same shape a real agent writes
+        to its sidecar. Mock is NOT a runtime; see docs design/mock-agent.md.
+
+            @registry.mock_agent("tech-stack-analyst")
+            def _stub(inv, ctx):
+                ctx.write_file("{run_dir}/tech-stack.md", "# ...")
+                return {"status": "ok", "result": {"languages": ["Python"]}}
+        """
+
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self._mock_agents[name] = fn
+            return fn
+
+        return deco
+
     def on(self, event: str, *, node: str | list[str] | tuple[str, ...] | None = None) -> Callable[[Hook], Hook]:
         """Register an OBSERVING hook for a lifecycle `event` (decorator).
 
@@ -235,6 +259,13 @@ class FlowRegistry:
         except KeyError:
             raise ValueError(f"unknown agent impl {name!r} (registered: {sorted(self._agent_impls)})") from None
 
+    def get_mock_agent(self, name: str) -> Callable[..., Any]:
+        """Resolve a named mock_agent behaviour."""
+        try:
+            return self._mock_agents[name]
+        except KeyError:
+            raise ValueError(f"unknown mock_agent {name!r} (registered: {sorted(self._mock_agents)})") from None
+
     def has_gate(self, name: str) -> bool:
         return name in self._gates
 
@@ -243,6 +274,9 @@ class FlowRegistry:
 
     def has_agent_impl(self, name: str) -> bool:
         return name in self._agent_impls
+
+    def has_mock_agent(self, name: str) -> bool:
+        return name in self._mock_agents
 
     def fire(self, event: str, /, *args: Any, _node_name: str | None = None, **kwargs: Any) -> None:
         """Fire the observing hooks registered for `event`.

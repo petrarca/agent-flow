@@ -1,9 +1,9 @@
 """Integration test: build_flow emits on_node_event and records node durations.
 
-Runs a tiny 2-node flow on the MOCK runtime (real Prefect task boundary, no LLM)
-and asserts the node-lifecycle hook fires start/finish per node and that each
-NodeOutcome carries a duration. Marked integration because it crosses the
-Prefect task + subprocess boundary.
+Runs a tiny 2-node flow with the --mock-agents mode (in-process MockExecutor, no
+LLM, no subprocess) and asserts the node-lifecycle hook fires start/finish per
+node and that each NodeOutcome carries a duration. Marked integration because it
+crosses the Prefect task boundary.
 """
 
 import pytest
@@ -11,30 +11,31 @@ import pytest
 pytestmark = pytest.mark.integration
 
 # build_flow defaults to the local backend (no Prefect), so no bootstrap needed.
-from pathlib import Path  # noqa: E402
-
 from agent_flow import agent_node, build_flow  # noqa: E402
 from agent_flow.engine import NodeOutcome  # noqa: E402
 
-# The mock runtime spawns the packaged _mock_agent.py and does NOT validate the
-# agent-dir layout, so this test owns a self-contained fixture agent dir (it does
-# not depend on examples/ content). The agent name is cosmetic under mock.
-_FIXTURE_DIR = str(Path(__file__).resolve().parents[1] / "fixtures" / "opencode")
+
+def _stub(inv, ctx):  # a trivial mock_agent behaviour
+    return {"status": "ok", "result": {"ran": inv.node}}
 
 
 def test_on_node_event_and_durations(tmp_path):
+    from agent_flow.registry import FlowRegistry
+
+    registry = FlowRegistry()
+    registry.mock_agent("selftest-analyst")(_stub)
+
     events: list[tuple] = []
     nodes = [
-        agent_node("analyze", agent="selftest-analyst"),
-        agent_node("verify", agent="selftest-analyst", depends_on=("analyze",)),
+        agent_node("analyze", agent="selftest-analyst", registry=registry),
+        agent_node("verify", agent="selftest-analyst", depends_on=("analyze",), registry=registry),
     ]
     flow = build_flow(
         nodes,
         name="progress-probe",
-        agent_dir=_FIXTURE_DIR,
         on_node_event=lambda n, p, s, a: events.append((n, p, s, a)),
     )
-    result = flow(run_dir=str(tmp_path), runtime="mock")
+    result = flow(run_dir=str(tmp_path), mock_agents=True)
 
     # Lifecycle: each node fires start (status None) then finish (a status).
     assert ("analyze", "start", None, "selftest-analyst") in events

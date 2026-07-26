@@ -40,6 +40,34 @@ from dataclasses import dataclass, field
 from agent_flow.runners.base import AgentInvocation
 
 
+class AgentTimeoutError(RuntimeError):
+    """Raised when an agent goes STALE: no event and no sidecar for
+    `idle_timeout_s`. This is a liveness timeout, not a wall-clock one — an
+    actively-emitting agent is never killed regardless of elapsed time.
+    Liveness supervision is SubprocessExecutor-only (nothing else is a process to
+    supervise), so only it raises this."""
+
+
+class AgentContentFailedError(RuntimeError):
+    """Raised when an agent (or a mock_agent) reports a content failure via its
+    control status.
+
+    This is a genuine failure the agent diagnosed itself (e.g. could not parse
+    the report, missing required input). Retrying the same prompt will not help,
+    so the retry policy must NOT retry this class. Raised by the shared
+    `AgentExecutor.check_content_status` — see that method.
+    """
+
+
+class AgentCrashError(RuntimeError):
+    """Raised when an agent process exits non-zero with no error control signal.
+
+    This represents a process-level crash (CLI error, OOM, rate-limit 429, …).
+    It is transient and the retry policy SHOULD retry it. Subprocess-only (there
+    is no process to crash for an in-process/mock executor).
+    """
+
+
 @dataclass(frozen=True)
 class AgentResult:
     """Outcome of running one agent invocation — the executor seam's OUTPUT type.
@@ -91,3 +119,71 @@ class AgentExecutor(abc.ABC):
         type — callers that need them must hold the concrete type directly.
         """
         raise NotImplementedError
+
+    # --- shared result-assembly tail ---------------------------------------
+    # Concrete executors differ in HOW they obtain a control envelope (a
+    # subprocess reads a sidecar; the mock calls a behaviour; ...), but the tail
+    # is identical: validate the envelope's `result` against the invocation's
+    # result_schema and build the AgentResult. Hoisted here so subclasses share
+    # one implementation.
+    @staticmethod
+    def assemble_result(
+        inv: AgentInvocation,
+        control: dict,
+        *,
+        exit_code: int | None = 0,
+        duration_s: float = 0.0,
+        tokens: int = 0,
+        cost: float = 0.0,
+        events: int = 0,
+        completion: str = "completed",
+    ) -> "AgentResult":
+        """Build an AgentResult from a control envelope, validating result_schema.
+
+        The `result_obj` / `result_valid` / `result_errors` fields are populated
+        ONLY via schema validation (identical to the subprocess path): with no
+        schema, `result_valid` is True and `result_obj` is None. The raw payload
+        is always in `control["result"]` regardless, so a gate can read it either
+        way.
+        """
+        from agent_flow.core.schema import coerce_schema
+
+        schema = coerce_schema(inv.result_schema)
+        outcome = schema.validate(control.get("result", {})) if schema is not None else None
+        return AgentResult(
+            agent=inv.agent,
+            exit_code=exit_code,
+            duration_s=duration_s,
+            control=control,
+            tokens=tokens,
+            cost=cost,
+            events=events,
+            completion=completion,
+            result_valid=outcome.valid if outcome is not None else True,
+            result_obj=outcome.obj if outcome is not None else None,
+            result_errors=outcome.errors if outcome is not None else (),
+        )
+
+    @staticmethod
+    def check_content_status(agent: str, control: dict) -> None:
+        """Raise AgentContentFailedError unless the envelope's status is ok/verified.
+
+        This is the DEFAULT fail-fast policy for a bad content status. It is the
+        ONLY mechanism (short of a custom gate manually reading `ctx.result`)
+        by which a bad status stops or degrades a node: `interpret()` catches the
+        raised exception and maps it through the node's `criticality` (blocking ->
+        NodeBlocked/halts; degrade -> recorded as "degraded"). None of the
+        built-in gates (require_file, rerun_on_signal, rerun_on_named) inspect
+        `status` themselves, so without this check a bad status would otherwise
+        be silently treated as a success.
+
+        Every executor that produces a content-derived envelope (subprocess sidecar
+        or a mock_agent's return) must call this after assembling its AgentResult,
+        so a bad status behaves IDENTICALLY regardless of execution model.
+        SubprocessExecutor additionally raises AgentTimeoutError for its own
+        stale/liveness case — that is subprocess-specific and not part of this
+        shared check.
+        """
+        status = control.get("status")
+        if status not in ("ok", "verified"):
+            raise AgentContentFailedError(f"agent {agent!r} reported status={status!r}: {control.get('reason')}")

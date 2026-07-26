@@ -6,13 +6,63 @@ location, so it cannot be forgotten. The default run is `-m unit` (fast,
 docker-free); integration tests run via `-m integration`.
 """
 
+import json
 import shutil
 import tempfile
 from pathlib import Path
 
 import pytest
 
+from agent_flow.runners.base import AgentInvocation, AgentRunnerInfo, Event
+
 FIXTURES = Path(__file__).parent / "fixtures"
+
+_STUB = Path(__file__).resolve().parents[1] / "src" / "agent_flow" / "core" / "_mock_agent.py"
+
+
+class StubRunner:
+    """Test-only AgentRunner that drives the domain-free subprocess stub.
+
+    Exercises the real SubprocessExecutor path (spawn / supervise / kill /
+    sidecar) with no tokens and no domain knowledge. The behaviour is supplied
+    entirely on the command line:
+      - emit=<dict>: the stub writes that envelope as the sidecar and exits 0.
+      - sleep=True:  the stub hangs forever (tests the stale/kill path).
+    """
+
+    name = "stub"
+
+    def __init__(self, *, emit: dict | None = None, sleep: bool = False) -> None:
+        self._emit = emit
+        self._sleep = sleep
+
+    def build_command(self, inv: AgentInvocation) -> list[str]:
+        cmd = ["python3", str(_STUB), "--agent", inv.agent, "--prompt", inv.prompt]
+        if self._sleep:
+            cmd.append("--sleep")
+        elif self._emit is not None:
+            cmd += ["--emit", json.dumps(self._emit)]
+        return cmd
+
+    def parse_event(self, line: str) -> Event:
+        return Event.none()  # stub finishes fast; completion is via sidecar
+
+    def info(self, agent_dir=None) -> AgentRunnerInfo:  # noqa: ARG002
+        return AgentRunnerInfo(name=self.name, available=True, detail="test stub")
+
+
+@pytest.fixture
+def stub_runner() -> type[StubRunner]:
+    """The StubRunner CLASS (not an instance) — instantiate per test, e.g.
+    `stub_runner(emit={...})` or `stub_runner(sleep=True)`.
+
+    Exposed as a fixture (not a plain import) so it resolves identically
+    regardless of how pytest is invoked (`python -m pytest` vs the `pytest`
+    console-script entry point) — `tests/` has no `__init__.py`, so
+    `from tests.conftest import StubRunner` is import-mode-dependent; pytest's
+    fixture injection is not.
+    """
+    return StubRunner
 
 
 def pytest_collection_modifyitems(config, items):  # noqa: ARG001

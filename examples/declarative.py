@@ -21,6 +21,7 @@ from pathlib import Path
 
 from agent_flow import FlowDef, FlowRegistry, NodeDef, load_env
 from agent_flow.gates import Continue, GateContext, Stop
+from examples import mock_agents  # the flow-supplied mock behaviours (--mock-agents mode)
 
 load_env()
 
@@ -41,6 +42,11 @@ class AssessParams(BaseSettings):
 # custom ones need registering.
 
 REGISTRY = FlowRegistry()
+
+# Register the mock_agent behaviours by name (analyst/verifier per agent). Only
+# invoked under --mock-agents; harmless otherwise. Resolved onto each node at
+# compile time by agent name.
+mock_agents.register(REGISTRY)
 
 
 @REGISTRY.gate("tech_stack_usable")

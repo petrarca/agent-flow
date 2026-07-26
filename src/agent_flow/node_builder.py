@@ -25,7 +25,7 @@ from typing import Any
 from agent_flow.core import DEFAULT_IDLE_TIMEOUT_S
 from agent_flow.engine import Criticality, Node, RunContext
 from agent_flow.gates import Gate
-from agent_flow.runners import AgentInvocation, get_executor
+from agent_flow.runners import AgentInvocation, MockExecutor, get_executor
 from agent_flow.runners.inprocess import InProcessExecutor
 from agent_flow.utils import resolve_template
 
@@ -52,6 +52,16 @@ def _node_logger():
         return logging.getLogger("agent_flow").info
 
 
+def resolve_work_order(inputs: dict[str, str], params: dict[str, Any]) -> dict[str, str]:
+    """Resolve `{param}` templates in every input value; return the structured dict.
+
+    This is the single place where input values are resolved. Both the prompt
+    representation (KEY: value lines) and the structured MockAgentContext.input()
+    dict are derived from it.
+    """
+    return {key: resolve_template(val, params) for key, val in inputs.items()}
+
+
 def build_work_order(inputs: dict[str, str], params: dict[str, Any]) -> str:
     """Render the KEY: value work-order prompt from templated inputs.
 
@@ -60,7 +70,8 @@ def build_work_order(inputs: dict[str, str], params: dict[str, Any]) -> str:
     completion protocol (CONTROL_FILE + control JSON shape) is injected separately
     by run_agent, so it is NOT part of these inputs.
     """
-    return "\n".join(f"{key}: {resolve_template(val, params)}" for key, val in inputs.items())
+    resolved = resolve_work_order(inputs, params)
+    return "\n".join(f"{key}: {val}" for key, val in resolved.items())
 
 
 def agent_node(
@@ -84,6 +95,7 @@ def agent_node(
     exports: Callable[[dict], Any] | dict[str, str] | None = None,
     export_ref: str | None = None,
     impl: Callable[..., Any] | None = None,
+    registry: Any | None = None,
 ) -> Node:
     """Build a `Node` that runs ONE runtime agent as a supervised subprocess.
 
@@ -135,6 +147,15 @@ def agent_node(
             composed prompt, model, run_dir, result_schema, ...). `agent` remains
             the display label. The declarative equivalent is NodeDef.impl_ref +
             registry.agent_impl(name). See runners/inprocess.py.
+        registry: optional FlowRegistry carrying `mock_agent` behaviours (and/or
+            gates, exports, schemas). When `--mock-agents` mode is ON
+            (mock_agents=True param) and the registry has a registered
+            `mock_agent` for this node's `agent` name, the node runs that
+            behaviour via MockExecutor — no subprocess, no tokens. Mocks are
+            keyed by AGENT name (not by node), so one registration covers every
+            node that runs the same agent. Absent registry or no matching
+            `mock_agent`, the node runs normally (partial mock). Mock is NOT a
+            runtime. See runners/mock_exec.py and docs design/mock-agent.md.
 
     Returns a plain `Node`, so it mixes freely with hand-written `run` nodes.
     """
@@ -148,7 +169,8 @@ def agent_node(
         warn = logging.getLogger("agent_flow").warning
         # Expose the run_dir to input templates as {run_dir}, alongside params.
         tmpl = {**ctx.params, "run_dir": str(ctx.run_dir)}
-        work_order = build_work_order(inputs, tmpl)
+        resolved_inputs = resolve_work_order(inputs, tmpl)
+        work_order = "\n".join(f"{k}: {v}" for k, v in resolved_inputs.items())
 
         # The caller-visible prompt, composed in order:
         #   [per-node context] [per-node instructions] [additional (standing)]
@@ -219,10 +241,35 @@ def agent_node(
             idle_timeout_s=eff_idle,
             on_event=make_printer(name) if callable(make_printer) else None,
         )
-        # An in-process impl (agent_node(impl=...) or a resolved impl_ref) runs the
-        # agent as a direct Python call — no subprocess/sidecar. Otherwise the
-        # runtime string selects a subprocess executor. Same invocation either way.
-        executor = InProcessExecutor(impl, name=runtime) if impl is not None else get_executor(runtime)
+        # Executor selection (the engine is blind to all of this):
+        #   1. --mock-agents mode ON + this node has a mock_agent -> MockExecutor
+        #      (substitute, regardless of impl/runtime). Partial mocking: nodes
+        #      without a mock_agent fall through to their normal executor.
+        #   2. an in-process impl -> InProcessExecutor (direct Python call).
+        #   3. else -> the runtime string selects a subprocess executor.
+        # Same neutral invocation either way.
+        mock_on = bool(ctx.params.get("mock_agents"))
+        # Resolve the mock_agent behaviour by AGENT name (not node name) from the
+        # registry. Mocks are per-agent: one registration covers every node that
+        # runs the same agent. Partial mock: no matching registration -> normal path.
+        # Registry namespacing: mock_agent and agent_impl live in SEPARATE registry
+        # dicts — a name "classify" as a mock_agent never collides with "classify"
+        # as an agent_impl, gate, or export. When mock mode is on and a mock_agent
+        # exists for this agent, it WINS over an in-process impl (the mock_agents
+        # mode is designed to override everything, including impl nodes).
+        _mock_behaviour = registry.get_mock_agent(agent) if (mock_on and registry is not None and registry.has_mock_agent(agent)) else None
+        if _mock_behaviour is not None:
+            log(
+                "node %s: --mock-agents ON -> MockExecutor (agent=%s behaviour=%s)",
+                name,
+                agent,
+                getattr(_mock_behaviour, "__name__", repr(_mock_behaviour)),
+            )
+            executor = MockExecutor(_mock_behaviour, work_order=resolved_inputs, tmpl=tmpl)
+        elif impl is not None:
+            executor = InProcessExecutor(impl, name=runtime)
+        else:
+            executor = get_executor(runtime)
         result = executor.run(inv)
         log(
             "node %s: agent=%s -> %s in %.1fs (tokens=%d cost=$%.4f completion=%s)",
