@@ -1,8 +1,8 @@
 ---
 type: Design
 title: ServeExecutor — shared opencode serve daemon
-description: Design for ServeExecutor, a peer executor that talks to a shared opencode serve HTTP daemon instead of spawning one process per node. Covers motivation, API surface, sidecar contract, directory routing, the scope boundary (daemon management is out of scope), and infrastructure gaps.
-tags: [agent-flow, serve-executor, opencode, goose, crush, http, sse, executor]
+description: Design for ServeExecutor, a peer executor that talks to a shared HTTP daemon instead of spawning one process per node. Covers motivation, the opencode serve API surface, an alternative facade-service protocol (own FastAPI layer over any agent, incl. subprocess-only ones like Claude), sidecar/verdict contract, directory routing, the scope boundary, and infrastructure gaps.
+tags: [agent-flow, serve-executor, opencode, goose, crush, facade, http, sse, executor]
 status: ideation
 ---
 
@@ -89,6 +89,86 @@ methods), NOT hardcoded into `ServeClient`. This mirrors how `AgentRunner`
 delegates `build_command`/`parse_event` for the subprocess family. The MVP
 targets opencode only, but the seam must not bake opencode's paths into the
 generic executor.
+
+---
+
+## Alternative / complement: a facade service (own protocol)
+
+**Status: ideation.** An alternative — or complement — to talking to each
+agent's NATIVE server is to put our OWN service in front of the coding agent and
+have `ServeExecutor` speak a single protocol WE define. The facade (built on the
+existing sonnet-server FastAPI infrastructure) drives the underlying agent
+however that agent works, and exposes one uniform surface.
+
+```
+agent-flow ──► facade (FastAPI, our protocol) ──► opencode / claude / codex / …
+              create/prompt/verdict/abort         subprocess / SDK / native server
+```
+
+### Why a facade is attractive
+
+- **Uniform protocol across all agents.** The ecosystem is fragmented:
+  opencode/Goose/Crush expose HTTP+SSE, Codex/Cursor expose JSON-RPC,
+  Claude/Gemini/Amp expose nothing but subprocess. Native-server support means N
+  `RemoteRunner`s with N transports. A facade means ONE `RemoteRunner` speaking
+  our protocol; all runtime-specific glue lives in the facade.
+- **Claude (and any subprocess-only agent) becomes "remote".** Claude Code has
+  no serve mode, so it can never be remote natively. Behind a facade, the facade
+  runs `claude -p` (or the Claude Agent SDK) internally and presents it through
+  our protocol. The facade normalises "has a server" vs "subprocess only".
+- **We own the verdict protocol end to end.** No coping with opencode's
+  `info.structured` vs sidecar vs `/file/content`, or each runtime's variant.
+  The facade decides how the agent reports and returns a clean, uniform envelope
+  — the "verdict transport is runtime-specific" problem collapses into the
+  facade.
+- **The facade is the natural home for warm-process pooling.** It may keep
+  `opencode serve` warm, pool SDK sessions, or spawn subprocesses — its concern.
+  agent-flow just sees "a URL that speaks my protocol." This is exactly the
+  companion infrastructure already scoped OUT of the library (see "Scope
+  boundary") — the facade is that infrastructure, realised.
+
+### How it fits what already exists
+
+Almost nothing changes in agent-flow — the seams already anticipate it:
+
+- `ServeExecutor` stays generic: it speaks HTTP(+SSE) to "a URL".
+- The runner for the facade is a SINGLE implementation speaking OUR protocol,
+  not opencode's — e.g. a `FacadeRunner` registered under `*-facade` (or simply
+  `remote`). Runtime-specific messiness moves OUT of agent-flow into the facade.
+- `serve_url` becomes the facade URL. This is the documented forward-compat point
+  ("the companion service BECOMES the endpoint `serve_url` points at") made real.
+- The verdict is owned by the facade; agent-flow interprets OUR clean response,
+  not a runtime's native shape.
+
+### Trade-offs
+
+- **We now own and operate a service** (deploy, health, scale, version) — but
+  the companion infrastructure was already accepted as desirable.
+- **Per-agent drivers move to the facade.** The runtime-specific complexity does
+  not vanish; it relocates from N runners in the library to N drivers in the
+  service — the right place (a service concern, evolving independently of
+  agent-flow releases).
+- **Two-repo effort.** agent-flow gets a small `FacadeRunner` + `ServeExecutor`
+  (one protocol). sonnet-server gets the facade service (the real work: per-agent
+  drivers, session management, verdict normalisation, optional event relay).
+- **Extra hop** agent-flow → facade → agent: negligible vs LLM latency.
+
+### Native-server vs facade — not either/or
+
+The native-opencode-serve path (the rest of this document) is the SIMPLEST
+possible facade: a thin/no-op passthrough for local single-daemon use. The
+facade is what makes the model GENERAL — uniform protocol, subprocess-only agent
+support (Claude), verdict normalisation. Both can coexist: `ServeExecutor`
+speaks HTTP+SSE either to a raw `opencode serve` or to our facade, chosen by
+which runner + `serve_url` is configured.
+
+### Open protocol question
+
+Should the facade protocol be **synchronous** (POST prompt → blocks → returns the
+verdict, like opencode's sync message — proven simplest) or **async + events**
+(POST prompt → 202 → subscribe/poll for completion — needed only for live
+streaming through the facade)? Sync is the likely MVP; async is an
+add-on if live `on_event` display through the facade is wanted.
 
 ---
 
