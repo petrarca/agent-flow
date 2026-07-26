@@ -60,12 +60,12 @@ reference them **by name** with `gate_args` — no registration, no import:
 | Gate | `gate_args` | What it does |
 |------|-------------|--------------|
 | `require_file` | `path` (required, templatable), `on_missing` (optional `Directive`) | The agent reported ok but didn't write its artifact -> `Restart` the node (bounded by `max_cycles`). `path` supports `{param}` templates (e.g. `"{run_dir}/report.md"`). A bare filename without a leading `/` or `{run_dir}` is treated as relative to `run_dir` — use `"{run_dir}/..."` to keep it consistent with the node's `inputs=` value. |
-| `rerun_on_signal` | `target` (required), `control_file` (optional) | The node's control sidecar set `rerun_required` -> `GoTo(target)`, a **fixed** earlier node (then the flow re-flows forward). The classic "verifier re-runs its analyst". `control_file` defaults to `<node>.control.json` under `run_dir` (same `run_dir` rule as `require_file` — not the process cwd). |
-| `rerun_on_named` | `control_file` (optional) | Same `rerun_required` signal, but routes to **whichever** node the sidecar names (first valid backward target). For a coherence check that may bounce to any upstream stage. Same `control_file` / `run_dir` default as `rerun_on_signal`. |
+| `rerun_on_signal` | `target` (required) | The agent's control verdict set `rerun_required` -> `GoTo(target)`, a **fixed** earlier node (then the flow re-flows forward). The classic "verifier re-runs its analyst". Reads the verdict from the harvested envelope (`ctx.result`) — no file, no path. |
+| `rerun_on_named` | *(none)* | Same `rerun_required` signal, but routes to **whichever** node the verdict names (first valid backward target). For a coherence check that may bounce to any upstream stage. Reads the same `ctx.result` envelope. |
 
 Signatures: `require_file(ctx, *, path, on_missing=None)`,
-`rerun_on_signal(ctx, *, target, control_file=None)`,
-`rerun_on_named(ctx, *, control_file=None)`. All three auto-populate the
+`rerun_on_signal(ctx, *, target)`,
+`rerun_on_named(ctx)`. All three auto-populate the
 directive's one-time `instruction`. A node with **no** gate behaves as
 `Continue()`. To write your own gate, see [Hook your own logic](#hook-your-own-logic-flowregistry)
 below; for the full directive/`GateContext` reference see the

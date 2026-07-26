@@ -77,13 +77,12 @@ NodeDef(name="tech-stack", agent="tech-stack-analyst",
 NodeDef(name="verify", agent="tech-stack-verifier", depends_on=["tech-stack"],
         gate="rerun_on_signal", gate_args={"target": "tech-stack"})
 
-# same signal, but route to WHICHEVER node the sidecar names -> GoTo(named).
+# same signal, but route to WHICHEVER node the verdict names -> GoTo(named).
 NodeDef(name="coherence", agent="coherence-check", gate="rerun_on_named")
 ```
 
 Their signatures are `require_file(ctx, *, path, on_missing=None)`,
-`rerun_on_signal(ctx, *, target, control_file=None)`, and
-`rerun_on_named(ctx, *, control_file=None)`.
+`rerun_on_signal(ctx, *, target)`, and `rerun_on_named(ctx)`.
 
 `require_file`: `path` is resolved via `{param}` templating against `ctx.params`
 (same values the node's `run` saw); `{run_dir}` is always available. A bare
@@ -93,16 +92,19 @@ working directory. `run_dir` is the artifact directory for the run (passed as
 `run_dir=` to `run_flow`/`build_flow`; defaults to a temp dir). Use the explicit
 `"{run_dir}/report.md"` form to make the intent obvious and keep `path=` visually
 consistent with the node's `inputs={"REPORT": "{run_dir}/report.md"}` value.
+`require_file` is a genuine FILESYSTEM check of the agent's WORK PRODUCT (the
+artifact it was told to write) — distinct from the re-run gates below, which read
+the VERDICT.
 
-`rerun_on_signal` reads `rerun_required` from the control sidecar and returns
-`GoTo(target)` for a FIXED target when the field is set; `rerun_on_named` reads
-the same field but routes to the node it NAMES (first valid backward target).
-Both default `control_file` to `<node-name>.control.json` under `run_dir` —
-the same `run_dir` rule as `require_file`: bare filename = relative to `run_dir`,
-NOT the process cwd. You rarely need to override `control_file`; it is there for
-the edge case where a node's agent writes its sidecar under a non-default name.
-All three auto-populate the directive's `instruction`. They are ordinary gates
-you may use, wrap, compose, or ignore.
+`rerun_on_signal` and `rerun_on_named` read `rerun_required` from the **harvested
+control envelope** (`ctx.result`) — NOT from a file. By the time a gate runs, the
+executor has already harvested the verdict however it came back (subprocess
+sidecar, or a remote runner's own mechanism), so the gate reads the dict it was
+handed and never re-reads a file or reconstructs a path. `rerun_on_signal`
+returns `GoTo(target)` for a FIXED target when the field is set; `rerun_on_named`
+routes to the node it NAMES (first valid backward target). All three
+auto-populate the directive's `instruction`. They are ordinary gates you may
+use, wrap, compose, or ignore.
 
 **A real agent must be TOLD `rerun_required` exists to use it.** The injected
 [control-file protocol](control-file.md) mentions the field, but a specific
@@ -122,5 +124,5 @@ built-in pairing (see [engine](engine.md) jump-back).
 
 `src/agent_flow/gates.py` (`Directive`, `Continue`/`Restart`/`GoTo`/`Stop`,
 `GateContext`, `Gate`, `require_file`, `rerun_on_signal`, `rerun_on_named`).
-The `produced` / `rerun_from_sidecar` helpers the gates read live in
+The `produced` / `rerun_targets` helpers the gates read live in
 `agent_flow.core` (report_signals).

@@ -170,53 +170,46 @@ def require_file(ctx: GateContext, *, path: str, on_missing: Directive | None = 
     return on_missing if on_missing is not None else Restart(instruction=f"The required file is missing: {resolved}. Produce it.")
 
 
-def rerun_on_signal(ctx: GateContext, *, target: str, control_file: str | None = None) -> Directive:
-    """Gate: re-run a FIXED `target` node when the sidecar asks for a re-run.
+def rerun_on_signal(ctx: GateContext, *, target: str) -> Directive:
+    """Gate: re-run a FIXED `target` node when the verdict asks for a re-run.
 
     Config:
-      target        which node to jump back to (required).
-      control_file  path to the control sidecar to read. Bare filename or
-                    absolute path. When bare (no leading `/`), resolved relative
-                    to `run_dir` (the run artifact dir, NOT the process cwd).
-                    Default: `<node-name>.control.json` under `run_dir`.
+      target  which node to jump back to (required).
 
-    Reads `rerun_required` from the sidecar; if non-empty -> GoTo(target)
-    (bounded by the walker), else Continue. The common verifier case (always
-    bounces to its one fixed subject). For a variable destination use
-    `rerun_on_named`.
+    Reads `rerun_required` from the HARVESTED control envelope (`ctx.result`) —
+    no file, no path. By the time this gate runs the executor has already
+    harvested the verdict however it came back (subprocess sidecar, remote
+    structured output, remote file API), so the gate reads the dict it was
+    handed. If `rerun_required` is non-empty -> GoTo(target) (bounded by the
+    walker), else Continue. The common verifier case (always bounces to its one
+    fixed subject). For a variable destination use `rerun_on_named`.
 
     Referenced as gate="rerun_on_signal", gate_args={"target": "..."}.
     """
-    from agent_flow.core import rerun_from_sidecar
+    from agent_flow.core import rerun_targets
 
     node_name = getattr(ctx.node, "name", None) or str(ctx.node)
-    cf = control_file or f"{node_name}.control.json"
-    if rerun_from_sidecar(ctx.run_dir / cf):
+    if rerun_targets(ctx.result):
         return GoTo(node=target, instruction=f"{node_name} signalled a re-run of {target}.")
     return Continue()
 
 
-def rerun_on_named(ctx: GateContext, *, control_file: str | None = None) -> Directive:
-    """Gate: re-run WHICHEVER node the sidecar's `rerun_required` names.
+def rerun_on_named(ctx: GateContext) -> Directive:
+    """Gate: re-run WHICHEVER node the verdict's `rerun_required` names.
 
-    Config:
-      control_file  path to the control sidecar to read. Bare filename or
-                    absolute path. When bare (no leading `/`), resolved relative
-                    to `run_dir` (the run artifact dir, NOT the process cwd).
-                    Default: `<node-name>.control.json` under `run_dir`.
+    Reads `rerun_required` from the HARVESTED control envelope (`ctx.result`) —
+    no file, no path (see `rerun_on_signal`). Unlike `rerun_on_signal` (fixed
+    target), routes to the node named in the envelope — for a final coherence
+    check that may bounce to any upstream stage. `rerun_required` carries NODE
+    names; the FIRST valid backward target is used (the walker bounds/validates
+    the jump). Empty -> Continue.
 
-    Unlike `rerun_on_signal` (fixed target), routes to the node named in the
-    sidecar — for a final coherence check that may bounce to any upstream stage.
-    `rerun_required` carries NODE names; the FIRST valid backward target is used
-    (the walker bounds/validates the jump). Empty -> Continue.
-
-    Referenced as gate="rerun_on_named" (no required args).
+    Referenced as gate="rerun_on_named" (no args).
     """
-    from agent_flow.core import rerun_from_sidecar
+    from agent_flow.core import rerun_targets
 
     node_name = getattr(ctx.node, "name", None) or str(ctx.node)
-    cf = control_file or f"{node_name}.control.json"
-    named = rerun_from_sidecar(ctx.run_dir / cf)
+    named = rerun_targets(ctx.result)
     if named:
         target = named[0]
         return GoTo(node=target, instruction=f"{node_name} signalled a re-run of {target}.")

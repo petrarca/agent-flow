@@ -35,7 +35,7 @@ from agent_flow.core.agent_runtime import DEFAULT_IDLE_TIMEOUT_S, AgentResult, r
 from agent_flow.core.context import read_context_blocks
 from agent_flow.core.control_protocol import build_control_preamble
 from agent_flow.core.env import load_env
-from agent_flow.core.report_signals import produced, rerun_from_sidecar
+from agent_flow.core.report_signals import produced, rerun_targets
 from agent_flow.core.schema import JsonSchema, ResultSchema, ValidationOutcome, coerce_schema
 from agent_flow.core.schema_pydantic import PydanticSchema
 from agent_flow.runners.executor import AgentContentFailedError, AgentCrashError, AgentTimeoutError
@@ -60,7 +60,7 @@ __all__ = [
     "coerce_schema",
     # file-based signals (gate building blocks)
     "produced",
-    "rerun_from_sidecar",
+    "rerun_targets",
     # environment
     "load_env",
 ]

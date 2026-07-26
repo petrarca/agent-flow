@@ -130,17 +130,17 @@ def test_require_file_run_dir_template_matches_bare_path(tmp_path):
 
 
 def test_rerun_on_signal_goto_when_flagged(tmp_path):
-    (tmp_path / "verify.control.json").write_text('{"status":"verified","rerun_required":["analyst"]}')
+    # The verdict is read from ctx.result (the harvested envelope), not a file.
     node = Node("verify", run=lambda c: None)
-    d = rerun_on_signal(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0), target="analyst")
+    result = {"status": "verified", "rerun_required": ["analyst"]}
+    d = rerun_on_signal(GateContext(result=result, node=node, run_dir=tmp_path, cycles=0), target="analyst")
     assert isinstance(d, GoTo)
     assert d.node == "analyst"
 
 
 def test_rerun_on_signal_continue_when_clean(tmp_path):
-    (tmp_path / "verify.control.json").write_text('{"status":"verified"}')
     node = Node("verify", run=lambda c: None)
-    d = rerun_on_signal(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0), target="analyst")
+    d = rerun_on_signal(GateContext(result={"status": "verified"}, node=node, run_dir=tmp_path, cycles=0), target="analyst")
     assert isinstance(d, Continue)
 
 

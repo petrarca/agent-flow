@@ -1,26 +1,28 @@
 """File-based signals — building blocks a GATE uses to decide flow control.
 
 These are NOT consulted by the engine (`run_agent` keys success solely on the
-control sidecar). They are helpers a pipeline's gate calls to inspect what an
-agent wrote on disk (or reported in its sidecar) and translate that into a
-directive (Continue / Restart / GoTo / Stop). This keeps artifact knowledge in
-the gate, out of the engine.
+control verdict). They are helpers a pipeline's gate calls to inspect what an
+agent produced and translate that into a directive (Continue / Restart / GoTo /
+Stop). This keeps artifact knowledge in the gate, out of the engine.
 
 Signals:
 
   1. produced(report_path) -> did the agent actually write a non-empty report
      file? A gate can use this to veto an otherwise-ok run (e.g. return
-     Restart() when the control says ok but no report landed).
+     Restart() when the control says ok but no report landed). This is a genuine
+     FILESYSTEM check about the agent's WORK PRODUCT — the artifact the agent was
+     told to write.
 
-  2. rerun_from_sidecar(control_file) -> does the agent's CONTROL SIDECAR name
-     any NODES in its `rerun_required` field? This is the actual mechanism (a
-     JSON field in the envelope, not a markdown block in the report) — see
-     control_protocol.py and gates.rerun_on_signal / rerun_on_named.
+  2. rerun_targets(control) -> does the agent's CONTROL ENVELOPE name any NODES
+     in its `rerun_required` field? Operates on the ALREADY-HARVESTED envelope
+     dict (`ctx.result`), NOT a file — by the time a gate runs, the executor has
+     already harvested the verdict however it came back (sidecar / structured
+     output / file API). So the gate reads the dict it was handed, never a file.
+     See gates.rerun_on_signal / rerun_on_named.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 
@@ -29,8 +31,14 @@ def produced(report_path: Path) -> bool:
     return report_path.exists() and report_path.stat().st_size > 0
 
 
-def rerun_from_sidecar(control_file: Path) -> list[str]:
-    """Return the NODE names in the sidecar ENVELOPE's `rerun_required` field.
+def rerun_targets(control: dict | None) -> list[str]:
+    """Return the NODE names in a control ENVELOPE's `rerun_required` field.
+
+    Operates on the harvested control dict (what the engine hands a gate as
+    `ctx.result`) — NOT a file. The verdict is already in memory by the time a
+    gate runs, regardless of HOW it was harvested (subprocess sidecar, remote
+    structured output, remote file API); the gate reads the dict, never re-reads
+    a file or reconstructs a path.
 
     `rerun_required` is a flow-control signal, so it lives in the envelope
     (alongside status/agent/reason), NOT in the free-form `result` payload. It
@@ -41,15 +49,11 @@ def rerun_from_sidecar(control_file: Path) -> list[str]:
         {"status": "verified", "agent": "domain-verifier",
          "rerun_required": ["domain"], "result": {...}}
 
-    Returns the list (empty when no re-run needed or the file is absent/invalid).
+    Returns the list (empty when no re-run needed or the field is absent/invalid).
     """
-    if not control_file.exists():
+    if not isinstance(control, dict):
         return []
-    try:
-        data = json.loads(control_file.read_text())
-    except json.JSONDecodeError, OSError:
-        return []
-    val = data.get("rerun_required")
+    val = control.get("rerun_required")
     if isinstance(val, list):
         return [str(x) for x in val]
     if isinstance(val, str) and val.strip():

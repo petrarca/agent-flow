@@ -27,7 +27,7 @@ Public API (the authoritative list is `__all__` below):
         Continue, Restart, GoTo, Stop,
         require_file, rerun_on_signal, rerun_on_named,
         # file-based signals (gate building blocks)
-        produced, rerun_from_sidecar,
+        produced, rerun_targets,
         # typed agent output (opt-in)
         ResultSchema, JsonSchema, PydanticSchema, ValidationOutcome, coerce_schema,
         # the injected control-file protocol
@@ -68,7 +68,7 @@ from agent_flow.core import (
     load_env,
     produced,
     read_context_blocks,
-    rerun_from_sidecar,
+    rerun_targets,
     run_agent,
 )
 from agent_flow.engine import (
@@ -238,7 +238,7 @@ __all__ = [
     "rerun_on_named",
     # signals
     "produced",
-    "rerun_from_sidecar",
+    "rerun_targets",
     # pre-flight checks
     "Check",
     "check",
