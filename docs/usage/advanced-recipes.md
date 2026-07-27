@@ -32,7 +32,10 @@ reusable runner. Your whole `main` becomes:
 ```python
 def main() -> None:
     from agent_flow import run_cli
-    run_cli(build_nodes, name="my-pipeline", default_agent_dir=_PACKAGE_DIR)
+    # run_config= is the pipeline's own run-config defaults (the lowest explicit
+    # source). agent_dir may be omitted entirely if you run from a dir whose
+    # cwd/ancestors contain a .opencode/ — the runner probes for it.
+    run_cli(build_nodes, name="my-pipeline", run_config={"agent_dir": _PACKAGE_DIR})
 ```
 
 `run_cli` provides a unified CLI:
@@ -42,20 +45,27 @@ def main() -> None:
 python -m my_pkg.pipeline run -p product_key=my-product -p repos_root=/tmp/repos \
     --runtime opencode --run-dir "{repos_root}/{product_key}/output" -i "cite a source for every finding"
 
-# or put the generic settings in a YAML config file:
+# or put the generic settings in a config file (--config is repeatable and also
+# accepts inline JSON; later --config values deep-merge over earlier ones):
 python -m my_pkg.pipeline run --config run.yml -p product_key=my-product
+python -m my_pkg.pipeline run --config run.yml --config '{"durations": {"long": 900}}' -p product_key=my-product
 ```
 
 ```yaml
 # run.yml — generic run settings (the lowest explicit source)
 runtime: opencode
 run_dir: "{repos_root}/{product_key}/output"
-agent_dir: /work/pipelines/tech-assessment
+agent_dir: /work/pipelines/tech-assessment   # often unnecessary (runner probes .opencode/)
 llm_concurrency: 2
 instructions: |
   Follow the team's coding standards and cite a source for every finding.
-node_instructions:            # per-node steering, appended last to that node
-  analyst: "Weight the security assessment heavily."
+durations: {long: 900}          # map a node's portable duration NAME to seconds
+options: {serve_url: "http://localhost:4096"}   # runtime-specific, an open bag
+nodes:                          # per-node run config (the shadow of a NodeDef)
+  analyst:
+    instructions: "Weight the security assessment heavily."   # appended last to that node
+    duration: long
+    model: azure-claude/Claude-Opus-5
 ```
 
 **Generic settings** resolve via `RunConfig` (a pydantic-settings model) with
@@ -193,12 +203,12 @@ agent_node("tech-stack", "tech-stack-analyst",
            instructions="List concrete versions where known; prefer a compact table.")
 ```
 
-## Steer one node at RUN time (`--instruct` / `node_instructions`)
+## Steer one node at RUN time (`--instruct` / `nodes.<n>.instructions`)
 
-To steer a node for a run *without* editing `build_nodes()` — or to persist
-per-product steering in config — attach a per-node instruction at run time. It is
-appended **LAST** (after the build-time instruction, before the work order), so it
-is the most recent standing guidance and overrides earlier ones by recency:
+To steer a node for a run *without* editing the flow — or to persist per-product
+steering in config — attach a per-node instruction at run time. It is appended
+**LAST** (after the build-time instruction, before the work order), so it is the
+most recent standing guidance and overrides earlier ones by recency:
 
 ```bash
 # CLI (repeatable; NODE=text like -p):
@@ -209,18 +219,18 @@ python my_flow.py run -p product_key=acme \
 
 ```yaml
 # --config run.yml — persist it per product (parallel to params:)
-node_instructions:
-  analyst: "Weight the security assessment heavily for Dim 14."
+nodes:
+  analyst: {instructions: "Weight the security assessment heavily for Dim 14."}
 ```
 
 ```python
-# programmatic (the flow callable is async — bridge with anyio.run, or await it)
-flow = build_flow(nodes, name="my-pipeline")
-anyio.run(lambda: flow(product_key="acme", node_instructions={"analyst": "…", "summary": "…"}))
+# programmatic — run-time per-node steering lives in run_config= (the nodes: map)
+run_flow(flow_def, run_config={"nodes": {"analyst": {"instructions": "…"}, "summary": {"instructions": "…"}}})
 ```
 
-CLI `--instruct` merges over the config `node_instructions:` (CLI wins per node).
-Pairs naturally with re-entering the flow at a node to iterate. See
+CLI `--instruct` wins over a config `nodes:` entry (per node). An unknown node
+name is a hard error, not silently ignored. Pairs naturally with re-entering the
+flow at a node to iterate. See
 [input-plane](../design/orchestrator/input-plane.md#per-node-run-time-instructions).
 
 ## Start partway through the flow (`--start-from`)
@@ -319,8 +329,9 @@ from agent_flow import render_prompt   # the default, if you want to fall back
 @registry.prompt
 def all_xml(parts):
     out = []
-    for tag in ("run_context", "run_instructions", "node_context",
-                "node_instructions", "node_runtime_instructions", "attempt_instruction"):
+    for tag in ("run_context", "run_instructions", "run_additional_instructions",
+                "node_context", "node_instructions", "node_runtime_instructions",
+                "attempt_instruction"):
         if (val := getattr(parts, tag)):
             out.append(f"<{tag}>\n{val}\n</{tag}>")
     out.append(f"<work_order>\n{parts.work_order}\n</work_order>")

@@ -61,9 +61,15 @@ NodeDef(
     exports={"stack": "detected_stack"},         # result->params map (or export_ref="name")
     impl_ref="classify",                          # OPTIONAL: run in-process (registry.agent_impl)
     instructions="…", context=["rules/*.md"],    # per-node prompt channels
-    model=None, idle_timeout_s=None, agent_dir=None,
+    duration="long",                              # PORTABLE intent; run config maps it to seconds
 )
 ```
+
+A node carries only PORTABLE data. `duration` is a name ("short"/"normal"/"long",
+or any name the run config defines), not a raw timeout — the run config's
+`durations: {long: 900}` maps it to seconds. A per-node `model` / `agent_dir` /
+concrete `idle_timeout_s` is an ENVIRONMENT fact, not pipeline data, so it lives
+in the run config's `nodes.<name>` section, not on the NodeDef.
 
 A node runs **either** an `agent` (the standard "run one agent" node) **or** a
 `run_ref` (a registered custom run — see below) — exactly one. `exports` and
@@ -73,18 +79,20 @@ so it requires `agent` to be set (see "In-process & mock execution" below).
 
 ## FlowDef
 
-The whole pipeline plus flow-wide settings.
+The whole pipeline — PORTABLE declarations only.
 
 ```python
 FlowDef(
     name="tech-assessment",
     nodes=[NodeDef(...), NodeDef(...), …],
     run_instructions="…", run_context=["{repos_root}/rules/*.md"],
-    agent_dir="…",           # where the agents' .md live (opencode --dir)
-    backend="inprocess",     # or "prefect"
-    llm_concurrency=None,
 )
 ```
+
+`agent_dir` (a filesystem path), `backend` (a deployment choice), and
+`llm_concurrency` (an environment capacity) are NOT flow fields — they are run
+config, supplied via `run_config=` / `--config` / the CLI / env. This keeps a
+serialized FlowDef meaningful on any machine.
 
 Validation runs at construction: unique node names, every `depends_on` names a
 known node. `compile_flow` additionally checks that every referenced gate /
@@ -184,7 +192,10 @@ async flow callable from `build_flow`) when you are already on an event loop.
 `run_cli(flow_def)` compiles + runs it and also gives `run`, `flow nodes`, and
 `version` subcommands (pass `version="…"` to surface your app version alongside
 agent-flow's). When no registry is passed, a default (built-in gates only) is used.
-The FlowDef's flow-wide `agent_dir` becomes the CLI's default agent dir.
+`agent_dir` is supplied via `run_config=` / `--config` / `--agent-dir` / env, or
+auto-discovered: the opencode runner probes for a `.opencode/` directory in the
+cwd and its ancestors, so a consumer running from their project usually needs to
+set nothing.
 
 `compile_flow(flow_def, registry) -> list[Node]` and `build_flow(nodes)` remain
 available for advanced use, but a normal consumer does not call them directly.

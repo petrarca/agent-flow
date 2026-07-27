@@ -185,16 +185,19 @@ where outputs go:
 - **`run_dir`** — where THIS RUN reads/writes: control sidecars, and the base
   for relative artifact paths. It is not a cwd and not where agents are defined.
 - **`agent_dir`** — where the runtime finds AGENT DEFINITIONS (opencode's
-  `.opencode/agent/*.md`). Passed to opencode as `--dir`. Set it on the FlowDef
-  (`FlowDef(agent_dir="…")`) and override per node with `NodeDef(agent_dir="…")`.
-  Both are templated (`{repo}/…`).
+  `.opencode/agent/*.md`). Passed to opencode as `--dir`. It is RUN CONFIG, not
+  flow data (a filesystem path is not portable): supply it via `run_config=` /
+  `--config` / `--agent-dir` / env, or let the opencode runner discover it — it
+  probes for a `.opencode/` directory in the cwd and its ancestors, so running
+  from your project usually needs no `agent_dir` at all. Templated (`{repo}/…`).
 
-In the toy example these happen to be the same tree; in a real pipeline they
+In the toy example the two happen to be the same tree; in a real pipeline they
 usually differ — e.g. agents in your pipeline repo, outputs in a product folder:
 
 ```python
-flow = FlowDef(name="hello", agent_dir="{repo}/pipelines/tech-assessment", nodes=[...])  # agents here
-run_flow(flow, run_dir="{repos_root}/{product_key}/output",                              # outputs here
+flow = FlowDef(name="hello", nodes=[...])                    # portable pipeline
+run_flow(flow, run_dir="{repos_root}/{product_key}/output",  # outputs here
+         run_config={"agent_dir": "{repo}/pipelines/tech-assessment"},  # agents here (or omit: probed)
          repos_root="/data/products", product_key="acme", repo="/work/pipeline", runtime="opencode")
 ```
 
