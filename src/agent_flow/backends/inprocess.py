@@ -39,7 +39,7 @@ def _first_of_type(eg: BaseExceptionGroup, exc_type: type[BaseException]) -> Bas
 
 
 class InProcessBackend(FlowBackend):
-    """In-process backend: task-group fan-out + semaphore limit + stdlib logging."""
+    """In-process backend: task-group fan-out + semaphore limit + loguru logging."""
 
     name = "inprocess"
 

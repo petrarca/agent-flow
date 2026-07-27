@@ -30,6 +30,7 @@ Token/cost telemetry is harvested from the event stream into the result.
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 from collections import deque
@@ -252,8 +253,12 @@ async def _supervise(
     reaped via a shielded kill before the cancellation propagates, so no orphaned
     opencode + MCP children survive.
     """
-    stdout_tx, stdout_rx = anyio.create_memory_object_stream[str | None](max_buffer_size=256)
-    stderr_tx, stderr_rx = anyio.create_memory_object_stream[str | None](max_buffer_size=256) if capture_stderr else (None, None)
+    # Unbounded reader buffers (like the previous thread + queue.Queue): a reader
+    # task must NEVER block on send, or it stops draining the OS pipe and the child
+    # blocks writing -> deadlock. stderr especially is only drained at the end
+    # (_drain_stderr), so a bounded buffer could wedge a chatty child.
+    stdout_tx, stdout_rx = anyio.create_memory_object_stream[str | None](max_buffer_size=math.inf)
+    stderr_tx, stderr_rx = anyio.create_memory_object_stream[str | None](max_buffer_size=math.inf) if capture_stderr else (None, None)
     try:
         async with anyio.create_task_group() as tg:
             tg.start_soon(_pump_lines, proc.stdout, stdout_tx)
