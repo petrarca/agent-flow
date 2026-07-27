@@ -154,8 +154,10 @@ def test_no_sidecar_clean_exit_is_content_failure(tmp_path, stub_runner):
     assert "no control sidecar written" in str(ei.value)
 
 
-def test_start_failure_binary_missing_is_crash(tmp_path):
-    # A runner whose binary does not exist -> Popen raises OSError -> AgentCrashError.
+@pytest.mark.anyio
+async def test_start_failure_binary_missing_is_crash(tmp_path):
+    # A runner whose binary does not exist -> open_process raises OSError ->
+    # AgentCrashError. Exercises the async executor directly (not the sync shim).
     from agent_flow.runners.base import AgentInvocation, LaunchSpec
 
     class _MissingBinaryRunner:
@@ -172,5 +174,5 @@ def test_start_failure_binary_missing_is_crash(tmp_path):
     control = tmp_path / "n.control.json"
     inv = AgentInvocation(agent="a", prompt="p", run_dir=tmp_path, node="n")
     with pytest.raises(AgentCrashError) as ei:
-        SubprocessExecutor(_MissingBinaryRunner()).run(inv, control_file=control)
+        await SubprocessExecutor(_MissingBinaryRunner()).run(inv, control_file=control)
     assert "failed to start" in str(ei.value)

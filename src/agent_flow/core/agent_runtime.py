@@ -4,14 +4,18 @@ Spawns an agent as an OS subprocess via an `AgentRunner` (opencode, Claude Code,
 mock, …), supervises it by LIVENESS (not wall-clock), and reads its result from a
 per-agent STATUS SIDECAR written by the agent itself.
 
-Supervision model:
-  - A background thread streams the runner's stdout through `runner.parse_event`;
-    each real event resets an idle deadline.
+Supervision model (async, anyio):
+  - Reader tasks stream the runner's stdout (and, when opted in, stderr) through
+    a decode + line-framing layer into anyio memory object streams; the main
+    coroutine folds each stdout line through `runner.parse_event`, and each real
+    event resets an idle deadline.
   - The agent is killed ONLY when STALE: no event AND no sidecar for
     `idle_timeout_s`. An actively-emitting agent runs as long as it makes
     progress — there is no absolute cap.
   - Completion is detected the moment the sidecar appears on disk, so a
     done-but-lingering process is finished immediately.
+  - Cancellation (Ctrl-C, a cancelled task group) ALWAYS reaps the whole process
+    group via a SHIELDED kill, so we never orphan an opencode + its MCP children.
 
 Status is read from the agent-written sidecar (`<agent>.control.json`), written
 by the agent via its Write tool — the control sidecar is the SOLE verdict. If it
@@ -27,15 +31,16 @@ from __future__ import annotations
 
 import json
 import os
-import queue
 import signal
-import subprocess
-import threading
-import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from subprocess import PIPE, STDOUT
+
+import anyio
+from anyio.abc import ByteReceiveStream, Process
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 from agent_flow.core.control_protocol import build_control_preamble
 from agent_flow.core.schema import ResultSchema, coerce_schema
@@ -45,6 +50,13 @@ from agent_flow.runners.executor import AgentCrashError, AgentExecutor, AgentRes
 
 # How many trailing raw stdout lines to keep for a no-sidecar diagnostic.
 _TAIL_LINES = 20
+
+# Longest silent poll window when the stream is quiet, so the sidecar `.exists()`
+# probe still fires even if the process emits nothing (matches the old 1.0s cap).
+_POLL_CAP_S = 1.0
+
+# Grace period (seconds) for a signalled process to exit before escalating.
+_KILL_GRACE_S = 5
 
 # Liveness supervision.
 #   IDLE = max silence (no runner event) before the agent is deemed STALE.
@@ -74,46 +86,51 @@ class _Supervision:
     tail: tuple[str, ...] = ()
 
 
-def _start_line_reader(proc: subprocess.Popen):  # noqa: ANN201 - returns a Queue
-    """Spawn a daemon thread that pushes each stdout line onto a queue.
+# --- async line framing (anyio open_process yields BYTES, not text lines) ----
 
-    The reader isolates the (potentially blocking) readline from the
-    supervision loop, so the loop can enforce the idle deadline even when the
-    process emits nothing. A trailing None signals EOF.
+
+async def _iter_lines(stream: ByteReceiveStream) -> AsyncIterator[str]:
+    """Yield decoded stdout/stderr LINES from a raw anyio byte stream.
+
+    anyio's `open_process` gives BYTE streams with no `text=True` and no line
+    iteration — so we reimplement universal-newline-ish line framing: decode
+    utf-8 (replacing undecodable bytes so a stray byte never crashes the run),
+    accumulate a buffer, and split on "\n". A trailing partial line (no final
+    newline) is yielded at EOF, mirroring `for line in proc.stdout`. Each yielded
+    line keeps its trailing "\n" (except a final unterminated one), so downstream
+    tail/rstrip logic is unchanged from the threaded reader.
     """
-    assert proc.stdout is not None
-    buf: queue.Queue[str | None] = queue.Queue()
-
-    def _reader() -> None:
-        try:
-            for line in proc.stdout:  # type: ignore[union-attr]
-                buf.put(line)
-        finally:
-            buf.put(None)
-
-    threading.Thread(target=_reader, daemon=True).start()
-    return buf
+    buf = ""
+    async for chunk in stream:
+        buf += chunk.decode("utf-8", errors="replace")
+        while "\n" in buf:
+            line, buf = buf.split("\n", 1)
+            yield line + "\n"
+    if buf:
+        yield buf
 
 
-def _start_stderr_reader(proc: subprocess.Popen):  # noqa: ANN201 - returns a Queue
-    """Spawn a daemon thread that drains stderr onto a queue (same as stdout reader).
+async def _pump_lines(stream: ByteReceiveStream | None, send: MemoryObjectSendStream[str | None]) -> None:
+    """Reader task: push each decoded line onto a memory stream; None marks EOF.
 
-    Used when LaunchSpec.capture_stderr is True. The runner's parse_stderr_line
-    is called per line in the supervision loop — only when something went wrong
-    (the runner controls which lines are actionable). A trailing None signals EOF.
+    Mirrors the old daemon-thread reader (`_start_line_reader`): isolate the
+    (blocking-in-spirit) read from the supervision loop so the loop can enforce
+    the idle deadline even when the process is silent. Sending a trailing None is
+    the EOF sentinel the loop keys on. The send stream is closed on the way out
+    so a consumer that stops early does not wedge the reader.
     """
-    assert proc.stderr is not None
-    buf: queue.Queue[str | None] = queue.Queue()
-
-    def _reader() -> None:
+    try:
+        if stream is not None:
+            async for line in _iter_lines(stream):
+                await send.send(line)
+    finally:
+        # Best-effort EOF sentinel, then close. If the consumer already closed
+        # the receive end (early stop), the send raises — swallow it.
         try:
-            for line in proc.stderr:  # type: ignore[union-attr]
-                buf.put(line)
-        finally:
-            buf.put(None)
-
-    threading.Thread(target=_reader, daemon=True).start()
-    return buf
+            await send.send(None)
+        except anyio.BrokenResourceError:
+            pass
+        send.close()
 
 
 def _apply_event(line: str, st: dict, runner: AgentRunner, on_event: Callable[[Event], None] | None) -> bool:
@@ -168,10 +185,8 @@ def _stop_kind(idle: bool, sidecar: bool) -> str | None:
     return None
 
 
-def _finish(proc: subprocess.Popen, st: dict, kind: str, *, kill: bool) -> _Supervision:
-    """Build the _Supervision result, optionally killing a lingering process."""
-    if kill:
-        _kill_group(proc)  # idempotent; ensures no lingering process
+def _finish(st: dict, kind: str) -> _Supervision:
+    """Build the _Supervision result (killing, if needed, is the caller's job)."""
     return _Supervision(
         completion=kind,
         tokens=st["tokens"],
@@ -182,27 +197,27 @@ def _finish(proc: subprocess.Popen, st: dict, kind: str, *, kill: bool) -> _Supe
     )
 
 
-def _drain_stderr(stderr_buf: queue.Queue | None, runner: AgentRunner, errors: list) -> None:
+def _drain_stderr(stderr_rx: MemoryObjectReceiveStream[str | None] | None, runner: AgentRunner, errors: list) -> None:
     """Non-blocking drain of any stderr lines already queued.
 
     Called at the end of the supervision loop (after EOF or kill) to flush
-    whatever the runner's stderr reader has buffered. Each line is passed to
+    whatever the stderr reader task has buffered. Each line is passed to
     runner.parse_stderr_line (if implemented); non-None results are appended to
     `errors` so _no_verdict_reason can include the real cause.
 
-    Non-blocking: only drains what is already in the queue — never waits. The
-    stderr reader thread is a daemon and will have written all lines before the
-    process exits, so by the time we call this the queue is complete.
+    Non-blocking: only drains what is already in the memory stream — never
+    waits. The reader task pushes all lines before EOF, so once the process has
+    exited (EOF/kill) the buffered lines are complete.
     """
-    if stderr_buf is None:
+    if stderr_rx is None:
         return
     parse_stderr = getattr(runner, "parse_stderr_line", None)
     if parse_stderr is None:
         return
     while True:
         try:
-            line = stderr_buf.get_nowait()
-        except queue.Empty:
+            line = stderr_rx.receive_nowait()
+        except anyio.WouldBlock, anyio.EndOfStream:
             break
         if line is None:
             break
@@ -211,89 +226,118 @@ def _drain_stderr(stderr_buf: queue.Queue | None, runner: AgentRunner, errors: l
             errors.append(msg)
 
 
-def _supervise(
-    proc: subprocess.Popen,
+async def _supervise(
+    proc: Process,
     *,
     runner: AgentRunner,
-    idle_timeout_s: int,
+    idle_timeout_s: float,
     control_file: Path | None,
     on_event: Callable[[Event], None] | None = None,
-    stderr_buf: queue.Queue | None = None,
+    capture_stderr: bool = False,
 ) -> _Supervision:
     """Supervise a running agent by LIVENESS only — kill solely when idle.
 
-    A background thread reads stdout; the runner parses each line into an Event.
-    The main loop:
+    Reader tasks stream stdout (+ optional stderr) into memory streams; the main
+    loop folds each stdout line into an Event. The loop:
       - resets the IDLE deadline on every real event (the heartbeat),
       - stops early ("sidecar") the moment the control sidecar appears on disk
         — the agent's work is done even if the process lingers,
-      - stops ("completed") when the reader hits EOF (process finished),
+      - stops ("completed") when the stdout reader hits EOF (process finished),
       - kills only on STALE: no event AND no sidecar for idle_timeout_s.
 
     Runner-agnostic: the only runner-specific step is `runner.parse_event`.
-    stderr_buf: when set (LaunchSpec.capture_stderr=True), drained at completion
-    via runner.parse_stderr_line; extracted errors fold into _Supervision.errors.
+    On cancellation (Ctrl-C / a cancelled parent task group) the process group is
+    reaped via a shielded kill before the cancellation propagates, so no orphaned
+    opencode + MCP children survive.
     """
+    stdout_tx, stdout_rx = anyio.create_memory_object_stream[str | None](max_buffer_size=256)
+    stderr_tx, stderr_rx = anyio.create_memory_object_stream[str | None](max_buffer_size=256) if capture_stderr else (None, None)
     try:
-        return _supervise_loop(
-            proc, runner=runner, idle_timeout_s=idle_timeout_s, control_file=control_file, on_event=on_event, stderr_buf=stderr_buf
-        )
-    except KeyboardInterrupt:
-        # Ctrl-C: kill the agent's whole process group before propagating, so we
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_pump_lines, proc.stdout, stdout_tx)
+            if stderr_tx is not None:
+                tg.start_soon(_pump_lines, proc.stderr, stderr_tx)
+            sup = await _supervise_loop(
+                proc,
+                runner=runner,
+                idle_timeout_s=idle_timeout_s,
+                control_file=control_file,
+                on_event=on_event,
+                stdout_rx=stdout_rx,
+                stderr_rx=stderr_rx,
+            )
+            tg.cancel_scope.cancel()  # tear down any still-running reader
+        return sup
+    except BaseException:
+        # KeyboardInterrupt OR cancellation (anyio's cancel exc is a
+        # BaseException): reap the whole process group before propagating, so we
         # never leave an orphaned opencode (and its MCP children) running.
-        _kill_group(proc)
+        await _kill_group(proc)
         raise
 
 
-def _supervise_loop(
-    proc: subprocess.Popen,
+async def _supervise_loop(
+    proc: Process,
     *,
     runner: AgentRunner,
     idle_timeout_s: float,
     control_file: Path | None,
     on_event: Callable[[Event], None] | None,
-    stderr_buf: queue.Queue | None,
+    stdout_rx: MemoryObjectReceiveStream[str | None],
+    stderr_rx: MemoryObjectReceiveStream[str | None] | None,
 ) -> _Supervision:
     """The liveness loop (see _supervise). Extracted so _supervise stays a thin
-    interrupt-handling wrapper (and both stay under the complexity limit)."""
-    buf = _start_line_reader(proc)
+    spawn/interrupt wrapper (and both stay under the complexity limit).
+
+    On a stale or sidecar-present stop the lingering process is killed with a
+    shielded `_kill_group`; on EOF the process is reaped (already exiting).
+    """
     st: dict = {"tokens": 0, "cost": 0.0, "events": 0, "saw_terminal": False, "errors": [], "tail": deque(maxlen=_TAIL_LINES)}
-    idle_deadline = time.monotonic() + idle_timeout_s
+    idle_deadline = anyio.current_time() + idle_timeout_s
     sidecar_present = _sidecar_probe(control_file)
 
     while True:
         # Stop conditions checked before waiting for the next line.
-        stop = _stop_kind(time.monotonic() >= idle_deadline, sidecar_present())
+        stop = _stop_kind(anyio.current_time() >= idle_deadline, sidecar_present())
         if stop is not None:
-            _drain_stderr(stderr_buf, runner, st["errors"])
-            return _finish(proc, st, stop, kill=True)
+            await _kill_group(proc)  # idempotent; ensures no lingering process
+            _drain_stderr(stderr_rx, runner, st["errors"])
+            return _finish(st, stop)
 
-        try:
-            line = buf.get(timeout=max(min(idle_deadline - time.monotonic(), 1.0), 0.05))
-        except queue.Empty:
-            continue
+        # Wait for the next line, but never longer than the poll cap, so the
+        # sidecar/deadline checks above keep firing even during silence. A fresh
+        # window each iteration = "deadline resets on activity".
+        wait = max(min(idle_deadline - anyio.current_time(), _POLL_CAP_S), 0.05)
+        line: str | None = None
+        got_line = False
+        with anyio.move_on_after(wait):
+            line = await stdout_rx.receive()
+            got_line = True
+        if not got_line:
+            continue  # timed out with no line — re-check stop conditions
 
         if line is None:  # reader EOF — process finished
-            _reap(proc)
-            _drain_stderr(stderr_buf, runner, st["errors"])
-            return _finish(proc, st, "completed", kill=False)
+            await _reap(proc)
+            _drain_stderr(stderr_rx, runner, st["errors"])
+            return _finish(st, "completed")
 
         # Line arrived: fold it in (tail + events + errors). A real event is a
         # heartbeat -> reset the idle deadline. A terminal event once the sidecar
         # is on disk stops promptly (else the top-of-loop check catches it next).
         if _consume_line(line, st, runner, on_event):
-            idle_deadline = time.monotonic() + idle_timeout_s
+            idle_deadline = anyio.current_time() + idle_timeout_s
         if st["saw_terminal"] and sidecar_present():
-            _drain_stderr(stderr_buf, runner, st["errors"])
-            return _finish(proc, st, "sidecar", kill=True)
+            await _kill_group(proc)
+            _drain_stderr(stderr_rx, runner, st["errors"])
+            return _finish(st, "sidecar")
 
 
-def _reap(proc: subprocess.Popen) -> None:
+async def _reap(proc: Process) -> None:
     """Wait briefly for a finished process; kill its group if it lingers."""
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        _kill_group(proc)
+    with anyio.move_on_after(_KILL_GRACE_S) as scope:
+        await proc.wait()
+    if scope.cancelled_caught:
+        await _kill_group(proc)
 
 
 def _read_sidecar(control_file: Path | None) -> dict | None:
@@ -371,7 +415,7 @@ class SubprocessExecutor(AgentExecutor):
         self.name = getattr(runner, "name", "subprocess")
         self._env_extra = env_extra
 
-    def run(self, inv: AgentInvocation, *, control_file: Path | None = None) -> AgentResult:
+    async def run(self, inv: AgentInvocation, *, control_file: Path | None = None) -> AgentResult:
         """Run one invocation as a supervised subprocess -> AgentResult.
 
         `control_file` overrides the per-node sidecar path; by default it is
@@ -386,30 +430,8 @@ class SubprocessExecutor(AgentExecutor):
         run_dir = inv.run_dir
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        # Per-node control sidecar (node name is unique per run; falls back to the
-        # agent name). Derived here — the sidecar is this executor's mechanism.
-        if control_file is None:
-            base = inv.node or agent
-            control_file = run_dir / f"{base}.control.json"
-        # Defensive: clear a stale sidecar so completion keys only on THIS run's write.
-        control_file.unlink(missing_ok=True)
-
-        # Compose the final prompt. Order:
-        #   [verdict preamble] [compose_prompt: run-wide context+instructions + prompt]
-        # HOW the agent is told to report its verdict is the RUNNER's protocol
-        # (build_verdict_preamble). The runner returns the instruction block; the
-        # executor prepends it. A runner that does not implement it falls back to
-        # the shared sidecar preamble (build_control_preamble) — identical output
-        # for opencode, which simply delegates to that helper. A result schema, if
-        # supplied, is embedded in the preamble block.
-        schema = coerce_schema(inv.result_schema)
-        schema_dict = schema.to_json_schema() if schema is not None else None
-        build_preamble = getattr(self.runner, "build_verdict_preamble", None)
-        if callable(build_preamble):
-            preamble = build_preamble(agent, str(control_file), schema_dict)
-        else:
-            preamble = build_control_preamble(agent, str(control_file), schema_dict)
-        full_prompt = preamble + "\n\n" + compose_prompt(inv)
+        control_file = self._resolve_control_file(inv, control_file)
+        full_prompt = self._compose_full_prompt(inv, control_file)
 
         agent_dir = inv.agent_dir or ""
         spec = self.runner.build_command(replace(inv, prompt=full_prompt))
@@ -420,19 +442,18 @@ class SubprocessExecutor(AgentExecutor):
 
         # cwd = agent_dir when set (the runtime's project dir, e.g. where opencode
         # finds .opencode/agent). Not run_dir — that is the artifact/sidecar root.
-        start = time.monotonic()
+        start = anyio.current_time()
         try:
-            proc = subprocess.Popen(
+            proc = await anyio.open_process(
                 spec.argv,
                 cwd=agent_dir or None,
                 env=env,
-                stdout=subprocess.PIPE,
+                stdout=PIPE,
                 # capture_stderr=True: separate pipe so the runner's
                 # parse_stderr_line can extract actionable error detail without
                 # polluting the stdout JSON parse. False: merge into stdout
                 # (backward-compatible default for runners that don't opt in).
-                stderr=subprocess.PIPE if spec.capture_stderr else subprocess.STDOUT,
-                text=True,
+                stderr=PIPE if spec.capture_stderr else STDOUT,
                 start_new_session=True,
             )
         except OSError as exc:
@@ -440,22 +461,71 @@ class SubprocessExecutor(AgentExecutor):
             # Transient-in-principle (fix PATH and retry), so AgentCrashError.
             raise AgentCrashError(f"agent {agent!r}: failed to start ({spec.display}): {exc}") from exc
 
-        stderr_buf = _start_stderr_reader(proc) if spec.capture_stderr else None
-        sup = _supervise(
-            proc, runner=self.runner, idle_timeout_s=inv.idle_timeout_s, control_file=control_file, on_event=inv.on_event, stderr_buf=stderr_buf
-        )
-        duration = time.monotonic() - start
+        async with proc:
+            sup = await _supervise(
+                proc,
+                runner=self.runner,
+                idle_timeout_s=inv.idle_timeout_s,
+                control_file=control_file,
+                on_event=inv.on_event,
+                capture_stderr=spec.capture_stderr,
+            )
+            returncode = proc.returncode
+        duration = anyio.current_time() - start
 
-        # The control sidecar is the SOLE verdict. No sidecar => error; the engine
-        # never inspects artifacts to guess success (that is the gate's job).
+        return self._finalize(inv, control_file, spec, sup, returncode, agent_dir, duration)
+
+    def _resolve_control_file(self, inv: AgentInvocation, control_file: Path | None) -> Path:
+        """Per-node control sidecar path (node name is unique per run; falls back
+        to the agent name). Cleared defensively so completion keys only on THIS
+        run's write. The sidecar is this executor's own mechanism."""
+        if control_file is None:
+            base = inv.node or inv.agent
+            control_file = inv.run_dir / f"{base}.control.json"
+        control_file.unlink(missing_ok=True)
+        return control_file
+
+    def _compose_full_prompt(self, inv: AgentInvocation, control_file: Path) -> str:
+        """Compose the final prompt: [verdict preamble] + [compose_prompt].
+
+        HOW the agent reports its verdict is the RUNNER's protocol
+        (build_verdict_preamble). The runner returns the instruction block; the
+        executor prepends it. A runner that does not implement it falls back to
+        the shared sidecar preamble (build_control_preamble) — identical output
+        for opencode, which simply delegates to that helper. A result schema, if
+        supplied, is embedded in the preamble block."""
+        schema = coerce_schema(inv.result_schema)
+        schema_dict = schema.to_json_schema() if schema is not None else None
+        build_preamble = getattr(self.runner, "build_verdict_preamble", None)
+        if callable(build_preamble):
+            preamble = build_preamble(inv.agent, str(control_file), schema_dict)
+        else:
+            preamble = build_control_preamble(inv.agent, str(control_file), schema_dict)
+        return preamble + "\n\n" + compose_prompt(inv)
+
+    def _finalize(
+        self,
+        inv: AgentInvocation,
+        control_file: Path,
+        spec,  # noqa: ANN001 - LaunchSpec (runner-private type)
+        sup: _Supervision,
+        returncode: int | None,
+        agent_dir: str,
+        duration: float,
+    ) -> AgentResult:
+        """Read the sidecar verdict, assemble the result, and route failures.
+
+        The control sidecar is the SOLE verdict. No sidecar => error; the engine
+        never inspects artifacts to guess success (that is the gate's job)."""
+        agent = inv.agent
         sidecar = _read_sidecar(control_file)
         if sidecar is None:
-            sidecar = {"status": "error", "agent": agent, "reason": _no_verdict_reason(sup, proc.returncode, spec.display, agent_dir)}
+            sidecar = {"status": "error", "agent": agent, "reason": _no_verdict_reason(sup, returncode, spec.display, agent_dir)}
 
         result = self.assemble_result(
             inv,
             sidecar,
-            exit_code=proc.returncode,
+            exit_code=returncode,
             duration_s=duration,
             tokens=sup.tokens,
             cost=sup.cost,
@@ -477,7 +547,7 @@ class SubprocessExecutor(AgentExecutor):
             #    (check_content_status below raises AgentContentFailedError.)
             # 3. No error event but the process exited NON-ZERO with no sidecar ->
             #    a genuine crash (OOM, killed, transient provider 5xx) -> retry.
-            if not sup.errors and proc.returncode not in (0, None):
+            if not sup.errors and returncode not in (0, None):
                 raise AgentCrashError(f"agent {agent!r}: {sidecar['reason']}")
 
         # Shared content-status policy — same check MockExecutor calls. Raises
@@ -485,6 +555,50 @@ class SubprocessExecutor(AgentExecutor):
         # exit with no sidecar.
         self.check_content_status(agent, sidecar)
         return result
+
+
+async def arun_agent(
+    *,
+    agent: str,
+    prompt: str,
+    run_dir: Path,
+    runner: AgentRunner,
+    agent_dir: Path | None = None,
+    idle_timeout_s: int = DEFAULT_IDLE_TIMEOUT_S,
+    model: str | None = None,
+    instructions: str = "",
+    env_extra: dict[str, str] | None = None,
+    control_file: Path | None = None,
+    result_schema: ResultSchema | dict | type | None = None,
+    on_event: Callable[[Event], None] | None = None,
+    shared_instructions: str = "",
+    shared_context: str = "",
+    node: str = "",
+) -> AgentResult:
+    """Run one agent as a supervised subprocess (async — the native entry point).
+
+    Builds a neutral `AgentInvocation` from the keyword arguments and delegates to
+    `SubprocessExecutor`. New async code should call this (or build an
+    `AgentInvocation` and call an `AgentExecutor` directly); the sync `run_agent`
+    wrapper keeps the long-standing blocking API for existing callers/tests.
+
+    See `SubprocessExecutor` for the supervision/sidecar semantics.
+    """
+    inv = AgentInvocation(
+        agent=agent,
+        prompt=prompt,
+        run_dir=run_dir,
+        node=node,
+        result_schema=result_schema,
+        model=model,
+        agent_dir=str(agent_dir) if agent_dir else "",
+        instructions=instructions,
+        shared_instructions=shared_instructions,
+        shared_context=shared_context,
+        idle_timeout_s=idle_timeout_s,
+        on_event=on_event,
+    )
+    return await SubprocessExecutor(runner, env_extra=env_extra).run(inv, control_file=control_file)
 
 
 def run_agent(
@@ -505,58 +619,66 @@ def run_agent(
     shared_context: str = "",
     node: str = "",
 ) -> AgentResult:
-    """Run one agent as a supervised subprocess (backward-compatible shim).
+    """Run one agent as a supervised subprocess (sync back-compatible shim).
 
-    This is a thin wrapper that builds a neutral `AgentInvocation` from the
-    keyword arguments and delegates to `SubprocessExecutor`. It preserves the
-    long-standing keyword API (callers and tests use it directly); new code
-    should prefer building an `AgentInvocation` and calling an `AgentExecutor`.
+    A thin `anyio.run` wrapper over `arun_agent` — it preserves the long-standing
+    blocking keyword API that Tier-1/2 callers, examples, and tests use directly.
+    New async code should prefer `arun_agent` (no event-loop bridge) or building
+    an `AgentInvocation` and calling an `AgentExecutor`.
 
     See `SubprocessExecutor` for the supervision/sidecar semantics.
     """
-    inv = AgentInvocation(
-        agent=agent,
-        prompt=prompt,
-        run_dir=run_dir,
-        node=node,
-        result_schema=result_schema,
-        model=model,
-        agent_dir=str(agent_dir) if agent_dir else "",
-        instructions=instructions,
-        shared_instructions=shared_instructions,
-        shared_context=shared_context,
-        idle_timeout_s=idle_timeout_s,
-        on_event=on_event,
+    return anyio.run(
+        lambda: arun_agent(
+            agent=agent,
+            prompt=prompt,
+            run_dir=run_dir,
+            runner=runner,
+            agent_dir=agent_dir,
+            idle_timeout_s=idle_timeout_s,
+            model=model,
+            instructions=instructions,
+            env_extra=env_extra,
+            control_file=control_file,
+            result_schema=result_schema,
+            on_event=on_event,
+            shared_instructions=shared_instructions,
+            shared_context=shared_context,
+            node=node,
+        )
     )
-    return SubprocessExecutor(runner, env_extra=env_extra).run(inv, control_file=control_file)
 
 
-def _kill_group(proc: subprocess.Popen) -> None:
+async def _kill_group(proc: Process) -> None:
     """Terminate the child's whole process group: SIGTERM, grace, then SIGKILL.
 
-    #1 fix: after exhausting both signals, falls back to a direct proc.kill()
-    so we never leave a zombie regardless of whether os.killpg reached the
-    group leader.
+    Runs inside a SHIELDED cancel scope so the kill completes even when the
+    caller is being cancelled (Ctrl-C, a cancelled parent task group) — this is
+    the invariant that guarantees no orphaned opencode + MCP children.
+    `os.killpg` stays (a non-blocking syscall); only the between-signal waits are
+    async. After exhausting both signals it falls back to a direct `proc.kill()`
+    so we never leave a zombie regardless of whether os.killpg reached the leader.
     """
-    try:
-        pgid = os.getpgid(proc.pid)
-    except ProcessLookupError:
-        return  # process already gone
-
-    for sig in (signal.SIGTERM, signal.SIGKILL):
+    with anyio.CancelScope(shield=True):
         try:
-            os.killpg(pgid, sig)
+            pgid = os.getpgid(proc.pid)
         except ProcessLookupError:
-            return  # group already gone — nothing to do
-        try:
-            proc.wait(timeout=5)
-            return  # process exited cleanly after signal
-        except subprocess.TimeoutExpired:
-            continue  # escalate to next signal
+            return  # process already gone
 
-    # Last resort: direct kill on the process leader in case os.killpg missed it.
-    try:
-        proc.kill()
-        proc.wait(timeout=5)
-    except ProcessLookupError, subprocess.TimeoutExpired:
-        pass
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(pgid, sig)
+            except ProcessLookupError:
+                return  # group already gone — nothing to do
+            with anyio.move_on_after(_KILL_GRACE_S) as scope:
+                await proc.wait()
+            if not scope.cancelled_caught:
+                return  # process exited after the signal
+
+        # Last resort: direct kill on the leader in case os.killpg missed it.
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            return
+        with anyio.move_on_after(_KILL_GRACE_S):
+            await proc.wait()

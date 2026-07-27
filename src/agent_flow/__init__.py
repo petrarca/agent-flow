@@ -9,8 +9,8 @@ the agent runtime (opencode, Claude Code, …) are both pluggable.
 Public API (the authoritative list is `__all__` below):
 
     from agent_flow import (
-        # Tier 1: one supervised agent (the primitive)
-        run_agent, AgentResult,
+        # Tier 1: one supervised agent (the primitive; arun_agent = async native)
+        run_agent, arun_agent, AgentResult,
         AgentTimeoutError, AgentContentFailedError, AgentCrashError,
         # runners (subprocess wire adapters) + the execution seam
         AgentRunner, AgentInvocation, Event,
@@ -63,6 +63,7 @@ from agent_flow.core import (
     PydanticSchema,
     ResultSchema,
     ValidationOutcome,
+    arun_agent,
     build_control_preamble,
     coerce_schema,
     load_env,
@@ -153,6 +154,7 @@ __all__ = [
     "__version__",
     # agent execution
     "run_agent",
+    "arun_agent",
     "AgentResult",
     "AgentTimeoutError",
     "AgentContentFailedError",
