@@ -65,11 +65,26 @@ imported only when you choose it, and Tiers 1–2 don't require it. Details and 
 backend rationale:
 [`design/orchestrator/backend.md`](../design/orchestrator/backend.md).
 
+**Async-first, sync-friendly.** The engine core runs on
+[`anyio`](https://anyio.readthedocs.io/), so an async-native agent (PydanticAI)
+is a first-class in-process node and the flow can run inside your own event loop.
+The change is additive: the flow callable `build_flow` returns is an async
+coroutine, but the entry points you call keep their blocking signatures —
+`run_flow(flow, …)` and `run_cli(flow)` bridge it with `anyio.run` for you. From
+inside an event loop, use the async twins `await arun_flow(flow, …)` /
+`await build_flow(nodes)(…)` instead. Consumer callables (impls, gates, exports,
+hooks) may be sync `def` or `async def` — the engine awaits an awaitable and
+offloads a blocking sync callable to a worker thread. See
+[`design/orchestrator/engine.md`](../design/orchestrator/engine.md).
+
 ```python
+import anyio
 from agent_flow import agent_node, build_flow
 
 nodes = [agent_node("hello", "hello-agent",
                     inputs={"REPORT": "{run_dir}/hello.md"},
                     gate_ref="require_file", gate_args={"path": "{run_dir}/hello.md"})]
-build_flow(nodes, name="hello")(runtime="opencode")  # no run_dir -> a temp dir (logged)
+flow = build_flow(nodes, name="hello")           # -> an async flow callable
+anyio.run(lambda: flow(runtime="opencode"))      # no run_dir -> a temp dir (logged)
+# on an event loop you'd instead:  await flow(runtime="opencode")
 ```

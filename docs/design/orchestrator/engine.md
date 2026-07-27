@@ -25,12 +25,32 @@ The engine does **not** import Tier 1 — it meets `run_agent` only through the
 caller-supplied `Node.run`. (The [node builder](node_builder.md) module is the one
 place that bridges both, on purpose.)
 
+## Async-first
+
+The engine core is **async** (on [`anyio`](https://anyio.readthedocs.io/)): the
+call chain `interpret → run_node → run_group → _walk → _walk_session → the flow
+callable` is a chain of coroutines, and the callable `build_flow` returns is an
+`async def`. This makes an async-native agent (PydanticAI) a first-class
+in-process node and lets the flow run inside a consumer's event loop.
+
+The change is **additive** — every consumer callable may be sync `def` OR async
+`async def`, and the engine dispatches through a single `await`-if-awaitable point
+(`_maybe_await`): a node's `run`, a `gate`, an `exports` impl, and the observing
+hooks. A sync callable's plain return passes straight through; an async one is
+awaited. The pure graph logic (`plan_groups`, the toposort, name→index resolvers,
+jump-back selection) stays synchronous — there is nothing to await there.
+
+Entry points stay sync-facing: `run_flow` / `run_cli` / `run_agent` are thin
+`anyio.run` wrappers over the async natives `arun_flow` / `arun_agent` / the async
+flow callable. Call the sync form from a script; `await` the async form from an
+event loop (FastAPI, a notebook).
+
 ## `Node`
 
 ```python
 Node(
     name,                      # unique node id
-    run,                       # RunFn: (RunContext) -> anything the gate inspects
+    run,                       # RunFn: (RunContext) -> anything the gate inspects; sync OR async
     gate=None,                 # optional flow-control gate; absent = Continue
     depends_on=(),             # DAG edges (upstream node names)
     parallel_group=None,       # nodes sharing a group name fan out concurrently
@@ -61,9 +81,11 @@ group), topologically sorts the groups by `depends_on` (Kahn, tie-broken by
 declaration order), and raises on an unknown dependency or a cycle. It is pure
 and unit-tested without Prefect.
 
-## `interpret` — one node to completion (pure)
+## `interpret` — one node to completion
 
-`interpret(node, …)` runs the node, invokes its gate, and applies the directive:
+`interpret(node, …)` is a coroutine (`await interpret(...)`). It `await`s the
+node's `run`, `await`s its gate, and applies the directive. Its logic is
+otherwise unchanged — only the consumer callables are awaited-if-awaitable:
 
 - `Continue` → done.
 - `Restart` (and `GoTo` to self) → re-run the node in place, bounded by
@@ -79,8 +101,10 @@ callback: `blocking` → `NodeBlocked`; `degrade` → status `degraded`.
 ## `build_flow` — compile to a runnable flow callable
 
 `build_flow(nodes, *, name, llm_tag, llm_concurrency, on_event_factory, on_node_event, shared_instructions, shared_context, agent_dir, node_instructions, backend="inprocess", registry=None)`
-returns a plain callable `f(run_dir="", start_from="", only="", **params) -> dict[str, NodeOutcome]`.
-It:
+returns an **async** callable `async f(run_dir="", start_from="", only="", **params) -> dict[str, NodeOutcome]`
+(`build_flow`'s own body stays sync — only the returned callable is a coroutine;
+`await` it, or use the sync `run_flow` / `run_cli` wrappers that bridge it with
+`anyio.run`). It:
 
 - fails fast at build time on cycles/unknown deps (`plan_groups`),
 - resolves the selected `backend` (default `"inprocess"`) and dispatches each
@@ -88,8 +112,8 @@ It:
 - honors bounded **cross-node jump-back**,
 - honors `start_from` (enter at a group, run forward) and `only` (run exactly
   one group, stop),
-- applies an optional LLM concurrency limit on `llm_tag` (a process-local
-  semaphore on the in-process backend; a server-side limit on the Prefect backend).
+- applies an optional LLM concurrency limit on `llm_tag` (an `anyio.Semaphore` on
+  the in-process backend; a server-side limit on the Prefect backend).
 
 The backend is resolved **lazily inside `build_flow`** (via
 `agent_flow.backends.get_backend`) so the engine module imports without pulling

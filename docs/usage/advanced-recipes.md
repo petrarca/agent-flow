@@ -16,6 +16,14 @@ Each assumes you've read [getting-started.md](getting-started.md).
 > custom registry logic, and run-wide brief/context:
 > see [recipes.md](recipes.md).
 
+> **The pipeline callable is async.** `build_flow(...)` returns an *async* flow
+> callable, so `pipeline(**params)` is a coroutine. The snippets below that call
+> it directly (`build_flow(nodes, …)(product_key=…)`) assume you either `await` it
+> on an event loop or bridge it with `anyio.run(lambda: pipeline(**params))`.
+> `run_cli` does this bridge for you — nothing to think about when you use the
+> CLI. Consumer callables here (gate callables, a hand-written node `run`, an
+> `impl`, hooks) may each be sync `def` or `async def`.
+
 ## Run a pipeline from the CLI (no bespoke command)
 
 Instead of hand-writing a Typer command, hand your node list to the library's
@@ -100,8 +108,10 @@ summary** so they don't read as inputs you could pass. A node then overwrites th
 placeholder for downstream nodes (see [`exports`](#exports)).
 
 Prefer your own CLI? `run_cli` is optional — build any CLI you like and call
-`build_flow(...)` / `pipeline(**params)` directly (see the toy example, which
-reuses `build_run_config` and `preflight` in its own Tier-2 CLI).
+`build_flow(...)` then run the pipeline yourself. The pipeline is an async
+coroutine, so a sync CLI bridges it once: `anyio.run(lambda: pipeline(**params))`
+(or `await pipeline(**params)` if your CLI is already async). See the toy example,
+which reuses `build_run_config` and `preflight` in its own Tier-2 CLI.
 
 ## Check that a step actually produced its file
 
@@ -204,9 +214,9 @@ node_instructions:
 ```
 
 ```python
-# programmatic
-build_flow(nodes, name="my-pipeline")(product_key="acme",
-    node_instructions={"analyst": "…", "summary": "…"})
+# programmatic (the flow callable is async — bridge with anyio.run, or await it)
+flow = build_flow(nodes, name="my-pipeline")
+anyio.run(lambda: flow(product_key="acme", node_instructions={"analyst": "…", "summary": "…"}))
 ```
 
 CLI `--instruct` merges over the config `node_instructions:` (CLI wins per node).
@@ -226,7 +236,7 @@ python my_flow.py run -p product_key=acme \
 ```
 
 ```python
-build_flow(nodes, name="my-pipeline")(product_key="acme", start_from="extractor")
+anyio.run(lambda: build_flow(nodes, name="my-pipeline")(product_key="acme", start_from="extractor"))
 ```
 
 `start_from` names a **node** or a **parallel-group** (`agent_node(parallel_group=…)`):
@@ -257,7 +267,7 @@ python my_flow.py run -p product_key=acme \
 ```
 
 ```python
-build_flow(nodes, name="my-pipeline")(product_key="acme", only="extractor")
+anyio.run(lambda: build_flow(nodes, name="my-pipeline")(product_key="acme", only="extractor"))
 ```
 
 Same **group granularity** as `start_from`: a group name runs the whole fan-out;
@@ -376,9 +386,10 @@ In short: **read `ctx.obj` when you set a schema; `ctx.result` otherwise.**
 ## Choose the execution backend (`--backend`)
 
 The DAG runs on a swappable execution backend. The default is a Prefect-free
-**local** backend — in-process threads for parallel groups, a semaphore for the
-concurrency limit, stdlib logging. No temporary server, fast startup, one fewer
-heavy dependency. It is the right choice for everyday single runs.
+**in-process** backend — an `anyio` task group for parallel groups, an
+`anyio.Semaphore` for the concurrency limit, stdlib logging. No temporary server,
+fast startup, one fewer heavy dependency. It is the right choice for everyday
+single runs.
 
 ```bash
 # default: in-process backend (nothing to pass)
@@ -480,22 +491,25 @@ The flow returns `dict[str, NodeOutcome]` (status + `duration_s` per node). See
 `agent_node` covers the common "one agent, KEY: value inputs" case. When it
 doesn't fit — e.g. one node needs to call two agents in sequence, or compose a
 prompt in a way `inputs`/`instructions` can't express — write the `Node`'s `run`
-yourself:
+yourself. It may be sync `def` or `async def`; the engine handles both. Prefer
+`async def` + `await arun_agent(...)` so the supervision runs on the engine's
+event loop; a sync `def run` that calls the blocking `run_agent` also works but is
+offloaded to a worker thread:
 
 ```python
-from agent_flow import Node, run_agent, get_runner
+from agent_flow import Node, arun_agent, get_runner
 
-def run(ctx):
-    r = run_agent(agent="my-agent", prompt="...", run_dir=ctx.run_dir,
-                   runner=get_runner(ctx.params.get("runtime", "opencode")),
-                   control_file=ctx.run_dir / "my-agent.control.json")
+async def run(ctx):
+    r = await arun_agent(agent="my-agent", prompt="...", run_dir=ctx.run_dir,
+                          runner=get_runner(ctx.params.get("runtime", "opencode")),
+                          control_file=ctx.run_dir / "my-agent.control.json")
     return r.control
 
 Node("custom", run=run, depends_on=("hello",))
 ```
 
 This still plugs into `build_flow` — a hand-written `Node` and an `agent_node`
-mix freely in the same graph. Or skip the declarative engine entirely and call
-`run_agent` inside your own Prefect flow (Tier 2 — see `examples/custom_flow.py`),
-or outside Prefect altogether (Tier 1). See
+mix freely in the same graph. Or skip the declarative engine entirely: `await
+arun_agent(...)` (or the blocking `run_agent(...)`) inside your own flow (Tier 2 —
+see `examples/custom_flow.py`), or outside any backend altogether (Tier 1). See
 [index.md](../design/orchestrator/index.md) for the three tiers.

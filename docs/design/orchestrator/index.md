@@ -84,10 +84,10 @@ signal). Everything else the agent emits is opaque. See
 Each tier is usable on its own; the number reflects how close you are to the metal.
 
 ```
-TIER 3  DECLARATIVE          declare Nodes -> build_flow() -> a runnable flow callable (dispatches to the backend)
+TIER 3  DECLARATIVE          declare Nodes -> build_flow() -> an async flow callable (dispatches to the backend)
         agent_node() = one call per agent (node builder)
               │ composes
-TIER 2  PRIMITIVES           call run_agent() as the leaf of YOUR OWN Prefect flow
+TIER 2  PRIMITIVES           await arun_agent() (or sync run_agent()) as the leaf of YOUR OWN flow
               │ uses
 TIER 1  ENGINE CORE          run_agent(): spawn + liveness-supervise + kill + sidecar verdict
         AgentExecutor seam (Subprocess / InProcess / Mock); AgentRunner wire
@@ -107,6 +107,7 @@ it. Pipelines differ only in their Tier-3 declaration.
 ## The 30-second example (Tier 3)
 
 ```python
+import anyio
 from agent_flow import agent_node, build_flow
 
 nodes = [
@@ -118,8 +119,17 @@ nodes = [
                depends_on=("tech-stack",), criticality="degrade",
                gate_ref="rerun_on_signal", gate_args={"target": "tech-stack"}),
 ]
-build_flow(nodes, name="tech")(product_key="acme", runtime="opencode")  # no run_dir -> temp dir under <temp>/agent-flow/
+flow = build_flow(nodes, name="tech")                    # -> an async flow callable
+anyio.run(lambda: flow(product_key="acme", runtime="opencode"))  # no run_dir -> temp dir under <temp>/agent-flow/
+# on an event loop:  await flow(product_key="acme", runtime="opencode")
+# or the FlowDef one-liner:  run_flow(flow_def, …) / await arun_flow(flow_def, …)
 ```
+
+The engine core is **async** (on [`anyio`](https://anyio.readthedocs.io/)) — an
+async-native agent (PydanticAI) is a first-class in-process node, and the flow can
+`await` inside a consumer's event loop. It stays additive: the sync `run_flow` /
+`run_cli` / `run_agent` wrap the async natives, and consumer callables (impls,
+gates, exports, hooks) may be sync or async. See [engine.md](engine.md).
 
 ## Concept map
 

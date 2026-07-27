@@ -70,7 +70,9 @@ nodes = [
 
 ## What it does for you
 
-Inside the generated `run`, `agent_node`:
+The generated `run` is an `async def` closure (the engine `await`s it); its
+single await point is the executor call below. Everything else — prompt
+composition, small-file reads — is synchronous inline. Inside it, `agent_node`:
 
 - resolves the `inputs` into a `KEY: value` work order via `resolve_work_order`,
   expanding `{name}` templates against the flow `params` (plus `{run_dir}`),
@@ -82,7 +84,8 @@ Inside the generated `run`, `agent_node`:
   `result_schema`, run-wide `shared_instructions`/`shared_context`, and an
   `on_event` callback built from `RunContext.on_event_factory` under the NODE
   name),
-- selects an executor and calls `executor.run(inv)` (see below),
+- selects an executor and `await`s `executor.run(inv)` (the executor seam is
+  async; an in-process `impl` may itself be sync or async — see below),
 - returns the control envelope plus a little `_`-prefixed telemetry for the gate.
 
 Note it does NOT call `run_agent`: it builds the invocation and hands it to an

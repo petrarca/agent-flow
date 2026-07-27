@@ -168,12 +168,18 @@ def _log(node, outcome):
 Two entry points, no manual compile/build in the common case:
 
 ```python
-from agent_flow import run_flow          # programmatic one-liner
+from agent_flow import run_flow          # programmatic one-liner (blocking)
 run_flow(flow, registry=registry, product_key="acme", runtime="opencode")
+
+from agent_flow import arun_flow         # async-native twin — await on an event loop
+# await arun_flow(flow, registry=registry, product_key="acme", runtime="opencode")
 
 from agent_flow.cli import run_cli        # the reusable CLI (run / flow nodes / version)
 run_cli(flow, registry=registry, params_model=MyParams)
 ```
+
+`run_flow` is a thin `anyio.run` wrapper over `arun_flow`; use `arun_flow` (or the
+async flow callable from `build_flow`) when you are already on an event loop.
 
 `run_cli(flow_def)` compiles + runs it and also gives `run`, `flow nodes`, and
 `version` subcommands (pass `version="…"` to surface your app version alongside

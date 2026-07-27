@@ -107,6 +107,52 @@ A gate configured per node just takes extra keyword params; the node's
 (a `(payload) -> params` map published downstream) and `@registry.run` (a custom
 `(ctx) -> dict` node run, referenced by `NodeDef(run_ref="…")`).
 
+Every consumer callable above — a gate, an `after_node` hook, an `export`, a
+custom `run`, an in-process `impl` — may be a plain `def` OR an `async def`. The
+engine awaits an awaitable return and offloads a blocking sync callable to a
+worker thread, so you write async only where it buys you something.
+
+## An async in-process agent (PydanticAI)
+
+An in-process node runs a Python callable directly — no subprocess, no control
+sidecar — and maps its typed return onto the same result contract a subprocess
+agent produces. Because agent-flow's engine is async-first, an async-native agent
+library (PydanticAI) is a first-class node: write the `impl` as `async def` and
+`await` the agent inside it. Register it by name and reference it with
+`NodeDef(impl_ref=…)` (or attach it imperatively with `agent_node(impl=…)`):
+
+```python
+from agent_flow import FlowDef, NodeDef, FlowRegistry, arun_flow
+from pydantic import BaseModel
+
+class Triage(BaseModel):
+    category: str
+    urgent: bool
+
+registry = FlowRegistry()
+registry.schema("Triage")(Triage)
+
+@registry.agent_impl("triage")               # the impl may be async
+async def triage(inv):                        # inv = the neutral AgentInvocation
+    # a real PydanticAI agent:  result = await agent.run(inv.prompt); return result.output
+    return Triage(category="bug", urgent="crash" in inv.prompt.lower())
+
+flow = FlowDef(name="triage", nodes=[
+    NodeDef(name="triage", impl_ref="triage", inputs={"TICKET": "{ticket}"}, result_schema="Triage"),
+])
+
+# On an event loop (FastAPI / notebook), await the async-native entry:
+#   result = await arun_flow(flow, registry=registry, ticket="app crashes on login")
+# From a plain script, the blocking run_flow wrapper does the same:
+#   run_flow(flow, registry=registry, ticket="app crashes on login")
+```
+
+A gate reads the validated typed object as `ctx.obj` regardless of whether the
+node ran in-process or as a subprocess — the two execution models are
+interchangeable behind the node. A runnable end-to-end version (sync + async
+impls mixed in one flow, both `run_flow` and `arun_flow` entry points) is
+`examples/inprocess.py`.
+
 ## Run-wide brief and context
 
 Inject a directive / rules into every agent:
