@@ -597,13 +597,13 @@ def build_flow(
                 # duplicate the multi-line reason in the log.
                 summary = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
                 if n.criticality == "blocking":
-                    logger.error("BLOCKING node %s failed: %s", n.name, summary)
+                    logger.error(f"BLOCKING node {n.name} failed: {summary}")
                     _emit(n.name, "finish", "failed", n.agent)
                     raise NodeBlocked(f"{n.name}: {exc}") from exc
-                logger.warning("DEGRADE node %s failed: %s — continuing", n.name, summary)
+                logger.warning(f"DEGRADE node {n.name} failed: {summary} — continuing")
                 return "degraded"
 
-            logger.info("node %s: start (criticality=%s)", node.name, node.criticality)
+            logger.info(f"node {node.name}: start (criticality={node.criticality})")
             _emit(node.name, "start", None, node.agent)
             # on_event_factory / shared_instructions / shared_context / agent_dir
             # are build-time values threaded into every node.
@@ -623,7 +623,7 @@ def build_flow(
             )
             # Stamp the node's wall-clock duration (timed here, where it runs).
             outcome = replace(outcome, duration_s=time.monotonic() - started)
-            logger.info("node %s: %s (%.1fs)", node.name, outcome.status, outcome.duration_s)
+            logger.info(f"node {node.name}: {outcome.status} ({outcome.duration_s:.1f}s)")
             _emit(node.name, "finish", outcome.status, node.agent)
             return outcome
 
@@ -653,7 +653,7 @@ def build_flow(
             # prefect backend; directly for local) — so the logger, concurrency
             # limit, and node submission all bind to that context here.
             logger = backend_impl.get_logger()
-            logger.info("run_dir: %s", wd)
+            logger.info(f"run_dir: {wd}")
             if llm_concurrency is not None:
                 await backend_impl.apply_concurrency_limit(llm_tag, llm_concurrency, logger.info, logger.warning)
             # Run-scoped {node: one-time instruction} store; the walker fills it on
@@ -674,7 +674,7 @@ def build_flow(
                 pending_instructions=pending_instructions,
             )
             # Compact {node: status} summary — not the verbose NodeOutcome reprs.
-            logger.info("%s done: %s", name, {n: oc.status for n, oc in results.items()})
+            logger.info(f"{name} done: { {n: oc.status for n, oc in results.items()} }")
             return results
 
         backend_impl.bootstrap()
@@ -739,9 +739,9 @@ def _resolve_start_index(start_from: str, by_name, group_index, node_group, logg
     entry = sorted(n for n in by_name if group_index[node_group[n]] == start_index)
     skipped = sorted(n for n in by_name if group_index[node_group[n]] < start_index)
     if len(entry) > 1:
-        logger.info("start_from=%s: entering at PARALLEL group %s (all run), skipping %s", start_from, entry, skipped)
+        logger.info(f"start_from={start_from}: entering at PARALLEL group {entry} (all run), skipping {skipped}")
     else:
-        logger.info("start_from=%s: entering at %s, skipping %s", start_from, entry, skipped)
+        logger.info(f"start_from={start_from}: entering at {entry}, skipping {skipped}")
     return start_index
 
 
@@ -758,9 +758,9 @@ def _resolve_only_index(only: str, by_name, group_index, node_group, logger) -> 
     idx = _name_to_group_index(only, by_name, group_index, node_group, "only")
     members = sorted(n for n in by_name if group_index[node_group[n]] == idx)
     if len(members) > 1:
-        logger.info("only=%s: running PARALLEL group %s (all run), skipping everything else", only, members)
+        logger.info(f"only={only}: running PARALLEL group {members} (all run), skipping everything else")
     else:
-        logger.info("only=%s: running %s, skipping everything else", only, members)
+        logger.info(f"only={only}: running {members}, skipping everything else")
     return idx
 
 
@@ -835,15 +835,15 @@ def _pick_jump_back(outcomes, node_group, group_index, current_i, jumps, by_name
         if target is None:
             continue
         if target not in by_name:
-            logger.warning("GoTo target %r is not a known node — ignoring", target)
+            logger.warning(f"GoTo target {target!r} is not a known node — ignoring")
             continue
         target_i = group_index[node_group[target]]
         if target_i >= current_i:
-            logger.warning("GoTo %r is not a backward jump — ignoring", target)
+            logger.warning(f"GoTo {target!r} is not a backward jump — ignoring")
             continue
         if jumps.get(target, 0) >= by_name[target].max_cycles:
-            logger.warning("GoTo %r exhausted (max_cycles) — proceeding", target)
+            logger.warning(f"GoTo {target!r} exhausted (max_cycles) — proceeding")
             continue
-        logger.info("jump-back to %r (re-running from its group)", target)
+        logger.info(f"jump-back to {target!r} (re-running from its group)")
         return target
     return None

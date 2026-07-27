@@ -20,8 +20,8 @@ Prefect-free, guarded by the import-isolation test.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 import anyio
 
@@ -81,18 +81,23 @@ class PrefectBackend(FlowBackend):
         except (PrefectException, httpx.HTTPError, OSError) as exc:
             warn(f"concurrency limit setup skipped: {exc}")
 
-    def get_logger(self) -> logging.Logger:
-        """Prefect's run logger inside a flow, else the stdlib logger.
+    def get_logger(self) -> Any:
+        """Prefect's run logger inside a flow, else loguru.
 
-        run_group / build_flow call this outside a task context too, so degrade
-        gracefully when there is no active run (mirrors node_builder._node_logger).
+        Inside a flow/task, Prefect's `get_run_logger()` routes node lines into
+        the run UI; both it and loguru accept a single pre-formatted message, and
+        the engine only passes f-strings, so either works. run_group / build_flow
+        call this outside a task context too, so degrade gracefully to loguru when
+        there is no active run.
         """
         try:
             from prefect import get_run_logger
 
             return get_run_logger()
-        except Exception:  # noqa: BLE001 - no active run context -> stdlib
-            return logging.getLogger("agent_flow")
+        except Exception:  # noqa: BLE001 - no active run context -> loguru (house default)
+            from loguru import logger
+
+            return logger
 
     def bootstrap(self) -> None:
         """Set Prefect env defaults for a robust, self-contained local run.

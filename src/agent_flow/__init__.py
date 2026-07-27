@@ -94,6 +94,7 @@ from agent_flow.gates import (
     rerun_on_named,
     rerun_on_signal,
 )
+from agent_flow.logging_setup import setup_logging
 from agent_flow.node_builder import agent_node, control_path
 from agent_flow.preflight import Check, check, fatal_failures
 from agent_flow.registry import FlowRegistry
@@ -248,4 +249,6 @@ __all__ = [
     "fatal_failures",
     # env
     "load_env",
+    # logging (loguru + stdlib intercept)
+    "setup_logging",
 ]

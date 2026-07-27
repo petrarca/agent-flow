@@ -42,6 +42,7 @@ dynamic = ["version"]
 # A programmatic consumer of build_flow (InProcessBackend) needs neither.
 dependencies = [
     "anyio>=4.0",
+    "loguru>=0.7",
     "python-dotenv>=1.0.0",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",

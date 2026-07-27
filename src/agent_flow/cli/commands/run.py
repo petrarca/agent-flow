@@ -64,8 +64,17 @@ def register(app, ctx: RunCliContext) -> None:
         idle_timeout: int | None = typer.Option(
             None, "--idle-timeout", help="liveness timeout (s): kill an agent only after this long with no event/sidecar"
         ),
+        log_level: str = typer.Option(
+            "INFO", "--log-level", help="library log level: DEBUG | INFO | WARNING | ERROR (engine/supervision lines via loguru to stderr)"
+        ),
     ) -> None:
         """Run the pipeline."""
+        from agent_flow.logging_setup import setup_logging
+
+        # Configure loguru (+ stdlib intercept) FIRST, so preflight and the whole
+        # run emit visible, level-controlled logs to stderr. DEBUG surfaces node
+        # start/finish, run_dir, jump-backs, and per-node executor selection.
+        setup_logging(log_level)
         console = get_console()
         cfg = build_run_config(
             config_file=config or None,

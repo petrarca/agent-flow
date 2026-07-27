@@ -23,8 +23,8 @@ PRIMITIVE differs (a threadpool vs Prefect task submission). So this seam is an
 from __future__ import annotations
 
 import abc
-import logging
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from agent_flow.engine import Node, NodeOutcome
 
@@ -61,7 +61,7 @@ class FlowBackend(abc.ABC):
         if len(group) == 1:
             n = group[0]
             return {n.name: await run_node(n.name)}
-        self.get_logger().info("PARALLEL group: %s", [n.name for n in group])
+        self.get_logger().info(f"PARALLEL group: {[n.name for n in group]}")
         names = [n.name for n in group]
         outcomes = await self._execute_parallel(names, run_node)
         # Defensive: any name the backend didn't return -> degraded (never drop a node).
@@ -96,8 +96,14 @@ class FlowBackend(abc.ABC):
         """Best-effort: bound concurrent node execution to `limit` (on tag `tag`)."""
 
     @abc.abstractmethod
-    def get_logger(self) -> logging.Logger:
-        """A logger for engine + node lines (run-tagged if the backend supports it)."""
+    def get_logger(self) -> Any:
+        """A logger for engine + node lines (run-tagged if the backend supports it).
+
+        Returns any object exposing `.info/.warning/.error` that accepts a single
+        pre-formatted message string — loguru's `logger` (InProcessBackend, the
+        house standard) or Prefect's `get_run_logger()` (PrefectBackend, so node
+        lines land in the run UI). The engine passes only f-string messages, so
+        both sinks behave identically."""
 
     @abc.abstractmethod
     def bootstrap(self) -> None:

@@ -14,15 +14,14 @@ a single run, which is this backend's whole point.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 import anyio
+from loguru import logger as _LOGGER
 
 from agent_flow.backends.base import FlowBackend, RunNode
 from agent_flow.engine import NodeBlocked, NodeOutcome
-
-_LOGGER = logging.getLogger("agent_flow")
 
 
 def _first_of_type(eg: BaseExceptionGroup, exc_type: type[BaseException]) -> BaseException | None:
@@ -98,8 +97,8 @@ class InProcessBackend(FlowBackend):
         self._sema = anyio.Semaphore(limit)
         info(f"LLM concurrency limit set to {limit} (in-process semaphore)")
 
-    def get_logger(self) -> logging.Logger:
-        return _LOGGER
+    def get_logger(self) -> Any:
+        return _LOGGER  # loguru's logger (the house standard)
 
     def bootstrap(self) -> None:
         return None  # no setup — the whole point of the in-process backend
