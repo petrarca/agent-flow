@@ -59,12 +59,21 @@ still flows a value (`category`/`urgency`) from one node to the next. Attached b
 name (`NodeDef.impl_ref` + `registry.agent_impl`); the imperative form is
 `agent_node(impl=fn)`.
 
-It runs **programmatically via `run_flow`** (not `run_cli`): an all-in-process
-flow has no runtime/agent-dir, and the CLI pre-flight is still subprocess-oriented
-(issue #11). No `.opencode/` or `--runtime` needed.
+This is also the **async-first showcase**: `classify` is a plain `def` and
+`respond` is an `async def` (the real PydanticAI shape — `await agent.run(…)`),
+and the two mix in one flow with no FlowDef changes. The engine awaits an async
+impl inline on its event loop and offloads a blocking sync impl to a worker
+thread. Two entry points are shown: the sync `run_flow` (an `anyio.run` wrapper,
+for a plain script) and the async-native `arun_flow` (what you'd `await` from a
+FastAPI handler / notebook already on an event loop).
+
+It runs **programmatically via `run_flow` / `arun_flow`** (not `run_cli`): an
+all-in-process flow has no runtime/agent-dir, and the CLI pre-flight is still
+subprocess-oriented (issue #11). No `.opencode/` or `--runtime` needed.
 
 ```bash
-task example:inprocess                                  # default ticket
+task example:inprocess                                  # sync run_flow, default ticket
 task example:inprocess TICKET="cannot log in, urgent"   # your ticket
 python -m examples.inprocess "minor typo on the about page"
+python -m examples.inprocess --async "billing question"  # async-native arun_flow
 ```

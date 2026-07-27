@@ -191,3 +191,31 @@ Docs are OKF bundles (`docs/usage/`, `docs/design/orchestrator/`) — every file
 has a `type` frontmatter field. When you change behavior, update the matching
 concept doc and verify code snippets run. The README covers install + the three
 tiers + running the examples.
+
+### OKF frontmatter taxonomy
+
+Every doc opens with a YAML frontmatter block. Keys (in this order):
+
+- `type` — **required**, the doc's role. Vocabulary in use:
+  - `Design Overview` / `Usage Overview` — the `index.md` at a bundle root (the
+    concept map / entry point).
+  - `Concept` — one design concept per file (`design/orchestrator/*.md`): the
+    engine, gates, supervision, the control-file, the input-plane, etc.
+  - `Design` — a design *proposal/plan* for a change (broader than one Concept),
+    e.g. `async-first.md`, `serve-executor.md`.
+  - `Guide` — a task-oriented consumer how-to (`usage/*.md`:
+    getting-started, writing-agents, recipes).
+  - `Research` — empirical findings from probing an external system
+    (`docs/research/*.md`).
+- `title` — **required**, one human-readable line.
+- `description` — **required**, 1–3 sentences; what the doc covers and why.
+- `tags` — **required**, a `[list]` always led by `agent-flow`.
+- `status` — **only on `Design` / `Research` docs** (a Concept/Guide is just
+  "the current truth", so it carries none). Values in use: `ideation` (proposed,
+  not built) → `implemented` (the plan has landed); `findings` for a Research doc.
+  Bump a `Design` doc from `ideation` to `implemented` when its change ships.
+- `timestamp` — ISO-8601 on the evergreen Concept/Guide/Overview docs; omit it on
+  a `status`-carrying Design/Research doc (the status tracks its lifecycle).
+
+When you add a doc, match the bundle's existing frontmatter shape exactly; when a
+`Design` doc's plan lands, flip its `status` and update the matching Concept docs.

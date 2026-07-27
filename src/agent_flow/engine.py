@@ -119,7 +119,7 @@ class RunContext:
 
 # A node's work: perform the invocation, return whatever the gate will inspect
 # (typically the control dict or an AgentResult). May raise on hard failure.
-# Additive since v2: the callable may be sync (`def`) OR async (`async def`) —
+# Additive since the async-first migration: the callable may be sync (`def`) OR async (`async def`) —
 # the engine awaits an awaitable return via _maybe_await. agent_node's closure is
 # async; hand-written `run` nodes may be either.
 RunFn = Callable[[RunContext], Awaitable[Any] | Any]

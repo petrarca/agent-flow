@@ -60,7 +60,7 @@ def test_plan_groups_cycle():
 
 
 def _interpret(node, **kw):
-    # interpret is async since the v2 migration; these pure orchestration tests
+    # interpret is async since the async-first migration; these pure orchestration tests
     # drive it synchronously via a single anyio.run bridge (no event loop needed).
     kw.setdefault("on_error", _criticality)
     return anyio.run(lambda: interpret(node, **kw))

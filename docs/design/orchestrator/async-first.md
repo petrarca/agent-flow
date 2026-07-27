@@ -1,12 +1,12 @@
 ---
 type: Design
-title: Async-first core (v2) — migrate the engine to anyio
+title: Async-first core — migrate the engine to anyio
 description: Plan to migrate agent-flow's synchronous core to an async-first engine on anyio, so async-native agent libraries (PydanticAI) are first-class and the flow can run inside a consumer's event loop (FastAPI). Covers the programming-model impact (additive — sync callables still work), the layer-by-layer migration inventory, dependency ordering, risks, and the sync-facade strategy.
-tags: [agent-flow, async, anyio, engine, v2, executor, backend, pydantic-ai]
-status: ideation
+tags: [agent-flow, async, anyio, engine, executor, backend, pydantic-ai]
+status: implemented
 ---
 
-# Async-first core (v2) — migrate the engine to anyio
+# Async-first core — migrate the engine to anyio
 
 ## Why now
 
