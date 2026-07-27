@@ -19,18 +19,21 @@ downstream nodes has to reach into a passed-around dict. This service makes the
 domain params a first-class, process-wide, run-scoped store you can `get_...`
 from anywhere (nodes, gates, exports hooks), with a lock for the concurrent case.
 
-House pattern (as in run_config / coco-rag): an lru_cache singleton via
-`get_run_context()`, installed by `init_run_context(...)`, reset in tests by
-`clear_run_context()`.
+Accessed via `get_run_context()`, installed by `init_run_context(...)`, reset by
+`clear_run_context()`. The store is held in a **ContextVar**, so it is scoped to
+the RUN's async task tree — not to the process.
 
 SCOPE / BOUNDARY (important, honest constraint):
-  This is a SAME-PROCESS, run-scoped store. The engine runs nodes as concurrent
-  anyio TASKS in one process (the in-process backend; the Prefect backend adds
-  its own task runner), so a process-global singleton is the correct sharing
-  mechanism and `update()` is visible to nodes that run LATER (downstream
-  groups). It is NOT a distributed store: if the flow backend is ever configured
-  to run nodes in SEPARATE PROCESSES, a child process gets its own memory and
-  will not see the parent's updates. Therefore:
+  This is a SAME-PROCESS, RUN-scoped store. The engine runs nodes as concurrent
+  anyio TASKS; a ContextVar is copied into each task at spawn, so every node of a
+  run inherits its run's store and `update()` is visible to nodes that run LATER
+  (downstream groups). Two flows running CONCURRENTLY in one process (e.g. an
+  async server handling two requests) each resolve their OWN store, so neither
+  reads nor overwrites the other's params — this used to be a process-global
+  singleton, where the last `init_run_context()` won for everyone and an exports
+  write leaked across runs. It is NOT a distributed store: if the flow backend is
+  ever configured to run nodes in SEPARATE PROCESSES, a child process gets its
+  own memory and will not see the parent's updates. Therefore:
     - `update()` propagates to DOWNSTREAM (later-group) nodes, never to
       concurrent siblings in the same parallel group (which may be serialized /
       run elsewhere). Exports semantics respect this: publish for what comes
@@ -44,7 +47,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Mapping
-from functools import lru_cache
+from contextvars import ContextVar
 from typing import Any
 
 
@@ -98,35 +101,41 @@ class RunContextService:
             self._data.update(merged)
 
 
-# --- Global run-context lifecycle (lru_cache singleton, mirrors run_config) ---
+# --- Run-context lifecycle (task-scoped ContextVar) --------------------------
+#
+# The VARIABLE is module-level; its VALUE is per async-context. A ContextVar is
+# copied into each task at spawn, so every node of a run inherits the store the
+# run installed, while a CONCURRENT run on the same event loop resolves its own.
+# That is what makes two flows in one process (a FastAPI handler serving two
+# requests) isolated — including the exports WRITE path, where a shared store
+# would land run A's published value in run B's params.
+#
+# Why not the lru_cache singleton this used to be: that is process-global, so
+# the last init_run_context() won for everyone. It was correct while a run owned
+# the process (the CLI: one run, then exit) and became wrong the moment
+# arun_flow made concurrent runs a supported shape.
 
-_run_context_override: RunContextService | None = None
+_run_context_var: ContextVar[RunContextService | None] = ContextVar("agent_flow_run_context", default=None)
 
 
 def init_run_context(params: Mapping[str, Any] | None = None) -> RunContextService:
     """Build the run-context service from the initial params and install it.
 
-    Called once by the engine at flow start with the run's domain params. Returns
-    the installed singleton so the caller can seed/read immediately.
+    Called by the engine at flow start with the run's domain params, INSIDE that
+    run's task — so the value binds to this run's context and its nodes (spawned
+    later) inherit it. Returns the service so the caller can seed/read it.
     """
-    global _run_context_override
-    _run_context_override = RunContextService(params)
-    _get_run_context_cached.cache_clear()
-    return get_run_context()
+    service = RunContextService(params)
+    _run_context_var.set(service)
+    return service
 
 
 def get_run_context() -> RunContextService:
-    """Return the process-wide RunContextService (empty one if not init'd)."""
-    return _get_run_context_cached()
-
-
-@lru_cache(maxsize=1)
-def _get_run_context_cached() -> RunContextService:
-    return _run_context_override if _run_context_override is not None else RunContextService()
+    """Return THIS run's RunContextService (an empty one if not init'd)."""
+    service = _run_context_var.get()
+    return service if service is not None else RunContextService()
 
 
 def clear_run_context() -> None:
-    """Reset the run-context singleton — for testing / between runs."""
-    global _run_context_override
-    _run_context_override = None
-    _get_run_context_cached.cache_clear()
+    """Drop this context's run-context — for testing / between runs."""
+    _run_context_var.set(None)

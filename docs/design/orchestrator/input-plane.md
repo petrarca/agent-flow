@@ -183,7 +183,10 @@ thing — they are effectively reserved names in the params bag.
 
 Params are not only set at start. They live in a run-scoped **run-context
 service** (`run_context.py`) — a thread-safe store the engine installs from the
-initial params. A node reads a *snapshot* of it when it starts (so it sees a
+initial params, held in a **ContextVar** so it is scoped to the RUN's async task
+tree, not the process. Two flows running concurrently in one process (an async
+server handling two requests) each get their own store, so neither reads nor
+overwrites the other's params. A node reads a *snapshot* of it when it starts (so it sees a
 stable view for its execution), and a node can **publish** values into it for
 downstream nodes via `agent_node(exports=...)`:
 
@@ -199,13 +202,17 @@ Example: the readiness check captures provenance and `exports` it, so every
 downstream agent stamps the same `analysis_timestamp` / `pipeline_commit`
 without re-capturing it.
 
-Scope is same-process, **downstream-only** — exports target nodes that run
+Scope is same-process and **downstream-only** — exports target nodes that run
 *after* the publisher, never parallel-group siblings (which may be serialized).
+"Same-process" means the store is not distributed: nodes run as tasks in one
+process and share the run's store; it is per-RUN, not per-process, so concurrent
+runs stay isolated.
 Scalar params are the first slice of a broader "dynamic prompt composition"
 direction (injecting context/instructions at run time); see the roadmap.
 
 A param that is *only ever* set this way (not a user input) is declared on the
-`params_model` with a placeholder default and the `runtime_param()` marker
+flow's params model (`FlowDef(params_schema=...)`, or an imperative
+`params_model=`) with a placeholder default and the `runtime_param()` marker
 (`Field(json_schema_extra=runtime_param())`). The placeholder keeps `{name}`
 templating resolvable from the first node;
 `run_cli` recognises the marker and **omits the field from the resolved-params

@@ -34,8 +34,10 @@ pipeline comes down to five capabilities. agent-flow delivers each directly:
    order) — the engine *injects file content*, so an agent physically has the
    rules rather than being told to go read them. Runtime parameters (model,
    liveness timeout, domain params) resolve through one precedence chain
-   (CLI > env > .env > YAML > default) and flow through a **run-context service** —
-   values can even be published by one node for downstream nodes (`exports`).
+   (CLI > env > .env > --config > run_config > default) and flow through a
+   **run-context service** — values can even be published by one node for
+   downstream nodes (`exports`). The store is task-scoped, so concurrent runs in
+   one process (an async server) never share params.
 
 4. **Runtime- and backend-agnostic.** The subprocess executor's per-runtime wire
    details are a further **`AgentRunner`** strategy — OpenCode today, Claude Code
