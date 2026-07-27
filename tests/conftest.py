@@ -76,6 +76,16 @@ def stub_runner() -> type[StubRunner]:
     return StubRunner
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    """Pin the anyio pytest plugin to the asyncio backend for `@pytest.mark.anyio`
+    tests. The engine only targets asyncio (Starlette/Prefect hosts); we do not
+    run the suite on trio, so a single-backend fixture keeps async tests
+    unparametrized.
+    """
+    return "asyncio"
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _stop_prefect_ephemeral_server():
     """Stop Prefect's temporary subprocess server BEFORE the interpreter exits.

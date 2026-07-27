@@ -26,6 +26,9 @@ dynamic = ["version"]
 # LEAN CORE. The default install is what you need to declare a pipeline and run
 # it in-process on the default InProcessBackend, with typed params/results and config
 # (incl. YAML) — no execution-backend or display dependency:
+#   - anyio: the async concurrency primitive the engine core runs on (task
+#     groups, cancel scopes, async subprocess). Present transitively via many
+#     hosts (Starlette/Prefect) but declared here as a first-class core dep.
 #   - pydantic + pydantic-settings: typed agent `result` payloads AND the typed
 #     run-parameters / RunConfig model (declared, required-checked, validated).
 #     pydantic-settings also provides the YAML config source.
@@ -38,6 +41,7 @@ dynamic = ["version"]
 #   - [cli]:     rich + typer for run_cli and the human-facing display helpers.
 # A programmatic consumer of build_flow (InProcessBackend) needs neither.
 dependencies = [
+    "anyio>=4.0",
     "python-dotenv>=1.0.0",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
@@ -84,6 +88,7 @@ quote-style = "double"
 markers = [
     "unit: marks tests as unit tests (default)",
     "integration: marks tests as integration tests",
+    "anyio: marks async tests run via the anyio pytest plugin (asyncio backend)",
 ]
 testpaths = ["tests"]
 addopts = ["-m unit", "--strict-markers"]
