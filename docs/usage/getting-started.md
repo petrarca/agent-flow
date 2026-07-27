@@ -238,7 +238,7 @@ the recommended surface.)
 
 `hello-verifier` reads `hello.md` (via its own `.md` instructions) and reports
 its own status. If it should be able to ask for `hello` to be redone, see
-[recipes.md — "a verifier that can trigger a re-run"](recipes.md#a-verifier-that-can-trigger-a-re-run).
+[recipes.md — "a verifier that can trigger a re-run"](advanced-recipes.md#a-verifier-that-can-trigger-a-re-run).
 
 ## Where to go next
 

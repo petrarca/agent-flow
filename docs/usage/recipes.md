@@ -103,9 +103,38 @@ run_flow(flow, registry=registry, product_key="acme", runtime="opencode")
 
 A gate configured per node just takes extra keyword params; the node's
 `gate_args` supply them (`def g(ctx, *, target): …` with
-`gate="g", gate_args={"target": "…"}`). Also registrable: `@registry.export`
-(a `(payload) -> params` map published downstream) and `@registry.run` (a custom
-`(ctx) -> dict` node run, referenced by `NodeDef(run_ref="…")`).
+`gate="g", gate_args={"target": "…"}`).
+
+### Everything you can register
+
+The registry is the ONE place your code lives, so a `FlowDef` stays pure data:
+the declaration carries a NAME, the registry holds the implementation. That is
+also why new capabilities land here rather than as extra `build_flow` /
+`agent_node` parameters.
+
+| register | signature | referenced from a node by |
+|---|---|---|
+| `@registry.gate("name")` | `(ctx, **gate_args) -> Directive` | `gate="name"` (+ `gate_args={…}`) |
+| `@registry.schema("name")` | a pydantic model, a JSON-schema dict, or a `ResultSchema` | `result_schema="name"` **and** `input_schema="name"` |
+| `@registry.export("name")` | `(payload) -> Mapping` published to downstream params | `export_ref="name"` |
+| `@registry.run("name")` | `(ctx) -> dict` — a node that runs your code, not an agent | `run_ref="name"` |
+| `@registry.agent_impl("name")` | `(inv) -> AgentResult / model / dict` — an in-process agent | `impl_ref="name"` |
+| `@registry.mock_agent("agent")` | `(inv, ctx) -> envelope` — a token-free stand-in | *(matched by AGENT name under `--mock-agents`)* |
+| `@registry.on("event", node=…)` | an observing hook; never steers flow | *(fires automatically; `node=` scopes it)* |
+| `registry.work_order(fn)` | `(resolved: dict[str, str]) -> str` — the prompt shape ([advanced](advanced-recipes.md#change-how-the-work-order-is-rendered)) | *(flow-wide; no reference)* |
+
+Each takes a decorator or a direct call — `@registry.schema("TriageIn")` above a
+class, or `registry.schema("TriageIn")(TriageIn)` for a model defined elsewhere.
+Referencing a name that is not registered fails at **compile**, before anything
+runs: `node 'n': unknown input_schema 'Nope'`.
+
+Note `schema` serves **both** ends: one registration is usable as a node's
+`input_schema` and as its `result_schema`. And `work_order` is the one singleton
+— it is a per-flow presentation choice, not something a node selects.
+
+Working imperatively (`agent_node`) you can skip the registry entirely and pass
+the callable or class directly (`gate=fn`, `input_schema=TriageIn`,
+`impl=fn`); the registry exists so the DECLARATIVE surface stays serializable.
 
 Every consumer callable above — a gate, an `after_node` hook, an `export`, a
 custom `run`, an in-process `impl` — may be a plain `def` OR an `async def`. The
@@ -114,35 +143,40 @@ worker thread, so you write async only where it buys you something.
 
 ## Type a node's inputs (`input_schema`)
 
-`result_schema` types what an agent RETURNS. `input_schema` is its mirror: it
-types what a node RECEIVES. The values still live in `inputs` — a schema is
-their TYPE, so several nodes can share one schema with different values:
+`result_schema` types what an agent RETURNS ([typed output](advanced-recipes.md#get-typed-output-from-an-agent)).
+`input_schema` is its mirror: it types what a node RECEIVES. The values still
+live in `inputs` — a schema is their TYPE, so several nodes can share one schema
+with different values.
 
 ```python
 class TriageIn(BaseModel):
     ticket: str
     priority: Literal["low", "normal", "high"] = "normal"
 
-agent_node("triage-eu", "triage", input_schema=TriageIn, result_schema=TriageOut,
-           inputs={"ticket": "{eu_ticket}", "priority": "high"})
-agent_node("triage-us", "triage", input_schema=TriageIn, result_schema=TriageOut,
-           inputs={"ticket": "{us_ticket}"})            # priority defaults
+registry.schema("TriageIn")(TriageIn)
+
+FlowDef(name="triage", nodes=[
+    NodeDef(name="triage-eu", agent="triage", input_schema="TriageIn",
+            inputs={"ticket": "{eu_ticket}", "priority": "high"}),
+    NodeDef(name="triage-us", agent="triage", input_schema="TriageIn",
+            inputs={"ticket": "{us_ticket}"}),          # priority defaults
+])
 ```
 
 Validation runs on the **resolved** work order — after `{param}` templating and
-upstream [`exports`](#exports) — and **before the agent is spawned**. So an
-unresolved `{mode}` (a skipped upstream, a typo) fails with a real schema error
-instead of reaching the agent as the literal text `{mode}`. Note this only bites
-for a **constrained** field: a bare `str` accepts `"{mode}"` quite happily, so
-use `Literal`, a `pattern`, or a non-`str` type where you want that guarantee.
-A failure is mapped
-through the node's `criticality` like any other node error: `blocking` halts the
-run, `degrade` records the node as degraded and continues.
+upstream [`exports`](advanced-recipes.md#exports) — and **before the agent is
+spawned**. So an unresolved `{mode}` (a skipped upstream, a typo) fails with a
+real schema error instead of reaching the agent as the literal text `{mode}`.
+Note this only bites for a **constrained** field: a bare `str` accepts `"{mode}"`
+quite happily, so use `Literal`, a `pattern`, or a non-`str` type where you want
+that guarantee. A failure is mapped through the node's `criticality` like any
+other node error: `blocking` halts the run, `degrade` records the node as
+degraded and continues.
 
-It does **not** change the prompt. Work-order lines render with the keys you
-wrote, so adding a schema to an existing node cannot break the agent `.md` that
-refers to `TICKET`/`REPORT`. Keep UPPERCASE keys with snake_case fields using
-ordinary pydantic aliases:
+It does **not** change the prompt. The work order renders with the keys you
+wrote, so adding a schema cannot break the agent `.md` that refers to
+`TICKET`/`REPORT`. Keep UPPERCASE keys with snake_case fields using ordinary
+pydantic aliases:
 
 ```python
 class TriageIn(BaseModel):
@@ -153,15 +187,8 @@ class TriageIn(BaseModel):
 An **in-process** impl receives the validated instance as `inv.input_obj` (the
 raw values stay on `inv.inputs`), which is what makes a PydanticAI node typed at
 both ends — see the next recipe. A subprocess agent simply gets the same work
-order it always did.
-
-Declaratively it is a registered name, exactly like `result_schema`, so the
-FlowDef stays serializable data:
-
-```python
-registry.schema("TriageIn")(TriageIn)
-NodeDef(name="triage", agent="triage", inputs={...}, input_schema="TriageIn")
-```
+order it always did. Imperatively, pass the class straight to
+`agent_node(input_schema=TriageIn)` instead of registering a name.
 
 ## An async in-process agent (PydanticAI)
 
@@ -207,44 +234,6 @@ node ran in-process or as a subprocess — the two execution models are
 interchangeable behind the node. A runnable end-to-end version (sync + async
 impls mixed in one flow, both `run_flow` and `arun_flow` entry points) is
 `examples/inprocess.py`.
-
-## Change how the work order is rendered
-
-A node's `inputs` are rendered into the prompt as **XML tags** (the default):
-
-```
-<PRODUCT_KEY>acme</PRODUCT_KEY>
-<REPORT>/run/report.md</REPORT>
-```
-
-Why tags rather than `KEY: value`: a closing tag **delimits** the value, so a
-multi-line or structured value is unambiguous — a line-oriented work order has no
-continuation marker, so the second line of a value is indistinguishable from the
-next key. Tags are also the shape Anthropic recommends for Claude prompts. Your
-agent `.md` needs no change: it refers to the KEY *name* (`REPORT`), which is
-identical either way.
-
-To override it, register a renderer — it is a **registry registration, not a
-parameter**, so `build_flow`/`agent_node` do not grow a knob per presentation
-choice (the same reasoning as gates and exports):
-
-```python
-from agent_flow import render_work_order_lines
-
-registry.work_order(render_work_order_lines)      # opt back into KEY: value
-```
-
-Or supply your own — any `(resolved: dict[str, str]) -> str`:
-
-```python
-@registry.work_order
-def as_json(resolved):
-    import json
-    return json.dumps(resolved, indent=2)
-```
-
-It receives the **resolved** work order (after templating and upstream exports),
-so a renderer never has to think about `{param}` substitution.
 
 ## Fill params just-in-time (`before_node`)
 

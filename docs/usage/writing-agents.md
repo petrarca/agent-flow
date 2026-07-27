@@ -101,7 +101,7 @@ Replace `"hello"` with the name of the node you want redone (the pipeline's
 `agent_node(name=...)` — see [getting-started.md](getting-started.md)). The
 corresponding node also needs a `rerun_on_signal` gate targeting it
 (`gate="rerun_on_signal", gate_args={"target": "hello"}`) — see
-[recipes.md](recipes.md#a-verifier-that-can-trigger-a-re-run).
+[recipes.md](advanced-recipes.md#a-verifier-that-can-trigger-a-re-run).
 
 ## Gotcha: use absolute paths for files
 

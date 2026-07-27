@@ -281,6 +281,44 @@ already exist (runtime-populated params fall back to their defaults). `--only`
 and `--start-from` are **mutually exclusive** — setting both is an error.
 CLI/programmatic only — not a persisted config setting.
 
+## Change how the work order is rendered
+
+A node's `inputs` are rendered into the prompt as **XML tags** (the default):
+
+```
+<PRODUCT_KEY>acme</PRODUCT_KEY>
+<REPORT>/run/report.md</REPORT>
+```
+
+Why tags rather than `KEY: value`: a closing tag **delimits** the value, so a
+multi-line or structured value is unambiguous — a line-oriented work order has no
+continuation marker, so the second line of a value is indistinguishable from the
+next key. Tags are also the shape Anthropic recommends for Claude prompts. Your
+agent `.md` needs no change: it refers to the KEY *name* (`REPORT`), which is
+identical either way.
+
+To override it, register a renderer — it is a **registry registration, not a
+parameter**, so `build_flow`/`agent_node` do not grow a knob per presentation
+choice (the same reasoning as gates and exports):
+
+```python
+from agent_flow import render_work_order_lines
+
+registry.work_order(render_work_order_lines)      # opt back into KEY: value
+```
+
+Or supply your own — any `(resolved: dict[str, str]) -> str`:
+
+```python
+@registry.work_order
+def as_json(resolved):
+    import json
+    return json.dumps(resolved, indent=2)
+```
+
+It receives the **resolved** work order (after templating and upstream exports),
+so a renderer never has to think about `{param}` substitution.
+
 ## Make agents actually read rules/standards (ingest context)
 
 Telling an agent to "read the security rules" is unreliable; injecting the
@@ -322,6 +360,24 @@ class TechStackResult(BaseModel):
 
 agent_node("tech-stack", "tech-stack-analyst", result_schema=PydanticSchema(TechStackResult))
 ```
+
+The mirror on the way IN is `input_schema` — same accepted forms, validated
+against the node's RESOLVED work order before the agent runs, and surfaced to an
+in-process impl as `inv.input_obj`:
+
+```python
+class TechStackIn(BaseModel):
+    product_key: str
+    report: str
+
+agent_node("tech-stack", "tech-stack-analyst",
+           input_schema=TechStackIn,        # typed IN
+           result_schema=TechStackResult,   # typed OUT
+           inputs={"product_key": "{product_key}", "report": "{run_dir}/tech-stack.md"})
+```
+
+See [Type a node's inputs](recipes.md#type-a-nodes-inputs-input_schema) for the
+declarative form and the failure semantics.
 
 The schema is injected into the agent's prompt and the result is validated
 (never fails the run — check `result["_result_valid"]` in a gate if you need to
