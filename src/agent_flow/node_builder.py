@@ -269,6 +269,7 @@ def agent_node(
             executor = InProcessExecutor(impl)
         else:
             executor = get_executor(runtime)
+        logger.debug(f"node {name}: executor={type(executor).__name__} prompt_chars={len(inv.prompt)} inputs={list(resolved_inputs)}")
         result = await executor.run(inv)
         log(
             f"node {name}: agent={agent} -> {result.control.get('status')} in {result.duration_s:.1f}s "

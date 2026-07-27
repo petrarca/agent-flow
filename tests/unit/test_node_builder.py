@@ -15,6 +15,9 @@ class _L:
     def warning(self, *a):
         pass
 
+    def debug(self, *a):
+        pass
+
 
 # --- agent_node -------------------------------------------------------------
 

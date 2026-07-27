@@ -796,6 +796,7 @@ async def _walk(
     i = start_index
     while i < len(planned):
         _key, group = planned[i]
+        logger.debug(f"walk: group[{i}] {_key!r} -> nodes {[getattr(n, 'name', n) for n in group]}")
         outcomes = await run_group(group)
         for n_name, oc in outcomes.items():
             results[n_name] = oc

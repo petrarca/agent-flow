@@ -17,6 +17,9 @@ class _Logger:
     def warning(self, *a, **k):
         pass
 
+    def debug(self, *a, **k):
+        pass
+
 
 def _linear(names):
     """A linear plan of solo groups + the index maps _walk/_resolve need."""

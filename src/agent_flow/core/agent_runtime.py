@@ -41,6 +41,7 @@ from subprocess import DEVNULL, PIPE, STDOUT
 import anyio
 from anyio.abc import ByteReceiveStream, Process
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
+from loguru import logger
 
 from agent_flow.core.control_protocol import build_control_preamble
 from agent_flow.core.schema import ResultSchema, coerce_schema
@@ -123,6 +124,7 @@ async def _pump_lines(stream: ByteReceiveStream | None, send: MemoryObjectSendSt
         if stream is not None:
             async for line in _iter_lines(stream):
                 await send.send(line)
+        logger.debug("reader: stream EOF")
     finally:
         # Best-effort EOF sentinel, then close. If the consumer already closed
         # the receive end (early stop), the send raises — swallow it.
@@ -300,6 +302,10 @@ async def _supervise_loop(
         # Stop conditions checked before waiting for the next line.
         stop = _stop_kind(anyio.current_time() >= idle_deadline, sidecar_present())
         if stop is not None:
+            if stop == "stale":
+                logger.debug(f"supervise: STALE — no event/sidecar for {idle_timeout_s}s (events={st['events']}) -> killing")
+            else:  # "sidecar"
+                logger.debug(f"supervise: sidecar on disk (events={st['events']}) -> stopping")
             await _kill_group(proc)  # idempotent; ensures no lingering process
             _drain_stderr(stderr_rx, runner, st["errors"])
             return _finish(st, stop)
@@ -317,6 +323,7 @@ async def _supervise_loop(
             continue  # timed out with no line — re-check stop conditions
 
         if line is None:  # reader EOF — process finished
+            logger.debug(f"supervise: stdout EOF (events={st['events']}) -> reaping")
             await _reap(proc)
             _drain_stderr(stderr_rx, runner, st["errors"])
             return _finish(st, "completed")
@@ -327,6 +334,7 @@ async def _supervise_loop(
         if _consume_line(line, st, runner, on_event):
             idle_deadline = anyio.current_time() + idle_timeout_s
         if st["saw_terminal"] and sidecar_present():
+            logger.debug(f"supervise: terminal event + sidecar (events={st['events']}) -> stopping")
             await _kill_group(proc)
             _drain_stderr(stderr_rx, runner, st["errors"])
             return _finish(st, "sidecar")
@@ -468,6 +476,10 @@ class SubprocessExecutor(AgentExecutor):
             # Transient-in-principle (fix PATH and retry), so AgentCrashError.
             raise AgentCrashError(f"agent {agent!r}: failed to start ({spec.display}): {exc}") from exc
 
+        logger.debug(
+            f"spawned agent={agent!r} pid={proc.pid} cwd={agent_dir or os.getcwd()!r} "
+            f"capture_stderr={spec.capture_stderr} idle_timeout_s={inv.idle_timeout_s} :: {spec.display}"
+        )
         async with proc:
             sup = await _supervise(
                 proc,
@@ -675,6 +687,7 @@ async def _kill_group(proc: Process) -> None:
         for sig in (signal.SIGTERM, signal.SIGKILL):
             try:
                 os.killpg(pgid, sig)
+                logger.debug(f"kill_group: sent {sig!s} to pgid={pgid} (pid={proc.pid})")
             except ProcessLookupError:
                 return  # group already gone — nothing to do
             with anyio.move_on_after(_KILL_GRACE_S) as scope:

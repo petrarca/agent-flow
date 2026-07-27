@@ -72,3 +72,9 @@ def setup_logging(log_level: str = "INFO") -> None:
     # The library's own logger emits at INFO/DEBUG for node lifecycle + supervision;
     # let it flow at the requested level (loguru's sink does the final filtering).
     logging.getLogger(LIBRARY_LOGGER).setLevel(logging.DEBUG if log_level in ("DEBUG", "TRACE") else logging.INFO)
+
+    # Keep --log-level DEBUG focused on agent-flow: pin chatty third-party loggers
+    # (asyncio's "Using selector: …", HTTP client internals) to WARNING so they
+    # don't drown the engine/supervisor debug lines the flag is meant to surface.
+    for noisy in ("asyncio", "anyio", "httpx", "httpcore", "urllib3"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
