@@ -25,7 +25,12 @@ def register(app, ctx: RunCliContext) -> None:
 
     @app.command()
     def run(
-        config: str = typer.Option("", "--config", "-c", help="YAML run config (generic settings)"),
+        config: list[str] | None = typer.Option(  # noqa: B008 - Typer idiom
+            None,
+            "--config",
+            "-c",
+            help="run config: a YAML/JSON file path OR inline JSON ({...}). Repeatable; later --config deep-merges over earlier.",
+        ),
         param: list[str] | None = typer.Option(None, "--param", "-p", help="domain param KEY=VALUE (repeatable)"),  # noqa: B008 - Typer idiom
         runtime: str | None = typer.Option(None, help="real out-of-process runner, e.g. 'opencode'"),
         mock_agents: bool | None = typer.Option(
@@ -77,7 +82,7 @@ def register(app, ctx: RunCliContext) -> None:
         setup_logging(log_level)
         console = get_console()
         cfg = build_run_config(
-            config_file=config or None,
+            config_file=config or None,  # list[str] of --config sources (paths and/or inline JSON)
             runtime=runtime,
             mock_agents=mock_agents,  # None (env/config wins) | True | False (explicit)
             backend=backend,

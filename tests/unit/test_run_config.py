@@ -113,7 +113,7 @@ def test_yaml_nodes_section(tmp_path):
 def test_yaml_rejects_unknown_key(tmp_path):
     p = tmp_path / "run.yml"
     p.write_text("runtimee: opencode\n")  # typo
-    with pytest.raises(ValueError, match="unknown config keys"):
+    with pytest.raises(ValueError, match="unknown run config keys"):
         build_run_config(config_file=str(p))
 
 
