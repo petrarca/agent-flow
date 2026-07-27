@@ -174,6 +174,34 @@ async def test_after_node_hook_fires_via_build_flow():
 
 
 @pytest.mark.anyio
+async def test_async_hooks_are_awaited():
+    """An `async def` hook must actually RUN — registry.fire returns each
+    handler's result so the engine can await the awaitable ones. Regression: a
+    fire() that discarded returns left the coroutine un-awaited (hook silently
+    never ran, with a RuntimeWarning). Covers node-scoped and group hooks, and
+    proves sync hooks still work alongside them."""
+    r = FlowRegistry()
+    fired: list[str] = []
+
+    @r.on("before_node")
+    def _sync_hook(node):  # noqa: ARG001 - signature fixed by the event
+        fired.append("sync-before-node")
+
+    @r.on("after_node")
+    async def _async_node_hook(node, outcome):  # noqa: ARG001
+        fired.append("async-after-node")
+
+    @r.on("before_group")
+    async def _async_group_hook(group):  # noqa: ARG001
+        fired.append("async-before-group")
+
+    node = Node(name="a", run=lambda ctx: {"ok": True})
+    result = await build_flow([node], name="t", registry=r)(run_dir="")
+    assert result["a"].status == "ok"
+    assert sorted(fired) == ["async-after-node", "async-before-group", "sync-before-node"]
+
+
+@pytest.mark.anyio
 async def test_all_lifecycle_events_fire_in_order():
     r = FlowRegistry()
     ev = []

@@ -278,15 +278,22 @@ class FlowRegistry:
     def has_mock_agent(self, name: str) -> bool:
         return name in self._mock_agents
 
-    def fire(self, event: str, /, *args: Any, _node_name: str | None = None, **kwargs: Any) -> None:
-        """Fire the observing hooks registered for `event`.
+    def fire(self, event: str, /, *args: Any, _node_name: str | None = None, **kwargs: Any) -> list[Any]:
+        """Fire the observing hooks registered for `event`; return their results.
 
         For per-node events, pass `_node_name` so scoped hooks (registered with
         `node=`) match only their target; a None scope fires for every node.
-        Group events ignore `_node_name`. The return of each hook is discarded.
-        (The engine wraps this so a failing observer never breaks the run.)
+        Group events ignore `_node_name`. (The engine wraps this so a failing
+        observer never breaks the run.)
+
+        A hook may be sync OR async: the results are returned rather than
+        discarded so the caller can await the awaitable ones — an `async def`
+        hook would otherwise produce a coroutine that is never awaited (i.e.
+        silently never runs). The engine's `_fire_hook` does exactly that.
         """
+        results: list[Any] = []
         for scope, hook in self._hooks.get(event, ()):  # unknown event -> no hooks
             if scope is not None and _node_name is not None and _node_name not in scope:
                 continue
-            hook(*args, **kwargs)
+            results.append(hook(*args, **kwargs))
+        return results

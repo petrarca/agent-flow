@@ -429,19 +429,24 @@ async def _fire_hook(registry: Any, event: str, node: Node, log: Callable[[str],
     An observer must never break the run — a failing hook is logged and ignored.
     `fire_args` are the event's payload (e.g. (node,) / (node, outcome) /
     (node, exc)); node.name is passed as the scope key so node-scoped hooks match.
-    A hook may be sync or async: registry.fire returns whatever the handlers
-    returned, and any awaitables are awaited here (async observers welcome).
+    A hook may be sync or async: registry.fire returns each handler's result, and
+    every awaitable among them is awaited here (async observers welcome).
     """
     try:
-        await _maybe_await(registry.fire(event, *fire_args, _node_name=node.name))
+        for result in registry.fire(event, *fire_args, _node_name=node.name):
+            await _maybe_await(result)
     except Exception as exc:  # noqa: BLE001 - an observer must never break the run
         log(f"node {node.name}: {event} hook failed ({exc}) — ignored")
 
 
 async def _fire_group_hook(registry: Any, event: str, group: list[Node], warn: Callable[[str], None], *extra: Any) -> None:
-    """Fire an observing group hook (before_group/after_group). Not node-scoped."""
+    """Fire an observing group hook (before_group/after_group). Not node-scoped.
+
+    Like _fire_hook, each handler's result is awaited when awaitable so an
+    `async def` group hook actually runs."""
     try:
-        await _maybe_await(registry.fire(event, group, *extra))
+        for result in registry.fire(event, group, *extra):
+            await _maybe_await(result)
     except Exception as exc:  # noqa: BLE001 - an observer must never break the run
         warn(f"{event} hook failed ({exc}) — ignored")
 

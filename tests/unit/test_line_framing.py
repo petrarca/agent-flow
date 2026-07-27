@@ -51,13 +51,25 @@ async def test_yields_trailing_partial_line_at_eof():
 
 
 @pytest.mark.anyio
-async def test_multibyte_utf8_split_across_chunk_boundary_is_replaced_not_crashed():
-    # A 2-byte utf-8 char (é = \xc3\xa9) split across chunks: the framing must
-    # never crash (errors="replace"); it may render as replacement chars but the
-    # run survives, which is the invariant that matters for supervision.
-    lines = await _collect([b"caf\xc3", b"\xa9\n"])
-    assert len(lines) == 1
-    assert lines[0].endswith("\n")
+async def test_multibyte_utf8_split_across_chunk_boundary_is_preserved():
+    # A 2-byte utf-8 char (é = \xc3\xa9) split across chunks must be REASSEMBLED,
+    # not corrupted: decoding is incremental, so the partial sequence is held
+    # until its remaining bytes arrive. (A naive per-chunk bytes.decode() would
+    # yield "caf\ufffd\ufffd".)
+    assert await _collect([b"caf\xc3", b"\xa9\n"]) == ["café\n"]
+
+
+@pytest.mark.anyio
+async def test_invalid_bytes_degrade_to_replacement_not_crash():
+    # A genuinely invalid byte still degrades to U+FFFD rather than raising —
+    # a stray byte must never break supervision.
+    assert await _collect([b"bad\xff byte\n"]) == ["bad\ufffd byte\n"]
+
+
+@pytest.mark.anyio
+async def test_dangling_partial_sequence_at_eof_is_flushed():
+    # A truncated multi-byte sequence at EOF is flushed (as U+FFFD), not dropped.
+    assert await _collect([b"x\n", b"\xc3"]) == ["x\n", "\ufffd"]
 
 
 @pytest.mark.anyio

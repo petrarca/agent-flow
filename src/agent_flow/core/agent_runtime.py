@@ -29,6 +29,7 @@ Token/cost telemetry is harvested from the event stream into the result.
 
 from __future__ import annotations
 
+import codecs
 import json
 import math
 import os
@@ -101,13 +102,20 @@ async def _iter_lines(stream: ByteReceiveStream) -> AsyncIterator[str]:
     newline) is yielded at EOF, mirroring `for line in proc.stdout`. Each yielded
     line keeps its trailing "\n" (except a final unterminated one), so downstream
     tail/rstrip logic is unchanged from the threaded reader.
+
+    Decoding is INCREMENTAL: a multi-byte UTF-8 character split across two chunk
+    boundaries is held until its remaining bytes arrive (a per-chunk
+    `bytes.decode` would corrupt it into two replacement chars). Genuinely
+    invalid bytes still degrade to U+FFFD rather than raising.
     """
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
     buf = ""
     async for chunk in stream:
-        buf += chunk.decode("utf-8", errors="replace")
+        buf += decoder.decode(chunk)
         while "\n" in buf:
             line, buf = buf.split("\n", 1)
             yield line + "\n"
+    buf += decoder.decode(b"", final=True)  # flush any dangling partial sequence
     if buf:
         yield buf
 
