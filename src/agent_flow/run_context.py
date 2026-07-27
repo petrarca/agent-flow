@@ -24,12 +24,13 @@ House pattern (as in run_config / coco-rag): an lru_cache singleton via
 `clear_run_context()`.
 
 SCOPE / BOUNDARY (important, honest constraint):
-  This is a SAME-PROCESS, run-scoped store. The engine runs nodes as THREADS in
-  one process, so a process-global singleton is the correct sharing mechanism and
-  `update()` is visible to nodes that run LATER (downstream groups). It is NOT a
-  distributed store: if the flow backend is ever configured to run nodes in
-  SEPARATE PROCESSES, a child process gets its own memory and will not see the
-  parent's updates. Therefore:
+  This is a SAME-PROCESS, run-scoped store. The engine runs nodes as concurrent
+  anyio TASKS in one process (the in-process backend; the Prefect backend adds
+  its own task runner), so a process-global singleton is the correct sharing
+  mechanism and `update()` is visible to nodes that run LATER (downstream
+  groups). It is NOT a distributed store: if the flow backend is ever configured
+  to run nodes in SEPARATE PROCESSES, a child process gets its own memory and
+  will not see the parent's updates. Therefore:
     - `update()` propagates to DOWNSTREAM (later-group) nodes, never to
       concurrent siblings in the same parallel group (which may be serialized /
       run elsewhere). Exports semantics respect this: publish for what comes
@@ -50,9 +51,14 @@ from typing import Any
 class RunContextService:
     """Thread-safe, run-scoped store of the open domain params.
 
-    Holds a single mutable dict guarded by a lock. Reads are lock-free snapshots
-    (a shallow copy), so a node/gate always works against a stable view; writes
+    Holds a single mutable dict guarded by a lock. Reads are snapshots (a shallow
+    copy), so a node/gate always works against a stable view; writes
     (`set`/`update`) are locked so concurrent exports do not corrupt the dict.
+
+    The lock is a plain `threading.Lock` (not an anyio one) on purpose: it is held
+    only for the microseconds of a dict copy/update and NEVER across an `await`,
+    so it cannot stall the event loop, and it stays correct if a consumer's sync
+    callable is offloaded to a worker thread.
     """
 
     def __init__(self, initial: Mapping[str, Any] | None = None) -> None:
