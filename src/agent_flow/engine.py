@@ -141,6 +141,14 @@ class Node:
                    subclass for the agent's `result` payload. The run callable
                    passes it to run_agent, which injects it into the prompt and
                    validates the output.
+    input_schema   the MIRROR of result_schema, for the node's INPUTS: the same
+                   accepted forms, validated against the RESOLVED work order
+                   (after `{param}` templating and upstream `exports`). Values
+                   still live in `inputs` — a schema is their TYPE, so several
+                   nodes may share one schema with different values. Invalid
+                   input fails the node BEFORE its agent runs, mapped through
+                   `criticality` like any other node error. An in-process impl
+                   receives the validated instance as `inv.input_obj`.
     agent          optional INFORMAL display label: the agent this node runs.
                    Purely cosmetic — the engine never uses it for logic (a node's
                    work is its `run` callable). Set automatically by agent_node;
@@ -156,6 +164,7 @@ class Node:
     criticality: Criticality = "blocking"
     max_cycles: int = DEFAULT_MAX_CYCLES
     result_schema: object = None
+    input_schema: object = None
     agent: str = ""
     # Optional result->params export hook. After the node completes (and is not
     # re-running), the engine derives keys from the node's result and merges them

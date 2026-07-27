@@ -112,6 +112,54 @@ custom `run`, an in-process `impl` — may be a plain `def` OR an `async def`. T
 engine awaits an awaitable return and offloads a blocking sync callable to a
 worker thread, so you write async only where it buys you something.
 
+## Type a node's inputs (`input_schema`)
+
+`result_schema` types what an agent RETURNS. `input_schema` is its mirror: it
+types what a node RECEIVES. The values still live in `inputs` — a schema is
+their TYPE, so several nodes can share one schema with different values:
+
+```python
+class TriageIn(BaseModel):
+    ticket: str
+    priority: Literal["low", "normal", "high"] = "normal"
+
+agent_node("triage-eu", "triage", input_schema=TriageIn, result_schema=TriageOut,
+           inputs={"ticket": "{eu_ticket}", "priority": "high"})
+agent_node("triage-us", "triage", input_schema=TriageIn, result_schema=TriageOut,
+           inputs={"ticket": "{us_ticket}"})            # priority defaults
+```
+
+Validation runs on the **resolved** work order — after `{param}` templating and
+upstream [`exports`](#exports) — and **before the agent is spawned**. So an
+unresolved `{mode}` (a skipped upstream, a typo) fails with a real schema error
+instead of reaching the agent as the literal text `{mode}`. A failure is mapped
+through the node's `criticality` like any other node error: `blocking` halts the
+run, `degrade` records the node as degraded and continues.
+
+It does **not** change the prompt. Work-order lines render with the keys you
+wrote, so adding a schema to an existing node cannot break the agent `.md` that
+refers to `TICKET`/`REPORT`. Keep UPPERCASE keys with snake_case fields using
+ordinary pydantic aliases:
+
+```python
+class TriageIn(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    ticket: str = Field(validation_alias="TICKET")
+```
+
+An **in-process** impl receives the validated instance as `inv.input_obj` (the
+raw values stay on `inv.inputs`), which is what makes a PydanticAI node typed at
+both ends — see the next recipe. A subprocess agent simply gets the same work
+order it always did.
+
+Declaratively it is a registered name, exactly like `result_schema`, so the
+FlowDef stays serializable data:
+
+```python
+registry.schema("TriageIn")(TriageIn)
+NodeDef(name="triage", agent="triage", inputs={...}, input_schema="TriageIn")
+```
+
 ## An async in-process agent (PydanticAI)
 
 An in-process node runs a Python callable directly — no subprocess, no control
@@ -134,7 +182,11 @@ registry.schema("Triage")(Triage)
 
 @registry.agent_impl("triage")               # the impl may be async
 async def triage(inv):                        # inv = the neutral AgentInvocation
-    # a real PydanticAI agent:  result = await agent.run(inv.prompt); return result.output
+    # Typed at BOTH ends: inv.input_obj is validated from the node's inputs (see
+    # input_schema above); inv.result_schema is the node's declared output type.
+    #   agent = Agent(inv.model, output_type=inv.result_schema, deps_type=TriageIn)
+    #   result = await agent.run(format_as_xml(inv.input_obj), deps=inv.input_obj)
+    #   return result.output
     return Triage(category="bug", urgent="crash" in inv.prompt.lower())
 
 flow = FlowDef(name="triage", nodes=[
@@ -152,6 +204,32 @@ node ran in-process or as a subprocess — the two execution models are
 interchangeable behind the node. A runnable end-to-end version (sync + async
 impls mixed in one flow, both `run_flow` and `arun_flow` entry points) is
 `examples/inprocess.py`.
+
+## See what the engine is doing (logging)
+
+agent-flow is **silent until you ask**. Importing it configures no logging and
+writes nothing to stderr — a library must not hijack your output. Two ways to
+turn it on:
+
+```bash
+python my_flow.py run --log-level DEBUG      # via run_cli (it configures logging for you)
+```
+
+```python
+from agent_flow import setup_logging
+setup_logging("DEBUG")                        # programmatic (run_flow / arun_flow)
+```
+
+`INFO` gives the run's shape (run_dir, node start/finish + duration, jump-backs,
+the final summary). `DEBUG` adds the diagnostics you want when a run is stuck:
+the spawned process (pid, argv, cwd), stdout EOF, stale/kill transitions, the
+group walk, and which executor each node selected. Chatty third-party loggers
+(asyncio, httpx, …) are pinned to WARNING so `DEBUG` stays about your flow.
+
+Output goes to **stderr** via [loguru](https://loguru.readthedocs.io/), leaving
+stdout free for the CLI's tables and event stream. Standard-library log records
+(including Prefect's) are routed into the same sink, so one flag controls
+everything.
 
 ## Run-wide brief and context
 

@@ -86,6 +86,8 @@ def _validate_refs(flow_def: FlowDef, registry) -> None:
             raise ValueError(f"node {n.name!r}: unknown gate {n.gate!r}")
         if n.result_schema and not registry.has_schema(n.result_schema):
             raise ValueError(f"node {n.name!r}: unknown result_schema {n.result_schema!r}")
+        if n.input_schema and not registry.has_schema(n.input_schema):
+            raise ValueError(f"node {n.name!r}: unknown input_schema {n.input_schema!r}")
         if n.run_ref:
             registry.get_run(n.run_ref)  # raises if unknown
         if n.export_ref:
@@ -128,6 +130,7 @@ def _compile_agent_node(nd: NodeDef, registry, schema) -> Node:
         gate_ref=nd.gate,
         gate_args=nd.gate_args,
         result_schema=schema,
+        input_schema=registry.get_schema(nd.input_schema) if nd.input_schema else None,
         exports=nd.exports,
         export_ref=nd.export_ref,
         model=nd.model,

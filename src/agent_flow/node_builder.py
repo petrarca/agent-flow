@@ -53,6 +53,32 @@ def _node_logger():
         return logger.info
 
 
+def _validate_inputs(node: str, input_schema: object, resolved: dict[str, str]) -> object | None:
+    """Validate a node's RESOLVED work order against its `input_schema`.
+
+    The mirror of the result-schema check, on the way IN. Runs after templating,
+    so an unresolved `{param}`/`{export}` surfaces as a real schema error here —
+    before an agent is spawned — instead of reaching the agent as the literal
+    text "{mode}". Returns the typed instance (a pydantic model) for an in-process
+    impl to use, or None when no schema is declared (or a plain dict JSON-schema
+    was used, which validates but yields no new object).
+
+    Raises ValueError on invalid input; `interpret` maps that through the node's
+    criticality like any other node failure (blocking halts, degrade degrades).
+    """
+    if input_schema is None:
+        return None
+    from agent_flow.core.schema import coerce_schema
+
+    schema = coerce_schema(input_schema)
+    if schema is None:
+        return None
+    outcome = schema.validate(resolved)
+    if not outcome.valid:
+        raise ValueError(f"node {node!r}: inputs do not match input_schema: {'; '.join(outcome.errors)}")
+    return outcome.obj
+
+
 def resolve_work_order(inputs: dict[str, str], params: dict[str, Any]) -> dict[str, str]:
     """Resolve `{param}` templates in every input value; return the structured dict.
 
@@ -89,6 +115,7 @@ def agent_node(
     gate_ref: str | None = None,
     gate_args: dict[str, Any] | None = None,
     result_schema: object = None,
+    input_schema: object = None,
     max_cycles: int = 1,
     model: str | None = None,
     idle_timeout_s: int | None = None,
@@ -171,6 +198,13 @@ def agent_node(
         # Expose the run_dir to input templates as {run_dir}, alongside params.
         tmpl = {**ctx.params, "run_dir": str(ctx.run_dir)}
         resolved_inputs = resolve_work_order(inputs, tmpl)
+        # Typed INPUTS (the mirror of result_schema): validate the RESOLVED work
+        # order — after templating and upstream exports — so a missing param or an
+        # unresolved `{export}` fails HERE with a real schema error, instead of
+        # silently handing an agent a literal "{mode}". Raising routes through the
+        # node's criticality like any other node error (blocking halts, degrade
+        # degrades). `input_obj` is the typed instance for an in-process impl.
+        input_obj = _validate_inputs(name, input_schema, resolved_inputs)
         work_order = "\n".join(f"{k}: {v}" for k, v in resolved_inputs.items())
 
         # The caller-visible prompt, composed in order:
@@ -241,6 +275,13 @@ def agent_node(
             shared_context=shared_ctx,
             idle_timeout_s=eff_idle,
             on_event=make_printer(name) if callable(make_printer) else None,
+            # The structured twin of `prompt`, for in-process impls that want the
+            # VALUES rather than the rendered text (a subprocess ignores these).
+            # Copies: the invocation owns its snapshot, so an impl cannot mutate
+            # the engine's work order or the run-context view.
+            inputs=dict(resolved_inputs),
+            input_obj=input_obj,
+            params=dict(ctx.params),
         )
         # Executor selection (the engine is blind to all of this):
         #   1. --mock-agents mode ON + this node has a mock_agent -> MockExecutor
@@ -312,6 +353,7 @@ def agent_node(
         criticality=criticality,
         max_cycles=max_cycles,
         result_schema=result_schema,
+        input_schema=input_schema,
         agent=agent,
         exports=exports,
         export_ref=export_ref,

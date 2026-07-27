@@ -38,7 +38,7 @@ part of AgentRunner, AgentInvocation, or the AgentExecutor contract.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -110,6 +110,14 @@ class AgentInvocation:
     resolved standing context for runtimes WITHOUT named agents (opencode ignores
     it — its identity lives in its .md; Claude Code injects it as a system
     prompt). Executors materialise identity their own way from these fields.
+
+    Text AND data. A subprocess agent can only be handed TEXT, so `prompt` is the
+    contract that matters for it. An IN-PROCESS agent is Python calling Python and
+    wants the values themselves, so the same request is also carried structured:
+    `inputs` (this node's resolved work order) and `params` (the run's domain
+    params). Both are already templated — the exact values that were rendered into
+    the prompt — so an impl never has to parse them back out of the text it was
+    given. The subprocess path simply ignores them.
     """
 
     agent: str  # logical agent name / ref
@@ -126,6 +134,11 @@ class AgentInvocation:
     shared_context: str = ""  # run-wide context CONTENT (already read from files)
     idle_timeout_s: int = DEFAULT_IDLE_TIMEOUT_S  # liveness budget (subprocess) / cap hint (in-process)
     on_event: Callable[[Event], None] | None = None  # live progress callback (both kinds may emit)
+    # The STRUCTURED twin of `prompt` (see "Text AND data" above). Both are
+    # snapshots owned by this invocation — an impl may read them freely.
+    inputs: dict[str, str] = field(default_factory=dict)  # this node's resolved work order ({KEY: value}, templated)
+    input_obj: object = None  # `inputs` validated against the node's input_schema (a pydantic instance), else None
+    params: dict[str, Any] = field(default_factory=dict)  # the run's domain params (incl. upstream `exports`)
 
 
 def compose_prompt(inv: AgentInvocation) -> str:

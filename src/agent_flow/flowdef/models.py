@@ -46,6 +46,12 @@ class NodeDef(BaseModel):
     # Result-schema by registered name (validated + injected by the agent run).
     result_schema: str | None = None
 
+    # Input-schema by registered name — the mirror of result_schema, applied to
+    # the RESOLVED work order (after templating/exports). Same registry, so the
+    # FlowDef stays pure serializable data: the NAME travels, the model class
+    # lives in code.
+    input_schema: str | None = None
+
     # Result -> params publishing for downstream nodes: a declarative
     # {param: field} map, OR a registered export impl by name (export_ref).
     exports: dict[str, str] | None = None

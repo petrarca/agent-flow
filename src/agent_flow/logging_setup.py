@@ -59,6 +59,11 @@ def setup_logging(log_level: str = "INFO") -> None:
     """
     log_level = (log_level or "INFO").upper()
 
+    # agent-flow disables its own loguru records at import (see __init__): a
+    # LIBRARY must stay silent until an application asks for output. Configuring
+    # logging IS that ask, so turn them back on.
+    logger.enable(LIBRARY_LOGGER)
+
     logger.remove()  # drop loguru's default handler (and any prior setup_logging sink)
     logger.add(sys.stderr, level=log_level, colorize=True)
 

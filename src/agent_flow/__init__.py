@@ -55,6 +55,8 @@ examples/ for how to build a pipeline on this library, and
 docs/design/orchestrator/ for the full design.
 """
 
+from loguru import logger as _loguru_logger
+
 from agent_flow.backends import FlowBackend, InProcessBackend, get_backend
 from agent_flow.cli import NodeProgressPrinter, event_printer, get_console, print_preflight_results, print_results_table, run_cli
 from agent_flow.core import (
@@ -94,7 +96,7 @@ from agent_flow.gates import (
     rerun_on_named,
     rerun_on_signal,
 )
-from agent_flow.logging_setup import setup_logging
+from agent_flow.logging_setup import LIBRARY_LOGGER, setup_logging
 from agent_flow.node_builder import agent_node, control_path
 from agent_flow.preflight import Check, check, fatal_failures
 from agent_flow.registry import FlowRegistry
@@ -150,6 +152,13 @@ def _resolve_version() -> str:
 
 
 __version__ = _resolve_version()
+
+# A library must not write to stderr unless the application asks it to. loguru
+# ships an ENABLED default stderr sink, so importing agent-flow would otherwise
+# spam a programmatic consumer with our INFO/DEBUG records. Follow loguru's
+# documented library pattern: disable our own records at import; `setup_logging`
+# (which run_cli calls, and any consumer may call) re-enables them.
+_loguru_logger.disable(LIBRARY_LOGGER)
 
 __all__ = [
     "__version__",

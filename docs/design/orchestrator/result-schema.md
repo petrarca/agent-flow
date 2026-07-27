@@ -68,6 +68,41 @@ tied to a runner. The core depends only on the `ResultSchema` protocol, not on
 any one schema library, so a raw JSON-schema dict is a first-class alternative to
 a Pydantic model.
 
+## The mirror: `input_schema` (typed INPUTS)
+
+The same concept applied on the way IN. A node's `inputs` carry the VALUES
+(templated per node, serializable); `input_schema` carries their TYPE (shared,
+referenced by registered name). Both use the SAME machinery — `coerce_schema` +
+`ResultSchema.validate` — so a pydantic model or a plain JSON-schema dict works
+in either position.
+
+| | values | type |
+|---|---|---|
+| in | `inputs={...}` | `input_schema=` |
+| out | the agent's `result` payload | `result_schema=` |
+
+Two properties make it safe to add to an existing node:
+
+- **It validates, it does not re-render.** The work order still renders with the
+  keys the author wrote, so an agent `.md` that refers to `TICKET`/`REPORT` is
+  unaffected. snake_case fields keep UPPERCASE wire keys via ordinary pydantic
+  aliases — no case rule in the engine.
+- **It runs on the RESOLVED work order**, after `{param}` templating and upstream
+  `exports`, and BEFORE the agent is spawned. An unresolved `{mode}` therefore
+  becomes a schema error rather than literal text handed to an agent — the
+  failure mode this exists to remove.
+
+Unlike a bad *result* (which never auto-fails — a [gate](gates.md) decides,
+because the agent has already run and its output is evidence), a bad *input* has
+no result to inspect and nothing downstream can repair it, so it raises. That
+raise is an ordinary node error: `interpret` maps it through the node's
+`criticality` (blocking halts, degrade degrades).
+
+An in-process impl receives the validated instance as `inv.input_obj`, alongside
+the raw `inv.inputs`/`inv.params` — which is what lets an in-process agent be
+typed at both ends while the same node definition still runs on a subprocess
+runtime, which can only be handed text.
+
 ## Where it lives
 
 `src/agent_flow/core/schema.py` (`ResultSchema`, `JsonSchema`, `ValidationOutcome`,
@@ -82,3 +117,6 @@ that validation. All of these types are re-exported at the top level, so
 consumers import them as `from agent_flow import PydanticSchema` (etc.); the
 `core.schema_pydantic` path is
 the internal location.
+
+`input_schema` is validated by `node_builder._validate_inputs` (before the
+executor is chosen) and surfaced on the invocation as `input_obj`.

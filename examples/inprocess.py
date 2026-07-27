@@ -45,7 +45,7 @@ Run:
 from __future__ import annotations
 
 import anyio
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from agent_flow import AgentInvocation, FlowDef, FlowRegistry, NodeDef
 
@@ -61,6 +61,20 @@ class DraftReply(BaseModel):
     message: str
 
 
+class RespondIn(BaseModel):
+    """The typed INPUT of the respond node — the mirror of its result_schema.
+
+    `inputs` on the NodeDef supplies the values (templated from the classify
+    node's `exports`); this model is their TYPE. The engine validates the
+    resolved work order against it BEFORE the impl runs, so a missing or
+    unresolved `{category}` fails here instead of reaching the agent as text.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+    category: str = Field(validation_alias="CATEGORY")
+    urgency: str = Field(validation_alias="URGENCY")
+
+
 # --- The registry: two in-process agent impls + their result schemas --------
 # A NodeDef references these BY NAME (impl_ref / result_schema), so the FlowDef
 # stays pure serializable data while the code lives here.
@@ -68,6 +82,7 @@ REGISTRY = FlowRegistry()
 
 REGISTRY.schema("Classification")(Classification)
 REGISTRY.schema("DraftReply")(DraftReply)
+REGISTRY.schema("RespondIn")(RespondIn)
 
 
 @REGISTRY.agent_impl("classify")
@@ -100,33 +115,20 @@ async def respond(inv: AgentInvocation) -> DraftReply:
 
     The classify node publishes `category`/`urgency` downstream via `exports`
     (see the FlowDef). The engine templates them into THIS node's work-order
-    inputs ({category}/{urgency}), so they arrive inside the composed `inv.prompt`
-    — which is all an in-process impl receives. We parse them back out below; a
-    real agent would just reason over `inv.prompt` as its input text.
+    inputs and — because the node declares `input_schema=RespondIn` — validates
+    them into a typed object, handed over as `inv.input_obj`. So an in-process
+    impl gets DATA, not text it has to parse back out of the prompt. (`inv.prompt`
+    is still there for an agent that wants to reason over the text, and
+    `inv.inputs` holds the raw work order.)
     """
     await anyio.sleep(0)  # stand-in for `await agent.run(...)` in a real PydanticAI agent
-    category = inv_params(inv).get("category", "general")
-    urgency = inv_params(inv).get("urgency", "normal")
+    ticket: RespondIn = inv.input_obj  # typed IN  (validated by the engine)
+    category, urgency = ticket.category, ticket.urgency
     channel = "phone" if urgency == "high" else "email"
     message = f"Thanks for reporting this {category} issue. " + (
         "We are treating it as urgent and will call you shortly." if urgency == "high" else "We will follow up by email within one business day."
     )
     return DraftReply(channel=channel, message=message)
-
-
-def inv_params(inv: AgentInvocation) -> dict:
-    """Best-effort extract of KEY: value work-order lines from the prompt.
-
-    The in-process impl receives the composed prompt (not a params dict), so for
-    the demo we parse the work order the node built. A real agent would just use
-    inv.prompt as its input text.
-    """
-    out: dict[str, str] = {}
-    for line in inv.prompt.splitlines():
-        if ": " in line and not line.startswith("#"):
-            k, _, v = line.partition(": ")
-            out[k.strip().lower()] = v.strip()
-    return out
 
 
 # --- The pipeline as data ---------------------------------------------------
@@ -165,7 +167,8 @@ FLOW = FlowDef(
             impl_ref="respond",  # agent= defaults to name= ("respond")
             depends_on=["classify"],
             inputs={"CATEGORY": "{category}", "URGENCY": "{urgency}"},
-            result_schema="DraftReply",
+            input_schema="RespondIn",  # typed IN  (validated before the impl runs)
+            result_schema="DraftReply",  # typed OUT (validated after it returns)
             gate="capture",
         ),
     ],
