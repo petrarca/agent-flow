@@ -36,7 +36,7 @@ from collections import deque
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from subprocess import PIPE, STDOUT
+from subprocess import DEVNULL, PIPE, STDOUT
 
 import anyio
 from anyio.abc import ByteReceiveStream, Process
@@ -448,6 +448,13 @@ class SubprocessExecutor(AgentExecutor):
                 spec.argv,
                 cwd=agent_dir or None,
                 env=env,
+                # No stdin: agents are non-interactive and never read it. anyio's
+                # open_process defaults stdin to a PIPE (unlike subprocess.Popen,
+                # which inherits the parent's stdin) — an OPEN, unwritten stdin
+                # pipe makes opencode block forever waiting for input. DEVNULL
+                # gives an immediate EOF, matching the old Popen(stdin inherited /
+                # closed) behaviour. This was the async-migration hang.
+                stdin=DEVNULL,
                 stdout=PIPE,
                 # capture_stderr=True: separate pipe so the runner's
                 # parse_stderr_line can extract actionable error detail without

@@ -176,3 +176,34 @@ async def test_start_failure_binary_missing_is_crash(tmp_path):
     with pytest.raises(AgentCrashError) as ei:
         await SubprocessExecutor(_MissingBinaryRunner()).run(inv, control_file=control)
     assert "failed to start" in str(ei.value)
+
+
+@pytest.mark.anyio
+async def test_stdin_is_closed_agent_reading_stdin_does_not_hang(tmp_path):
+    """Regression: the spawned agent must get a CLOSED stdin (immediate EOF).
+
+    anyio's `open_process` defaults stdin to an OPEN pipe (unlike subprocess.Popen,
+    which inherits the parent's stdin), so an agent that reads stdin — as opencode
+    does — blocks forever waiting for input that never comes. The executor must
+    pass stdin=DEVNULL. This runner's command reads stdin FIRST (which returns ""
+    on EOF), then writes its ok sidecar; if stdin were an open pipe it would hang
+    until the idle timeout. A short idle window keeps the test fast if it regresses.
+    """
+    from agent_flow.runners.base import AgentInvocation, Event, LaunchSpec
+
+    control = tmp_path / "n.control.json"
+    # read all of stdin (EOF -> ""), then write the sidecar and exit 0.
+    prog = f"import sys,json; sys.stdin.read(); open({str(control)!r},'w').write(json.dumps({{'status':'ok','agent':'a'}}))"
+
+    class _StdinReadingRunner:
+        name = "stdin-reader"
+
+        def build_command(self, inv):  # noqa: ARG002
+            return LaunchSpec(argv=["python3", "-c", prog], display="python3 -c <reads stdin>")
+
+        def parse_event(self, line):  # noqa: ARG002
+            return Event.none()
+
+    inv = AgentInvocation(agent="a", prompt="p", run_dir=tmp_path, node="n", idle_timeout_s=10)
+    result = await SubprocessExecutor(_StdinReadingRunner()).run(inv, control_file=control)
+    assert result.control["status"] == "ok"  # completed promptly — stdin got EOF, no hang
