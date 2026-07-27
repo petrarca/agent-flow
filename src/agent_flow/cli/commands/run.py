@@ -290,6 +290,7 @@ def _build_and_run(
         agent_dir=cfg.agent_dir,
         node_overrides={n: nc.model_dump() for n, nc in cfg.nodes.items()},
         durations=cfg.durations,
+        options=cfg.options,
         backend=cfg.backend,
         registry=registry,
     )

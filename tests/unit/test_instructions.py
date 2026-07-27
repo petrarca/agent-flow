@@ -34,7 +34,7 @@ def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, 
             captured["run_context"] = inv.run_context
             return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "ok"}, completion="completed")
 
-    monkeypatch.setattr("agent_flow.node_builder.get_executor", lambda _runtime: _FakeExecutor())
+    monkeypatch.setattr("agent_flow.node_builder.get_executor", lambda _runtime, **_kw: _FakeExecutor())
     anyio.run(
         lambda: interpret(
             node,

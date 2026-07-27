@@ -73,6 +73,10 @@ class NodeRunConfig(BaseModel):
     idle_timeout_s: int | None = Field(default=None, description="Liveness timeout (s) for this node, bypassing the duration vocabulary.")
     model: str | None = Field(default=None, description="Model for this node (overrides the run-wide and flow-declared model).")
     agent_dir: str | None = Field(default=None, description="agent_dir for this node (overrides the run-wide and flow-declared agent_dir).")
+    options: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Runtime-SPECIFIC flags for this node (e.g. {serve_url: ...}), merged over run-wide options. Open bag; the runtime reads it.",
+    )
 
 
 def runtime_param(**extra: Any) -> dict[str, Any]:
@@ -190,6 +194,13 @@ class RunConfig(BaseSettings):
         description=(
             "Duration vocabulary {name: seconds} for nodes that declare a portable `duration` "
             "(e.g. {long: 900}). Overlays the shipped short/normal/long, so retuning one name keeps the rest."
+        ),
+    )
+    options: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Runtime-SPECIFIC flags applied to every node (e.g. {serve_url: 'http://localhost:4096'}). "
+            "An open bag the runtime interprets; a per-node `nodes.<n>.options` entry merges over it."
         ),
     )
 

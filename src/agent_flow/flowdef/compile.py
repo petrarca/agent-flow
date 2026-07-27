@@ -24,6 +24,7 @@ def _build_pipeline_and_call(
     params: dict,
     durations: dict[str, int] | None = None,
     node_overrides: dict[str, dict] | None = None,
+    options: dict | None = None,
 ):
     """Shared plumbing for (a)run_flow: build the flow callable + assemble the
     call kwargs. Returns (pipeline, call_kwargs). Both entry points differ only in
@@ -45,6 +46,7 @@ def _build_pipeline_and_call(
         backend=flow_def.backend,
         durations=durations,
         node_overrides=node_overrides,
+        options=options,
         registry=registry,
     )
     call = {"run_dir": run_dir, **params}
@@ -64,6 +66,7 @@ async def arun_flow(
     only: str = "",
     durations: dict[str, int] | None = None,
     node_overrides: dict[str, dict] | None = None,
+    options: dict | None = None,
     **params,
 ):
     """Compile and RUN a FlowDef in one call — the async programmatic one-liner.
@@ -82,7 +85,7 @@ async def arun_flow(
     overriding that one node's flow-declared value. (Stage E folds both this and
     `durations` into a single `run_config=`.)
     """
-    pipeline, call = _build_pipeline_and_call(flow_def, registry, run_dir, start_from, only, params, durations, node_overrides)
+    pipeline, call = _build_pipeline_and_call(flow_def, registry, run_dir, start_from, only, params, durations, node_overrides, options)
     return await pipeline(**call)
 
 
@@ -95,6 +98,7 @@ def run_flow(
     only: str = "",
     durations: dict[str, int] | None = None,
     node_overrides: dict[str, dict] | None = None,
+    options: dict | None = None,
     **params,
 ):
     """Compile and RUN a FlowDef in one call — the sync programmatic one-liner.
@@ -119,6 +123,7 @@ def run_flow(
             only=only,
             durations=durations,
             node_overrides=node_overrides,
+            options=options,
             **params,
         )
     )

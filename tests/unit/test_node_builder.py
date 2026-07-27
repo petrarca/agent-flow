@@ -92,7 +92,7 @@ def test_gate_receives_validated_result_obj(tmp_path, monkeypatch):
         name = "fake"
         run = staticmethod(_run)
 
-    monkeypatch.setattr("agent_flow.node_builder.get_executor", lambda _runtime: _FakeExecutor())
+    monkeypatch.setattr("agent_flow.node_builder.get_executor", lambda _runtime, **_kw: _FakeExecutor())
 
     seen = {}
 

@@ -31,7 +31,7 @@ Mock and inproc are NOT runtimes: they are executor MODES selected in
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 from agent_flow.runners.base import (
     DEFAULT_IDLE_TIMEOUT_S,
@@ -95,7 +95,7 @@ def runner_specs() -> list[RunnerSpec]:
     return list(seen.values())
 
 
-def get_executor(name: str, *, serve_url: str = "") -> AgentExecutor:
+def get_executor(name: str, *, serve_url: str = "", options: dict[str, Any] | None = None) -> AgentExecutor:
     """Resolve an AgentExecutor for a runtime name (the "runtime" run param).
 
     The runner's SPEC decides the executor: a subprocess-transport runner is
@@ -103,11 +103,18 @@ def get_executor(name: str, *, serve_url: str = "") -> AgentExecutor:
     wrapped in ServeExecutor with the endpoint. `serve_url` is required when the
     runner's spec sets `needs_endpoint`. Mock is NOT a runtime — it is the
     `--mock-agents` mode, routed to MockExecutor in node_builder, never here.
+
+    `options` is the runtime-SPECIFIC bag (RunConfig `options:` merged with a
+    node's own). Known keys are read from it here; `serve_url` remains an explicit
+    kwarg for direct Tier-1 callers and, when set, wins over `options["serve_url"]`.
     """
     # Imported lazily: SubprocessExecutor lives in core.agent_runtime (next to the
     # subprocess machinery), which imports this package — avoid an import cycle.
     from agent_flow.core.agent_runtime import SubprocessExecutor
 
+    options = options or {}
+    # The explicit kwarg wins (a direct caller's intent); else fall to the bag.
+    serve_url = serve_url or str(options.get("serve_url") or "")
     try:
         runner = get_runner(name)
     except ValueError:

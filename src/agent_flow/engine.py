@@ -112,6 +112,11 @@ class RunContext:
     # `durations:`). A node declares a portable NAME (Node.duration); this map
     # supplies the environment's concrete seconds. Overlays the shipped defaults.
     durations: dict[str, int] = field(default_factory=dict)
+    # Run-wide runtime-SPECIFIC options {key: value}, from build_flow (RunConfig
+    # `options:`). An open bag the RUNTIME interprets (e.g. serve_url); the engine
+    # never looks inside. A node's own `node_overrides[name]["options"]` merges
+    # OVER this at the executor seam.
+    options: dict[str, Any] = field(default_factory=dict)
     # A ONE-TIME instruction for THIS run attempt only. Today it is set by the
     # engine from a gate's Restart/GoTo `instruction`, but the field's nature is
     # general: a single-attempt instruction handed to a node's next run, not
@@ -329,6 +334,7 @@ async def interpret(
     agent_dir: str = "",
     node_overrides: dict[str, dict[str, Any]] | None = None,
     durations: dict[str, int] | None = None,
+    options: dict[str, Any] | None = None,
     registry: Any = None,
     one_time_instruction: str = "",
 ) -> NodeOutcome:
@@ -391,6 +397,7 @@ async def interpret(
                         agent_dir=agent_dir,
                         node_overrides=dict(node_overrides or {}),
                         durations=dict(durations or {}),
+                        options=dict(options or {}),
                         one_time_instruction=attempt_instruction,
                     )
                 )
@@ -580,6 +587,7 @@ def build_flow(
     agent_dir: str = "",
     node_overrides: dict[str, dict[str, Any]] | None = None,
     durations: dict[str, int] | None = None,
+    options: dict[str, Any] | None = None,
     backend: str = "inprocess",
     registry: Any = None,
 ):
@@ -643,6 +651,7 @@ def build_flow(
     run_context_t = tuple(run_context or ())
     node_overrides_d = dict(node_overrides or {})
     durations_d = dict(durations or {})
+    options_d = dict(options or {})
     _check_node_overrides(nodes, node_overrides_d)
     _check_durations(nodes, durations_d, node_overrides_d)
     planned = plan_groups(nodes)  # fail fast on cycles/unknown deps at build time
@@ -704,6 +713,7 @@ def build_flow(
                 agent_dir=agent_dir,
                 node_overrides=node_overrides_d,
                 durations=durations_d,
+                options=options_d,
                 registry=registry,
                 one_time_instruction=attempt_instruction,
             )

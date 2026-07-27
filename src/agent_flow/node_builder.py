@@ -390,7 +390,11 @@ def agent_node(
             # describe an in-process call.
             executor = InProcessExecutor(impl)
         else:
-            executor = get_executor(runtime)
+            # Runtime-specific options: run-wide (ctx.options) with this node's
+            # own entry merged OVER it (per-node wins, key by key). An open bag
+            # the runtime interprets — e.g. serve_url for a remote runtime.
+            eff_options = {**ctx.options, **(ov.get("options") or {})}
+            executor = get_executor(runtime, options=eff_options)
         logger.debug(f"node {name}: executor={type(executor).__name__} prompt_chars={len(inv.prompt)} inputs={list(resolved_inputs)}")
         result = await executor.run(inv)
         log(
