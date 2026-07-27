@@ -25,7 +25,7 @@ from typing import Any
 from agent_flow.core import DEFAULT_IDLE_TIMEOUT_S
 from agent_flow.engine import Criticality, Node, RunContext
 from agent_flow.gates import Gate
-from agent_flow.runners import AgentInvocation, MockExecutor, get_executor
+from agent_flow.runners import AgentInvocation, MockExecutor, get_executor, probe_agent_dir
 from agent_flow.runners.base import PromptParts, render_prompt
 from agent_flow.runners.executor import AgentExecutor
 from agent_flow.runners.inprocess import InProcessExecutor
@@ -303,14 +303,16 @@ def agent_node(
         prompt = render_body(parts)
         shared_ctx = parts.run_context
 
+        runtime = ctx.params.get("runtime", "opencode")
         # Per-setting precedence (most specific first): the run config's per-node
         # entry (this run) > the agent_node() arg (the flow's standing declaration)
-        # > the run-wide value > the library default. `ov` is that per-node entry.
-        # agent_dir / model are templated; empty model ("") means "no model" — the
-        # runner omits --model and the runtime resolves it (never a hardcoded one).
-        eff_agent_dir = resolve_template(ov.get("agent_dir") or agent_dir or ctx.agent_dir or "", tmpl)
-
-        runtime = ctx.params.get("runtime", "opencode")
+        # > the run-wide value > the RUNNER PROBE > (empty -> preflight error).
+        # `ov` is that per-node entry. agent_dir is templated; the probe is the
+        # comfort fallback so the common case needs no explicit agent_dir at all.
+        explicit_agent_dir = ov.get("agent_dir") or agent_dir or ctx.agent_dir or ""
+        eff_agent_dir = resolve_template(explicit_agent_dir, tmpl) if explicit_agent_dir else (probe_agent_dir(runtime) or "")
+        # model: empty ("") means "no model" — the runner omits --model and the
+        # runtime resolves it (never a hardcoded one).
         eff_model = ov.get("model") or model or ctx.params.get("model") or ""
         # Liveness budget resolution, most specific first:
         #   1. the per-node run-config idle_timeout_s (a raw second-count override),

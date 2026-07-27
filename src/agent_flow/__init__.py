@@ -16,7 +16,7 @@ Public API (the authoritative list is `__all__` below):
         AgentRunner, AgentInvocation, Event,
         AgentExecutor, InProcessExecutor, AgentImpl, get_executor, compose_prompt,
         MockExecutor, MockAgentContext, MockAgent,  # --mock-agents mode
-        OpenCodeRunner, get_runner,
+        OpenCodeRunner, get_runner, probe_agent_dir,
         # Tier 3: declare Nodes -> build_flow (the DAG engine)
         Node, NodeOutcome, RunContext, build_flow, NodeBlocked,
         plan_groups, interpret,
@@ -142,6 +142,7 @@ from agent_flow.runners import (
     compose_prompt,
     get_executor,
     get_runner,
+    probe_agent_dir,
     render_prompt,
 )
 from agent_flow.runners.executor import AgentContentFailedError, AgentCrashError, AgentTimeoutError
@@ -195,6 +196,7 @@ __all__ = [
     "OpenCodeRunner",
     "get_runner",
     "get_executor",
+    "probe_agent_dir",
     "compose_prompt",
     # run-context service (open domain params + exports)
     "RunContextService",

@@ -102,6 +102,14 @@ def register(app, ctx: RunCliContext) -> None:
         # nodes.<node>.instructions, winning over a config `nodes:` entry per node.
         for node_name, text in parse_params(instruct).items():
             cfg.set_node_instruction(node_name, text)
+        # agent_dir runner probe (lowest slot): when nothing set it, ask the
+        # runner (opencode probes for .opencode/ in cwd + ancestors). Filling it
+        # here means the summary AND preflight see the resolved dir, and the node
+        # builder receives it as an explicit value.
+        if not cfg.agent_dir:
+            from agent_flow.runners import probe_agent_dir
+
+            cfg.agent_dir = probe_agent_dir(cfg.runtime) or ""
         params = _resolve_params(ctx.params_model, parse_params(param), console)
         runtime_fields = runtime_param_fields(ctx.params_model)
         # model / idle_timeout_s are run-wide knobs an agent-node reads from

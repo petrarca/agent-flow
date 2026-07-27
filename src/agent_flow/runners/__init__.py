@@ -95,6 +95,30 @@ def runner_specs() -> list[RunnerSpec]:
     return list(seen.values())
 
 
+def probe_agent_dir(runtime: str) -> str | None:
+    """Ask a runtime's runner to locate its agent-definitions dir (comfort feature).
+
+    Called only when NO explicit agent_dir was set anywhere — the LOWEST slot in
+    the precedence chain, above the "none configured" preflight error. The runner
+    owns the convention (opencode probes for `.opencode/` in cwd + ancestors); the
+    library hardcodes no marker. A runner that does not implement the OPTIONAL
+    `default_agent_dir` (a remote one) yields None, so the requirement surfaces at
+    preflight. Best-effort: an unknown runtime or a filesystem error yields None,
+    never raises.
+    """
+    try:
+        runner = get_runner(runtime)
+    except ValueError:
+        return None
+    probe = getattr(runner, "default_agent_dir", None)
+    if not callable(probe):
+        return None
+    try:
+        return probe()
+    except OSError:
+        return None
+
+
 def get_executor(name: str, *, serve_url: str = "", options: dict[str, Any] | None = None) -> AgentExecutor:
     """Resolve an AgentExecutor for a runtime name (the "runtime" run param).
 
@@ -150,6 +174,7 @@ __all__ = [
     "AgentRunner",
     "RunnerBase",
     "RunnerSpec",
+    "probe_agent_dir",
     "AgentRunnerInfo",
     "AgentInvocation",
     "AgentExecutor",

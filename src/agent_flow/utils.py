@@ -131,3 +131,19 @@ def resolve_run_dir(run_dir: str | None, *, name: str = "run") -> Path:
     slug = "".join(c if (c.isalnum() or c in "-_") else "-" for c in name) or "run"
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return Path(tempfile.mkdtemp(prefix=f"{slug}-{stamp}-", dir=base))
+
+
+def find_marker_dir(marker: str, start: Path | None = None) -> Path | None:
+    """Walk `start` (default cwd) and its ancestors for a directory named `marker`.
+
+    Same instinct as git finding `.git`: the first ancestor that CONTAINS a
+    `marker` directory is returned (the ancestor itself, not the marker). Returns
+    None if none is found up to the filesystem root. Used by a runner to locate
+    its agent-definitions convention (opencode's `.opencode/`) so the common case
+    needs no explicit agent_dir.
+    """
+    here = (start or Path.cwd()).resolve()
+    for directory in (here, *here.parents):
+        if (directory / marker).is_dir():
+            return directory
+    return None
