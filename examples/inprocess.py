@@ -1,11 +1,25 @@
 """In-process agents — a 2-node flow with NO subprocess, NO sidecar.
 
 Both "agents" are plain Python functions that simulate a PydanticAI-style agent:
-they take the neutral `AgentInvocation` (the composed prompt + params) and return
-a typed pydantic model. agent-flow's `InProcessExecutor` runs them as direct
-calls and maps the typed return onto the same `AgentResult` a subprocess agent
-would produce — so gates read `ctx.obj` identically, and nothing spawns a process
-or writes a control file.
+they take the neutral `AgentInvocation` and return a typed pydantic model.
+agent-flow's `InProcessExecutor` runs them as direct calls and maps the typed
+return onto the same `AgentResult` a subprocess agent would produce — so gates
+read `ctx.obj` identically, and nothing spawns a process or writes a control file.
+
+TYPED AT BOTH ENDS. `respond` declares both an `input_schema` and a
+`result_schema`, the two halves of the same idea:
+
+    inputs={...}    the VALUES  (templated per node, serializable in the FlowDef)
+    input_schema=   their TYPE  -> validated BEFORE the impl runs -> inv.input_obj
+    result_schema=  the return's TYPE -> validated AFTER it returns -> ctx.obj
+
+So an in-process agent receives DATA, not text it has to parse back out of a
+prompt (`inv.inputs` / `inv.params` hold the raw values; `inv.prompt` is still
+there for an agent that wants to reason over the text). Because the schema
+validates the RESOLVED work order, an unresolved `{urgency}` — a skipped
+upstream, a typo — fails here with a schema error instead of reaching the agent
+as literal text. (That only bites for a CONSTRAINED field: a bare `str` accepts
+"{urgency}" quite happily, which is why RespondIn.urgency is a Literal.)
 
 This example is also the ASYNC-FIRST showcase: an in-process impl may be a plain
 `def` OR an `async def`, and the two mix freely in one flow. `respond` is written
@@ -21,8 +35,8 @@ The pipeline:
 
   - classify: reads the ticket text from the work order, returns a
     Classification{category, urgency}.
-  - respond:  reads the classification (published downstream via `exports`),
-    returns a DraftReply{channel, message}.
+  - respond:  reads the classification (published downstream via `exports`) as a
+    VALIDATED RespondIn, returns a DraftReply{channel, message}.
 
 Two ways to attach an in-process impl are shown:
   - by NAME on the FlowDef  (NodeDef.impl_ref + registry.agent_impl) — declarative,
@@ -44,13 +58,15 @@ Run:
 
 from __future__ import annotations
 
+from typing import Literal
+
 import anyio
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_flow import AgentInvocation, FlowDef, FlowRegistry, NodeDef
 
 
-# --- Typed outputs (what each "agent" returns) ------------------------------
+# --- Typed models: what each "agent" receives and returns -------------------
 class Classification(BaseModel):
     category: str
     urgency: str  # "low" | "normal" | "high"
@@ -72,7 +88,10 @@ class RespondIn(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
     category: str = Field(validation_alias="CATEGORY")
-    urgency: str = Field(validation_alias="URGENCY")
+    # CONSTRAINED on purpose: a bare `str` would happily accept the literal text
+    # "{urgency}" if the upstream export never resolved. A Literal (or a pattern,
+    # or an int) is what turns an unresolved placeholder into a real error.
+    urgency: Literal["low", "normal", "high"] = Field(validation_alias="URGENCY")
 
 
 # --- The registry: two in-process agent impls + their result schemas --------

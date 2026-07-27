@@ -90,7 +90,9 @@ Two properties make it safe to add to an existing node:
 - **It runs on the RESOLVED work order**, after `{param}` templating and upstream
   `exports`, and BEFORE the agent is spawned. An unresolved `{mode}` therefore
   becomes a schema error rather than literal text handed to an agent — the
-  failure mode this exists to remove.
+  failure mode this exists to remove. The catch is only as strong as the field:
+  a bare `str` accepts `"{mode}"`, so a `Literal`/`pattern`/non-`str` type is
+  what makes an unresolved placeholder detectable.
 
 Unlike a bad *result* (which never auto-fails — a [gate](gates.md) decides,
 because the agent has already run and its output is evidence), a bad *input* has

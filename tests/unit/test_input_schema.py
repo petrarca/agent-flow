@@ -113,6 +113,27 @@ def test_unresolved_export_is_caught_instead_of_reaching_the_agent():
     assert ran == []
 
 
+def test_bare_str_field_does_NOT_catch_an_unresolved_placeholder():
+    """The honest limit of the guarantee, pinned so the docs stay true.
+
+    A `str` field accepts the literal text "{mode}", so an unresolved template
+    slips through. Only a CONSTRAINED field (Literal/pattern/non-str) turns it
+    into an error — which is why the docs and the in-process example say so.
+    """
+    seen = {}
+
+    class LooseIn(BaseModel):
+        mode: str  # unconstrained
+
+    async def impl(inv):
+        seen["obj"] = inv.input_obj
+        return {"status": "ok"}
+
+    n = agent_node("n", "a", impl=impl, input_schema=LooseIn, inputs={"mode": "{mode}"})
+    assert _run([n])["n"].status == "ok"
+    assert seen["obj"].mode == "{mode}"  # passed straight through, unresolved
+
+
 def test_blocking_node_halts_the_run_on_invalid_input():
     from agent_flow.engine import NodeBlocked
 

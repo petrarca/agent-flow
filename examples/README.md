@@ -59,6 +59,12 @@ still flows a value (`category`/`urgency`) from one node to the next. Attached b
 name (`NodeDef.impl_ref` + `registry.agent_impl`); the imperative form is
 `agent_node(impl=fn)`.
 
+It is **typed at both ends**: the `respond` node declares an `input_schema`
+(validated from the templated work order *before* the impl runs, handed over as
+`inv.input_obj`) alongside its `result_schema` (validated on return, seen by the
+gate as `ctx.obj`). So an in-process agent receives data rather than text it must
+parse back out of a prompt — the impl has no prompt-scraping helper at all.
+
 This is also the **async-first showcase**: `classify` is a plain `def` and
 `respond` is an `async def` (the real PydanticAI shape — `await agent.run(…)`),
 and the two mix in one flow with no FlowDef changes. The engine awaits an async

@@ -132,7 +132,10 @@ agent_node("triage-us", "triage", input_schema=TriageIn, result_schema=TriageOut
 Validation runs on the **resolved** work order — after `{param}` templating and
 upstream [`exports`](#exports) — and **before the agent is spawned**. So an
 unresolved `{mode}` (a skipped upstream, a typo) fails with a real schema error
-instead of reaching the agent as the literal text `{mode}`. A failure is mapped
+instead of reaching the agent as the literal text `{mode}`. Note this only bites
+for a **constrained** field: a bare `str` accepts `"{mode}"` quite happily, so
+use `Literal`, a `pattern`, or a non-`str` type where you want that guarantee.
+A failure is mapped
 through the node's `criticality` like any other node error: `blocking` halts the
 run, `degrade` records the node as degraded and continues.
 
