@@ -112,12 +112,9 @@ def register(app, ctx: RunCliContext) -> None:
             cfg.agent_dir = probe_agent_dir(cfg.runtime) or ""
         params = _resolve_params(ctx.params_model, parse_params(param), console)
         runtime_fields = runtime_param_fields(ctx.params_model)
-        # model / idle_timeout_s are run-wide knobs an agent-node reads from
-        # params; inject the resolved values (an explicit -p / per-node value still
-        # wins). model only when set (empty -> the runtime resolves it).
-        if cfg.model:
-            params.setdefault("model", cfg.model)
-        params.setdefault("idle_timeout_s", str(cfg.idle_timeout_s))
+        # Run-wide knobs an agent-node reads back out of `params` — seeded by the
+        # shared helper (the programmatic path calls the same one).
+        cfg.apply_run_wide_params(params)
         _print_run_summary(ctx.name, cfg, params, console, hide=runtime_fields)
         # Preflight validates the real runtime + agent-dir. Under full mock mode a
         # flow may have no agent-dir; skip the runtime preflight then (partial
@@ -190,19 +187,20 @@ def _resolve_params(model: type | None, cli_params: dict[str, str], console) -> 
     with -p as init kwargs over bare env/.env/defaults; on ValidationError print +
     exit 2. The validated model is dumped in JSON mode for {name} templating.
     """
-    if model is None:
-        return dict(cli_params)
     from pydantic import ValidationError
 
+    from agent_flow.run_config import validate_params
+
     try:
-        settings = model(**cli_params)
+        # Shared with the programmatic path (run_flow); only the ERROR handling
+        # differs — a CLI prints and exits 2, a library call raises.
+        return validate_params(model, cli_params)
     except ValidationError as exc:
         console.print(f"[red]Invalid parameters for {getattr(model, '__name__', 'params')}:[/red]")
         for err in exc.errors():
             loc = ".".join(str(p) for p in err.get("loc", ()))
             console.print(f"  [red]-[/red] {loc}: {err.get('msg')}")
         sys.exit(2)
-    return {k: ("" if v is None else str(v)) for k, v in settings.model_dump(mode="json").items()}
 
 
 def _run_preflight(runtime: str, agent_dir: str, backend: str, console) -> None:
@@ -317,7 +315,7 @@ def _build_and_run(
         run_additional_instructions=cfg.resolved_instructions(),
         run_context=run_context,
         agent_dir=cfg.agent_dir,
-        node_overrides={n: nc.model_dump() for n, nc in cfg.nodes.items()},
+        node_overrides=cfg.node_overrides(),
         durations=cfg.durations,
         options=cfg.options,
         backend=cfg.backend,

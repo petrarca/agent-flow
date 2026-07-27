@@ -38,7 +38,7 @@ def _build_pipeline_and_call(
     nodes / options. It is resolved through the SAME RunConfig source stack as the
     CLI, so env / .env still apply below it."""
     from agent_flow.engine import build_flow
-    from agent_flow.run_config import build_run_config
+    from agent_flow.run_config import build_run_config, validate_params
 
     if registry is None:
         from agent_flow.registry import FlowRegistry
@@ -46,6 +46,18 @@ def _build_pipeline_and_call(
         registry = FlowRegistry()
     cfg = build_run_config(base=run_config)
     nodes = compile_flow(flow_def, registry)
+    # The flow's declared SIGNATURE applies here too — not only under run_cli —
+    # so a missing/invalid param fails the same way on both entry points. A
+    # ValidationError propagates (a library raises; the CLI catches and exits 2).
+    #
+    # OVERLAY, never replace: this path's `params` carries the FRAMEWORK keys too
+    # (runtime / mock_agents / model / idle_timeout_s — the reserved names an
+    # agent-node reads back out of the bag). A domain model ignores unknown
+    # fields, so validating the whole bag and taking the result would silently
+    # DROP them. Validated domain values win; everything else passes through.
+    if flow_def.params_schema:
+        model = registry.get_params_model(flow_def.params_schema)
+        params = {**params, **validate_params(model, params)}
     pipeline = build_flow(
         nodes,
         name=flow_def.name,
@@ -58,17 +70,15 @@ def _build_pipeline_and_call(
         agent_dir=cfg.agent_dir,
         backend=cfg.backend,
         durations=cfg.durations,
-        node_overrides={n: nc.model_dump() for n, nc in cfg.nodes.items()},
+        node_overrides=cfg.node_overrides(),
         options=cfg.options,
         registry=registry,
     )
     # Run-wide model / idle_timeout_s ride `params` (the node builder reads them
-    # from ctx.params, per node). Inject the resolved config values so the
-    # programmatic path matches the CLI — an explicit -p / per-node value still
-    # wins (setdefault). This is why run_config={"model": ...} takes effect.
-    if cfg.model:
-        params.setdefault("model", cfg.model)
-    params.setdefault("idle_timeout_s", str(cfg.idle_timeout_s))
+    # from ctx.params, per node) — seeded by the SAME helper the CLI uses, so the
+    # two entry points cannot drift (they did once: run_config={"model": ...} was
+    # silently dropped on this path).
+    cfg.apply_run_wide_params(params)
     # An explicit run_dir= arg wins over run_config's run_dir (a convenience for
     # the common "same flow, different output dir" call); else fall to the config.
     call = {"run_dir": run_dir or cfg.run_dir, **params}
@@ -147,6 +157,10 @@ def compile_flow(flow_def: FlowDef, registry) -> list[Node]:
 
 
 def _validate_refs(flow_def: FlowDef, registry) -> None:
+    # Flow-level refs first: a typo'd params_schema must fail with the same
+    # fail-fast guarantee as a node's gate/schema ref, before anything runs.
+    if flow_def.params_schema and not registry.has_params_model(flow_def.params_schema):
+        raise ValueError(f"flow {flow_def.name!r}: unknown params_schema {flow_def.params_schema!r}")
     for n in flow_def.nodes:
         if n.gate and not registry.has_gate(n.gate):
             raise ValueError(f"node {n.name!r}: unknown gate {n.gate!r}")

@@ -86,13 +86,30 @@ FlowDef(
     name="tech-assessment",
     nodes=[NodeDef(...), NodeDef(...), …],
     run_instructions="…", run_context=["{repos_root}/rules/*.md"],
+    params_schema="AssessParams",            # the flow's SIGNATURE (registry name)
 )
 ```
+
+`params_schema` names a params model registered with `registry.params_model(...)`
+— the run parameters this pipeline NEEDS (`product_key`, …), the values its nodes
+template as `{name}`. It is the mirror of a node's `input_schema`, one scope up: a
+node declares its input contract, a flow declares its own. Because it is a NAME,
+the FlowDef stays serializable AND self-describing — the pairing "flow ↔ its
+params" travels with the flow instead of depending on the call site to pass the
+matching model. Unset → params pass through untyped.
 
 `agent_dir` (a filesystem path), `backend` (a deployment choice), and
 `llm_concurrency` (an environment capacity) are NOT flow fields — they are run
 config, supplied via `run_config=` / `--config` / the CLI / env. This keeps a
 serialized FlowDef meaningful on any machine.
+
+The three layers, kept apart on purpose:
+
+| layer | declares | where |
+|---|---|---|
+| flow | what it IS, SAYS, and NEEDS | `FlowDef` (portable) |
+| run config | HOW / WHERE it runs | `run_config=` / `--config` / CLI / env |
+| params | the VALUES for THIS run | `-p KEY=VALUE` / env / kwargs |
 
 Validation runs at construction: unique node names, every `depends_on` names a
 known node. `compile_flow` additionally checks that every referenced gate /
@@ -135,7 +152,21 @@ A node references a gate by name: `gate="rerun_to", gate_args={"target": "…"}`
   NOT running an agent (`NodeDef(run_ref="name")`); the node stays serializable,
   the code lives in the registry.
 - `@registry.schema("name")` — a result schema (pydantic model / JSON-schema
-  dict / `ResultSchema`) referenced by `NodeDef(result_schema="name")`.
+  dict / `ResultSchema`) referenced by `NodeDef(result_schema="name")`, and the
+  same registry serves `NodeDef(input_schema="name")`.
+- `@registry.params_model("name")` — the FLOW's params model, referenced by
+  `FlowDef(params_schema="name")`. Its OWN namespace, deliberately not
+  `schema()`: a flow's run-parameter contract and a node's result/input schema
+  are different concepts and must not collide on a name. Any pydantic model
+  works — a plain `BaseModel` (values from `-p` / kwargs) or a `BaseSettings`
+  (adds bare-env / `.env` fallback and `validation_alias` lookups).
+
+  ```python
+  @registry.params_model("AssessParams")
+  class AssessParams(BaseSettings):
+      product_key: str = Field(description="required")
+      repos_root: str = ""
+  ```
 
 ### In-process & mock execution
 
@@ -183,7 +214,7 @@ from agent_flow import arun_flow         # async-native twin — await on an eve
 # await arun_flow(flow, registry=registry, product_key="acme", runtime="opencode")
 
 from agent_flow.cli import run_cli        # the reusable CLI (run / flow nodes / version)
-run_cli(flow, registry=registry, params_model=MyParams)
+run_cli(flow, registry=registry)   # params come from the flow's params_schema
 ```
 
 `run_flow` is a thin `anyio.run` wrapper over `arun_flow`; use `arun_flow` (or the

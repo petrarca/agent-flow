@@ -38,7 +38,7 @@ Via the CLI (adds `run` / `flow nodes` / `version`, `-p/--param`, `--config`, et
 ```python
 def main():
     from agent_flow.cli import run_cli
-    run_cli(flow)                 # or run_cli(flow, registry=…, params_model=…, version="1.2.0")
+    run_cli(flow)                 # or run_cli(flow, registry=…, run_config={…}, version="1.2.0")
 ```
 
 ```bash

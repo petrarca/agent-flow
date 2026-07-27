@@ -76,26 +76,41 @@ templates in `inputs`, `context`, and paths — so `-p product_key=my-product`
 makes `{product_key}` resolve everywhere. There is no `--product` option built
 in; `--param` is the generic protocol for all of them.
 
-### Typed, required domain params (`params_model`)
+### Typed, required domain params
 
-Pass a pydantic-settings class to declare which params are required and validate
-their types before any agent runs:
+Declare which params the pipeline requires and validate their types before any
+agent runs. The model is the flow's SIGNATURE — what it needs to RUN (as opposed
+to `run_config`, which is how/where it runs).
 
 ```python
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+@registry.params_model("MyParams")           # register it BY NAME
 class MyParams(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     product_key: str                        # required — no default
     repos_root: str = Field(default="/tmp/repos")
 
+# DECLARATIVE (preferred): the flow declares its own signature.
+FLOW = FlowDef(name="my-pipeline", params_schema="MyParams", nodes=[...])
+run_cli(FLOW, registry=registry)
+
+# IMPERATIVE: the build_nodes form has no FlowDef to declare on, so pass it here.
 run_cli(build_nodes, name="my-pipeline", params_model=MyParams)
 ```
 
+Prefer the declarative form: the pairing "flow ↔ its params" then travels WITH
+the flow, so two flows in one app cannot be started with each other's params, and
+a serialized FlowDef says what it needs. An explicit `params_model=` still wins
+over a flow's `params_schema` (it is also the override hatch).
+
+A plain `BaseModel` works too — use `BaseSettings` only when you want bare-env /
+`.env` fallback and `validation_alias` lookups.
+
 Domain params resolve **`-p` > bare env / `.env` > model default** and are
 validated: a missing required param (or a bad value) fails fast with exit code 2
-**before** any agent is spawned. Omit `params_model` to accept raw untyped `-p`
+**before** any agent is spawned. Declare neither to accept raw untyped `-p`
 values (the historical behavior).
 
 **Runtime-populated fields.** Some params are not user inputs — they are filled
@@ -451,7 +466,7 @@ agent_node("analyst", "analyst", depends_on=("readiness",),
 
 The engine applies exports after the node settles, so later nodes pick the values
 up automatically. Pair this with a **runtime-populated** params field (see
-[typed params](#typed-required-domain-params-params_model)) to give the
+[typed params](#typed-required-domain-params)) to give the
 placeholder a sensible default and keep it out of the resolved-params summary.
 
 Scope: same-process, **downstream-only** — exports reach nodes that run *after*

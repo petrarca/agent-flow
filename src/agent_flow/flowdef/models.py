@@ -109,6 +109,15 @@ class FlowDef(BaseModel):
     run_instructions: str = ""
     run_context: list[str] = Field(default_factory=list)
 
+    # The flow's SIGNATURE: a registered params model BY NAME (registry
+    # .params_model) declaring the run parameters this pipeline needs —
+    # product_key, … — the values its nodes template as `{name}`. The mirror of
+    # NodeDef.input_schema, one scope up: a node declares its input contract, a
+    # flow declares its own. Kept as a NAME so the FlowDef stays serializable
+    # (the model class lives in code, like gates/schemas). Unset -> params pass
+    # through untyped, exactly as before.
+    params_schema: str | None = None
+
     @model_validator(mode="after")
     def _validate_graph(self) -> FlowDef:
         names = [n.name for n in self.nodes]

@@ -35,6 +35,7 @@ There is deliberately no "product" (or any domain) concept here.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -314,8 +315,9 @@ class RunConfig(BaseSettings):
         """This run's ADDITIONAL run-wide brief (the -i/--instructions value):
         instructions_file content if given, else the inline `instructions`.
 
-        This is the run-config layer only. It is combined with the flow's standing
-        `run_instructions` by `combine_instructions` — it does NOT replace it."""
+        This is the run-config layer ONLY — prompt channel [4]. It is rendered
+        AFTER the flow's standing `run_instructions` (channel [3]) as its own
+        block; it does not replace it. See design/orchestrator/input-plane.md."""
         if self.instructions_file:
             return Path(self.instructions_file).read_text()
         return self.instructions
@@ -324,6 +326,50 @@ class RunConfig(BaseSettings):
         """Set nodes.<node>.instructions, creating the entry if absent (CLI --instruct)."""
         entry = self.nodes.get(node) or NodeRunConfig()
         self.nodes[node] = entry.model_copy(update={"instructions": text})
+
+    def node_overrides(self) -> dict[str, dict[str, Any]]:
+        """The `nodes:` section projected to the plain dicts the ENGINE consumes.
+
+        The engine takes `dict[str, dict]`, never the NodeRunConfig type, so it
+        stays free of the settings module (tier discipline). One projection here
+        rather than at each entry point — the CLI and the programmatic path must
+        not hand-copy it and drift.
+        """
+        return {name: nc.model_dump() for name, nc in self.nodes.items()}
+
+    def apply_run_wide_params(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Inject the run-wide knobs a node reads back out of `params`, in place.
+
+        `model` / `idle_timeout_s` reach a node via `ctx.params` (see the reserved
+        param names in input-plane.md), so the resolved config values must be
+        seeded there. `setdefault` so an explicit `-p` (or a per-node value) still
+        wins. `model` only when set — empty means "let the runtime resolve it".
+
+        Shared by BOTH entry points on purpose: the programmatic path once missed
+        this and `run_config={"model": ...}` was silently dropped while the CLI
+        worked. One method, no drift.
+        """
+        if self.model:
+            params.setdefault("model", self.model)
+        params.setdefault("idle_timeout_s", str(self.idle_timeout_s))
+        return params
+
+
+def validate_params(model: type | None, values: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate domain params against a flow's params model; return a str dict.
+
+    The PURE core of param resolution, shared by both entry points: the CLI wraps
+    it to pretty-print a ValidationError and exit 2, while the programmatic
+    `run_flow` lets the ValidationError propagate to its caller (a library must
+    raise, not exit). `model is None` -> pass the values through untyped.
+
+    Values are dumped in JSON mode and stringified because `params` are the
+    `{name}` templating bag (all strings); None becomes "".
+    """
+    if model is None:
+        return dict(values)
+    obj = model(**values)
+    return {k: ("" if v is None else str(v)) for k, v in obj.model_dump(mode="json").items()}
 
 
 def normalize_run_config(run_config: "dict[str, Any] | RunConfig | None") -> dict[str, Any] | None:

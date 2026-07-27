@@ -124,8 +124,8 @@ class RunContext:
     # A ONE-TIME instruction for THIS run attempt only. Today it is set by the
     # engine from a gate's Restart/GoTo `instruction`, but the field's nature is
     # general: a single-attempt instruction handed to a node's next run, not
-    # intrinsically about re-running. Unlike node_instructions (standing, whole
-    # run) it is ephemeral: the node's `run` appends it as the LAST prompt block
+    # intrinsically about re-running. Unlike the per-node instruction channels
+    # (standing, whole run) it is ephemeral: the node's `run` appends it LAST
     # (freshest guidance, right before the work order), and the engine clears it so
     # the next attempt does not inherit it. It is injected VERBATIM — the engine
     # imposes NO heading or wrapping; the caller that produced it owns the full
