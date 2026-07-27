@@ -16,23 +16,8 @@ from agent_flow.engine import interpret
 from agent_flow.node_builder import agent_node
 
 
-def _capture_options(monkeypatch, node, *, options=None, node_overrides=None):
-    """Run one node with a stubbed get_executor that records the options it got."""
-    from agent_flow.core.agent_runtime import AgentResult
-
-    seen = {}
-
-    class _FakeExecutor:
-        name = "fake"
-
-        async def run(self, inv):
-            return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "ok"}, completion="completed")
-
-    def _fake_get_executor(_runtime, **kw):
-        seen["options"] = kw.get("options")
-        return _FakeExecutor()
-
-    monkeypatch.setattr("agent_flow.node_builder.get_executor", _fake_get_executor)
+def _capture_options(spy, node, *, options=None, node_overrides=None):
+    """Run one node through the shared spy; return the options get_executor got."""
     anyio.run(
         lambda: interpret(
             node,
@@ -43,22 +28,22 @@ def _capture_options(monkeypatch, node, *, options=None, node_overrides=None):
             node_overrides=node_overrides or {},
         )
     )
-    return seen["options"]
+    return spy.kwargs.get("options")
 
 
-def test_run_wide_options_reach_the_executor(monkeypatch):
+def test_run_wide_options_reach_the_executor(spy_executor):
     node = agent_node("n", "a")
-    assert _capture_options(monkeypatch, node, options={"serve_url": "http://x:4096"}) == {"serve_url": "http://x:4096"}
+    assert _capture_options(spy_executor, node, options={"serve_url": "http://x:4096"}) == {"serve_url": "http://x:4096"}
 
 
-def test_no_options_yields_empty(monkeypatch):
-    assert _capture_options(monkeypatch, agent_node("n", "a")) == {}
+def test_no_options_yields_empty(spy_executor):
+    assert _capture_options(spy_executor, agent_node("n", "a")) == {}
 
 
-def test_per_node_options_merge_over_run_wide(monkeypatch):
+def test_per_node_options_merge_over_run_wide(spy_executor):
     node = agent_node("n", "a")
     opts = _capture_options(
-        monkeypatch,
+        spy_executor,
         node,
         options={"serve_url": "http://run-wide:4096", "keep": "yes"},
         node_overrides={"n": {"options": {"serve_url": "http://node:5000"}}},
@@ -66,9 +51,9 @@ def test_per_node_options_merge_over_run_wide(monkeypatch):
     assert opts == {"serve_url": "http://node:5000", "keep": "yes"}  # overridden + inherited
 
 
-def test_options_is_an_open_bag(monkeypatch):
+def test_options_is_an_open_bag(spy_executor):
     node = agent_node("n", "a")
-    assert _capture_options(monkeypatch, node, options={"anything": 1, "nested": {"a": 2}})["nested"] == {"a": 2}
+    assert _capture_options(spy_executor, node, options={"anything": 1, "nested": {"a": 2}})["nested"] == {"a": 2}
 
 
 # --- get_executor reads serve_url from the bag ------------------------------
@@ -156,53 +141,23 @@ def test_yaml_options_sections(tmp_path):
 # options at the seam we spy on get_executor and run without mock mode.
 
 
-def test_programmatic_run_flow_forwards_options(monkeypatch, tmp_path):
+def test_programmatic_run_flow_forwards_options(spy_executor, tmp_path):
     from agent_flow import run_flow
     from agent_flow.flowdef import FlowDef, NodeDef
     from agent_flow.registry import FlowRegistry
 
-    seen = {}
-
-    def _fake(_runtime, **kw):
-        seen["options"] = kw.get("options")
-        from agent_flow.core.agent_runtime import AgentResult
-
-        class _E:
-            name = "fake"
-
-            async def run(self, inv):
-                return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "ok"}, completion="completed")
-
-        return _E()
-
-    monkeypatch.setattr("agent_flow.node_builder.get_executor", _fake)
     flow = FlowDef(name="t", nodes=[NodeDef(name="n", agent="a")])
     run_flow(flow, registry=FlowRegistry(), run_dir=str(tmp_path), run_config={"options": {"serve_url": "http://p:1"}})
-    assert seen["options"] == {"serve_url": "http://p:1"}
+    assert spy_executor.kwargs.get("options") == {"serve_url": "http://p:1"}
 
 
-def test_cli_path_forwards_options(monkeypatch, tmp_path):
+def test_cli_path_forwards_options(spy_executor, tmp_path):
     from agent_flow.cli.commands.run import _build_and_run
     from agent_flow.cli.console import get_console
     from agent_flow.flowdef import FlowDef, NodeDef, compile_flow
     from agent_flow.registry import FlowRegistry
     from agent_flow.run_config import build_run_config
 
-    seen = {}
-
-    def _fake(_runtime, **kw):
-        seen["options"] = kw.get("options")
-        from agent_flow.core.agent_runtime import AgentResult
-
-        class _E:
-            name = "fake"
-
-            async def run(self, inv):
-                return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "ok"}, completion="completed")
-
-        return _E()
-
-    monkeypatch.setattr("agent_flow.node_builder.get_executor", _fake)
     flow = FlowDef(name="t", nodes=[NodeDef(name="n", agent="a")])
     registry = FlowRegistry()
     cfg = build_run_config(run_dir=str(tmp_path))
@@ -219,4 +174,4 @@ def test_cli_path_forwards_options(monkeypatch, tmp_path):
         render_results=False,
         registry=registry,
     )
-    assert seen["options"] == {"serve_url": "http://cli:2"}, "run_cli must forward run-wide options"
+    assert spy_executor.kwargs.get("options") == {"serve_url": "http://cli:2"}, "run_cli must forward run-wide options"

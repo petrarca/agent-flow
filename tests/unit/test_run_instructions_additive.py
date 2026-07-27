@@ -24,20 +24,8 @@ STANDING = "STANDING-BRIEF-MARKER"
 ADDITION = "ADDITION-MARKER"
 
 
-def _prompt(monkeypatch, *, run_instructions="", run_additional_instructions=""):
-    """Render one node's prompt via the stubbed executor; return the prompt text."""
-    from agent_flow.core.agent_runtime import AgentResult
-
-    cap = {}
-
-    class _FakeExecutor:
-        name = "fake"
-
-        async def run(self, inv):
-            cap["prompt"] = inv.prompt
-            return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "ok"}, completion="completed")
-
-    monkeypatch.setattr("agent_flow.node_builder.get_executor", lambda _runtime, **_kw: _FakeExecutor())
+def _prompt(spy, *, run_instructions="", run_additional_instructions=""):
+    """Render one node's prompt through the shared executor spy; return the text."""
     anyio.run(
         lambda: interpret(
             agent_node("n", "a", inputs={"X": "1"}),
@@ -48,41 +36,41 @@ def _prompt(monkeypatch, *, run_instructions="", run_additional_instructions="")
             run_additional_instructions=run_additional_instructions,
         )
     )
-    return cap["prompt"]
+    return spy.inv.prompt
 
 
 # --- both blocks present, in order ------------------------------------------
 
 
-def test_standing_brief_renders(monkeypatch):
-    assert STANDING in _prompt(monkeypatch, run_instructions=STANDING)
+def test_standing_brief_renders(spy_executor):
+    assert STANDING in _prompt(spy_executor, run_instructions=STANDING)
 
 
-def test_addition_renders(monkeypatch):
-    assert ADDITION in _prompt(monkeypatch, run_additional_instructions=ADDITION)
+def test_addition_renders(spy_executor):
+    assert ADDITION in _prompt(spy_executor, run_additional_instructions=ADDITION)
 
 
-def test_both_render_standing_before_addition(monkeypatch):
-    p = _prompt(monkeypatch, run_instructions=STANDING, run_additional_instructions=ADDITION)
+def test_both_render_standing_before_addition(spy_executor):
+    p = _prompt(spy_executor, run_instructions=STANDING, run_additional_instructions=ADDITION)
     assert STANDING in p and ADDITION in p
     assert p.index(STANDING) < p.index(ADDITION)  # standing first, addition appended
 
 
-def test_addition_has_its_own_scoped_heading(monkeypatch):
-    p = _prompt(monkeypatch, run_instructions=STANDING, run_additional_instructions=ADDITION)
+def test_addition_has_its_own_scoped_heading(spy_executor):
+    p = _prompt(spy_executor, run_instructions=STANDING, run_additional_instructions=ADDITION)
     assert "## Run-wide instructions" in p
     # Scoped title (not the per-node "for this step" one) so the two never collide.
     assert "## Additional run-wide instructions" in p
 
 
-def test_no_instructions_leaves_no_run_wide_headings(monkeypatch):
+def test_no_instructions_leaves_no_run_wide_headings(spy_executor):
     """The 0.3.0-identical case: nothing declared, nothing added -> no heading."""
-    p = _prompt(monkeypatch)
+    p = _prompt(spy_executor)
     assert "Run-wide instructions" not in p
 
 
-def test_only_standing_when_no_addition(monkeypatch):
-    p = _prompt(monkeypatch, run_instructions=STANDING)
+def test_only_standing_when_no_addition(spy_executor):
+    p = _prompt(spy_executor, run_instructions=STANDING)
     assert "## Run-wide instructions" in p
     assert "Additional run-wide instructions" not in p
 

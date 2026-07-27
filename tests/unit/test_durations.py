@@ -21,20 +21,8 @@ from agent_flow.node_builder import agent_node
 from agent_flow.utils import DEFAULT_DURATIONS, duration_table, resolve_duration
 
 
-def _capture_idle(monkeypatch, node, *, params=None, durations=None):
-    """Run one node with a stubbed executor; return the invocation's idle_timeout_s."""
-    from agent_flow.core.agent_runtime import AgentResult
-
-    captured = {}
-
-    class _FakeExecutor:
-        name = "fake"
-
-        async def run(self, inv):
-            captured["idle"] = inv.idle_timeout_s
-            return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "ok"}, completion="completed")
-
-    monkeypatch.setattr("agent_flow.node_builder.get_executor", lambda _runtime, **_kw: _FakeExecutor())
+def _capture_idle(spy, node, *, params=None, durations=None):
+    """Run one node through the shared executor spy; return its idle_timeout_s."""
     anyio.run(
         lambda: interpret(
             node,
@@ -44,7 +32,7 @@ def _capture_idle(monkeypatch, node, *, params=None, durations=None):
             durations=durations or {},
         )
     )
-    return captured["idle"]
+    return spy.inv.idle_timeout_s
 
 
 # --- the vocabulary itself --------------------------------------------------
@@ -87,32 +75,32 @@ def test_unknown_name_raises_and_names_the_alternatives():
 # --- resolution reaching the invocation -------------------------------------
 
 
-def test_declared_duration_becomes_seconds_on_the_invocation(monkeypatch):
+def test_declared_duration_becomes_seconds_on_the_invocation(spy_executor):
     node = agent_node("n", "a", duration="long")
-    assert _capture_idle(monkeypatch, node, durations={"long": 900}) == 900
+    assert _capture_idle(spy_executor, node, durations={"long": 900}) == 900
 
 
-def test_shipped_vocabulary_works_with_zero_configuration(monkeypatch):
+def test_shipped_vocabulary_works_with_zero_configuration(spy_executor):
     """A flow must run on a machine whose run config defines no durations at all."""
     node = agent_node("n", "a", duration="long")
-    assert _capture_idle(monkeypatch, node, durations={}) == DEFAULT_DURATIONS["long"]
+    assert _capture_idle(spy_executor, node, durations={}) == DEFAULT_DURATIONS["long"]
 
 
-def test_no_duration_falls_back_to_the_run_wide_idle_timeout(monkeypatch):
+def test_no_duration_falls_back_to_the_run_wide_idle_timeout(spy_executor):
     node = agent_node("n", "a")
-    assert _capture_idle(monkeypatch, node, params={"idle_timeout_s": "45"}) == 45
+    assert _capture_idle(spy_executor, node, params={"idle_timeout_s": "45"}) == 45
 
 
-def test_no_duration_and_no_run_wide_value_uses_the_library_default(monkeypatch):
+def test_no_duration_and_no_run_wide_value_uses_the_library_default(spy_executor):
     node = agent_node("n", "a")
-    assert _capture_idle(monkeypatch, node) == DEFAULT_IDLE_TIMEOUT_S
+    assert _capture_idle(spy_executor, node) == DEFAULT_IDLE_TIMEOUT_S
 
 
-def test_declared_duration_beats_the_run_wide_idle_timeout(monkeypatch):
+def test_declared_duration_beats_the_run_wide_idle_timeout(spy_executor):
     """Specificity within a tier: the node's own declaration wins over the
     run-wide fallback."""
     node = agent_node("n", "a", duration="short")
-    idle = _capture_idle(monkeypatch, node, params={"idle_timeout_s": "45"}, durations={"short": 30})
+    idle = _capture_idle(spy_executor, node, params={"idle_timeout_s": "45"}, durations={"short": 30})
     assert idle == 30
 
 

@@ -89,19 +89,8 @@ def test_probe_agent_dir_runner_without_probe_is_none(monkeypatch):
 # --- resolution at the node: probe is the fallback --------------------------
 
 
-def _capture_agent_dir(monkeypatch, node, *, params=None, ctx_agent_dir=""):
-    from agent_flow.core.agent_runtime import AgentResult
-
-    cap = {}
-
-    class _FakeExecutor:
-        name = "fake"
-
-        async def run(self, inv):
-            cap["agent_dir"] = inv.agent_dir
-            return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "ok"}, completion="completed")
-
-    monkeypatch.setattr("agent_flow.node_builder.get_executor", lambda _runtime, **_kw: _FakeExecutor())
+def _capture_agent_dir(spy, node, *, params=None, ctx_agent_dir=""):
+    """Run one node through the shared executor spy; return its agent_dir."""
     anyio.run(
         lambda: interpret(
             node,
@@ -111,35 +100,35 @@ def _capture_agent_dir(monkeypatch, node, *, params=None, ctx_agent_dir=""):
             agent_dir=ctx_agent_dir,
         )
     )
-    return cap["agent_dir"]
+    return spy.inv.agent_dir
 
 
-def test_node_falls_back_to_the_probe_when_unset(tmp_path, monkeypatch):
+def test_node_falls_back_to_the_probe_when_unset(tmp_path, monkeypatch, spy_executor):
     (tmp_path / ".opencode").mkdir()
     monkeypatch.chdir(tmp_path)
     node = agent_node("n", "a")
-    assert _capture_agent_dir(monkeypatch, node) == str(tmp_path.resolve())
+    assert _capture_agent_dir(spy_executor, node) == str(tmp_path.resolve())
 
 
-def test_explicit_agent_dir_beats_the_probe(tmp_path, monkeypatch):
+def test_explicit_agent_dir_beats_the_probe(tmp_path, monkeypatch, spy_executor):
     (tmp_path / ".opencode").mkdir()
     monkeypatch.chdir(tmp_path)
     node = agent_node("n", "a", agent_dir="/explicit/dir")
-    assert _capture_agent_dir(monkeypatch, node) == "/explicit/dir"
+    assert _capture_agent_dir(spy_executor, node) == "/explicit/dir"
 
 
-def test_run_wide_agent_dir_beats_the_probe(tmp_path, monkeypatch):
+def test_run_wide_agent_dir_beats_the_probe(tmp_path, monkeypatch, spy_executor):
     (tmp_path / ".opencode").mkdir()
     monkeypatch.chdir(tmp_path)
     node = agent_node("n", "a")
-    assert _capture_agent_dir(monkeypatch, node, ctx_agent_dir="/run/wide") == "/run/wide"
+    assert _capture_agent_dir(spy_executor, node, ctx_agent_dir="/run/wide") == "/run/wide"
 
 
-def test_no_probe_hit_leaves_agent_dir_empty(tmp_path, monkeypatch):
+def test_no_probe_hit_leaves_agent_dir_empty(tmp_path, monkeypatch, spy_executor):
     monkeypatch.chdir(tmp_path)  # no .opencode anywhere under a temp dir
     node = agent_node("n", "a")
     # Empty -> the run would surface the missing requirement at preflight.
-    assert _capture_agent_dir(monkeypatch, node) == ""
+    assert _capture_agent_dir(spy_executor, node) == ""
 
 
 # --- CLI fills cfg.agent_dir from the probe (so preflight/summary see it) ----

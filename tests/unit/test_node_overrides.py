@@ -21,23 +21,8 @@ from agent_flow.engine import build_flow, interpret
 from agent_flow.node_builder import agent_node
 
 
-def _capture(monkeypatch, node, *, params=None, node_overrides=None, durations=None):
-    """Run one node with a stubbed executor; return the captured invocation."""
-    from agent_flow.core.agent_runtime import AgentResult
-
-    cap = {}
-
-    class _FakeExecutor:
-        name = "fake"
-
-        async def run(self, inv):
-            cap["model"] = inv.model
-            cap["agent_dir"] = inv.agent_dir
-            cap["idle"] = inv.idle_timeout_s
-            cap["prompt"] = inv.prompt
-            return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "ok"}, completion="completed")
-
-    monkeypatch.setattr("agent_flow.node_builder.get_executor", lambda _runtime, **_kw: _FakeExecutor())
+def _capture(spy, node, *, params=None, node_overrides=None, durations=None):
+    """Run one node through the shared executor spy; return the captured invocation."""
     anyio.run(
         lambda: interpret(
             node,
@@ -48,78 +33,78 @@ def _capture(monkeypatch, node, *, params=None, node_overrides=None, durations=N
             durations=durations or {},
         )
     )
-    return cap
+    return spy.inv
 
 
 # --- each setting reaches the invocation ------------------------------------
 
 
-def test_per_node_model_reaches_the_invocation(monkeypatch):
+def test_per_node_model_reaches_the_invocation(spy_executor):
     node = agent_node("n", "a")
-    assert _capture(monkeypatch, node, node_overrides={"n": {"model": "prov/big"}})["model"] == "prov/big"
+    assert _capture(spy_executor, node, node_overrides={"n": {"model": "prov/big"}}).model == "prov/big"
 
 
-def test_per_node_agent_dir_reaches_the_invocation(monkeypatch):
+def test_per_node_agent_dir_reaches_the_invocation(spy_executor):
     node = agent_node("n", "a")
-    assert _capture(monkeypatch, node, node_overrides={"n": {"agent_dir": "/work/x"}})["agent_dir"] == "/work/x"
+    assert _capture(spy_executor, node, node_overrides={"n": {"agent_dir": "/work/x"}}).agent_dir == "/work/x"
 
 
-def test_per_node_idle_timeout_bypasses_the_vocabulary(monkeypatch):
+def test_per_node_idle_timeout_bypasses_the_vocabulary(spy_executor):
     node = agent_node("n", "a", duration="long")
     # A raw idle_timeout_s on the node entry wins over the node's duration name.
-    idle = _capture(monkeypatch, node, node_overrides={"n": {"idle_timeout_s": 42}}, durations={"long": 900})["idle"]
+    idle = _capture(spy_executor, node, node_overrides={"n": {"idle_timeout_s": 42}}, durations={"long": 900}).idle_timeout_s
     assert idle == 42
 
 
-def test_per_node_duration_override_beats_the_flow_declared_one(monkeypatch):
+def test_per_node_duration_override_beats_the_flow_declared_one(spy_executor):
     node = agent_node("n", "a", duration="short")
-    idle = _capture(monkeypatch, node, node_overrides={"n": {"duration": "long"}}, durations={"short": 30, "long": 900})["idle"]
+    idle = _capture(spy_executor, node, node_overrides={"n": {"duration": "long"}}, durations={"short": 30, "long": 900}).idle_timeout_s
     assert idle == 900
 
 
-def test_per_node_agent_dir_is_templated(monkeypatch):
+def test_per_node_agent_dir_is_templated(spy_executor):
     node = agent_node("n", "a")
-    ad = _capture(monkeypatch, node, params={"root": "/w"}, node_overrides={"n": {"agent_dir": "{root}/defs"}})["agent_dir"]
+    ad = _capture(spy_executor, node, params={"root": "/w"}, node_overrides={"n": {"agent_dir": "{root}/defs"}}).agent_dir
     assert ad == "/w/defs"
 
 
 # --- precedence: per-node run config > agent_node() arg > run-wide -----------
 
 
-def test_per_node_model_beats_the_agent_node_arg(monkeypatch):
+def test_per_node_model_beats_the_agent_node_arg(spy_executor):
     """The run config layer ("how THIS run behaves") is more specific than the
     flow's standing agent_node() declaration."""
     node = agent_node("n", "a", model="flow/declared")
-    assert _capture(monkeypatch, node, node_overrides={"n": {"model": "run/override"}})["model"] == "run/override"
+    assert _capture(spy_executor, node, node_overrides={"n": {"model": "run/override"}}).model == "run/override"
 
 
-def test_agent_node_arg_beats_run_wide_model(monkeypatch):
+def test_agent_node_arg_beats_run_wide_model(spy_executor):
     node = agent_node("n", "a", model="flow/declared")
-    assert _capture(monkeypatch, node, params={"model": "run/wide"})["model"] == "flow/declared"
+    assert _capture(spy_executor, node, params={"model": "run/wide"}).model == "flow/declared"
 
 
-def test_run_wide_model_used_when_nothing_more_specific(monkeypatch):
+def test_run_wide_model_used_when_nothing_more_specific(spy_executor):
     node = agent_node("n", "a")
-    assert _capture(monkeypatch, node, params={"model": "run/wide"})["model"] == "run/wide"
+    assert _capture(spy_executor, node, params={"model": "run/wide"}).model == "run/wide"
 
 
-def test_empty_when_no_model_anywhere(monkeypatch):
+def test_empty_when_no_model_anywhere(spy_executor):
     node = agent_node("n", "a")
-    assert _capture(monkeypatch, node)["model"] == ""
+    assert _capture(spy_executor, node).model == ""
 
 
-def test_per_node_agent_dir_beats_the_agent_node_arg(monkeypatch):
+def test_per_node_agent_dir_beats_the_agent_node_arg(spy_executor):
     node = agent_node("n", "a", agent_dir="/flow/dir")
-    assert _capture(monkeypatch, node, node_overrides={"n": {"agent_dir": "/run/dir"}})["agent_dir"] == "/run/dir"
+    assert _capture(spy_executor, node, node_overrides={"n": {"agent_dir": "/run/dir"}}).agent_dir == "/run/dir"
 
 
-def test_a_partial_entry_inherits_the_rest(monkeypatch):
+def test_a_partial_entry_inherits_the_rest(spy_executor):
     """A node entry that sets only `model` must not wipe agent_dir/idle."""
     node = agent_node("n", "a", agent_dir="/flow/dir")
-    cap = _capture(monkeypatch, node, params={"idle_timeout_s": "55"}, node_overrides={"n": {"model": "m"}})
-    assert cap["model"] == "m"
-    assert cap["agent_dir"] == "/flow/dir"  # inherited from the agent_node arg
-    assert cap["idle"] == 55  # inherited from run-wide
+    cap = _capture(spy_executor, node, params={"idle_timeout_s": "55"}, node_overrides={"n": {"model": "m"}})
+    assert cap.model == "m"
+    assert cap.agent_dir == "/flow/dir"  # inherited from the agent_node arg
+    assert cap.idle_timeout_s == 55  # inherited from run-wide
 
 
 # --- build-time validation --------------------------------------------------

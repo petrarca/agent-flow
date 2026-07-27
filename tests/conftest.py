@@ -148,3 +148,48 @@ def opencode_workspace():
     finally:
         installed.unlink(missing_ok=True)
         shutil.rmtree(outdir, ignore_errors=True)
+
+
+class _ExecutorSpy:
+    """What `spy_executor` hands a test: the last invocation + get_executor kwargs.
+
+    `inv` is the neutral AgentInvocation the node built (assert on .model,
+    .agent_dir, .idle_timeout_s, .prompt, …); `kwargs` are what node_builder
+    passed to `get_executor` (assert on options=…). `by_node` keeps every
+    invocation keyed by node name for multi-node flows.
+    """
+
+    def __init__(self) -> None:
+        self.inv = None
+        self.kwargs: dict = {}
+        self.by_node: dict = {}
+
+
+@pytest.fixture
+def spy_executor(monkeypatch):
+    """Stub the EXECUTOR seam and record what the node builder produced.
+
+    One shared harness instead of a hand-rolled fake per test module: when the
+    seam's signature changes (as when `options=` was added to `get_executor`),
+    exactly one place needs updating — previously the same lambda had to be
+    patched in four files. Accepts **kwargs so a new seam argument never breaks
+    every caller again.
+    """
+    from agent_flow.core.agent_runtime import AgentResult
+
+    spy = _ExecutorSpy()
+
+    class _FakeExecutor:
+        name = "fake"
+
+        async def run(self, inv):
+            spy.inv = inv
+            spy.by_node[inv.node] = inv
+            return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "ok"}, completion="completed")
+
+    def _get_executor(_runtime, **kwargs):
+        spy.kwargs = kwargs
+        return _FakeExecutor()
+
+    monkeypatch.setattr("agent_flow.node_builder.get_executor", _get_executor)
+    return spy
