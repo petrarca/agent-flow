@@ -97,7 +97,14 @@ from agent_flow.gates import (
     rerun_on_signal,
 )
 from agent_flow.logging_setup import LIBRARY_LOGGER, setup_logging
-from agent_flow.node_builder import agent_node, control_path
+from agent_flow.node_builder import (
+    DEFAULT_WORK_ORDER_RENDERER,
+    agent_node,
+    build_work_order,
+    control_path,
+    render_work_order_lines,
+    render_work_order_xml,
+)
 from agent_flow.preflight import Check, check, fatal_failures
 from agent_flow.registry import FlowRegistry
 from agent_flow.run_config import (
@@ -234,6 +241,11 @@ __all__ = [
     "arun_flow",
     # node builder: one-call node for the common "run one agent" case
     "agent_node",
+    "build_work_order",
+    # work-order rendering (override via FlowRegistry.work_order)
+    "render_work_order_xml",
+    "render_work_order_lines",
+    "DEFAULT_WORK_ORDER_RENDERER",
     "control_path",
     # context ingestion (read files -> prompt content)
     "read_context_blocks",

@@ -161,7 +161,7 @@ def test_prompt_keys_are_unchanged_by_input_schema():
     n = agent_node("n", "a", impl=impl, input_schema=AliasedIn, inputs={"TICKET": "{ticket}", "PRIORITY": "high"})
     _run([n], ticket="login crash")
 
-    assert "TICKET: login crash" in seen["prompt"]  # authored casing preserved
+    assert "<TICKET>login crash</TICKET>" in seen["prompt"]  # authored casing preserved
     assert seen["obj"].ticket == "login crash"  # snake_case field, via alias
 
 
@@ -213,3 +213,43 @@ def test_flowdef_with_input_schema_round_trips_as_data():
     payload = flow.model_dump_json()
     assert json.loads(payload)["nodes"][0]["input_schema"] == "TriageIn"
     assert FlowDef.model_validate_json(payload) == flow
+
+
+# --- filling params just-in-time --------------------------------------------
+
+
+def test_before_node_hook_can_fill_params_for_that_node():
+    """`before_node` fires BEFORE the engine snapshots the run-context, so it is
+    the supported place to supply a param just-in-time. Forward-only: a node that
+    already ran does not see it."""
+    from agent_flow.run_context import get_run_context
+
+    reg = FlowRegistry()
+    seen: dict[str, str | None] = {}
+
+    @reg.on("before_node", node="b")  # scoped to ONE node
+    def _fill(node):  # noqa: ARG001
+        get_run_context().update({"mode": "deep"})
+
+    async def impl(inv):
+        seen[inv.node] = inv.inputs.get("mode")
+        return {"status": "ok"}
+
+    a = agent_node("a", "x", impl=impl, inputs={"mode": "{mode}"}, registry=reg)
+    b = agent_node("b", "x", impl=impl, inputs={"mode": "{mode}"}, depends_on=("a",), registry=reg)
+    c = agent_node("c", "x", impl=impl, inputs={"mode": "{mode}"}, depends_on=("b",), registry=reg)
+
+    with tempfile.TemporaryDirectory() as d:
+        anyio.run(lambda: build_flow([a, b, c], name="h", registry=reg)(run_dir=d))
+
+    assert seen["a"] == "{mode}"  # ran before the hook filled it
+    assert seen["b"] == "deep"  # the node the hook is scoped to
+    assert seen["c"] == "deep"  # and everything after it
+
+
+def test_compile_does_not_validate_input_values():
+    """Values are filled before execution, so compile must stay structural."""
+    reg = FlowRegistry()
+    reg.schema("TriageIn")(TriageIn)
+    flow = FlowDef(name="f", nodes=[NodeDef(name="n", agent="a", inputs={"ticket": "{never_set}"}, input_schema="TriageIn")])
+    assert compile_flow(flow, reg)[0].input_schema is TriageIn  # no error at compile

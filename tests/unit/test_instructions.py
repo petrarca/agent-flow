@@ -61,8 +61,8 @@ def test_per_node_instructions_prepended_to_work_order(monkeypatch):
     cap = _capture_prompt(monkeypatch, node)
     p = cap["prompt"]
     assert "Prefer a compact table." in p
-    assert "K: v" in p
-    assert p.find("Prefer a compact table.") < p.find("K: v")  # instructions before work order
+    assert "<K>v</K>" in p
+    assert p.find("Prefer a compact table.") < p.find("<K>v</K>")  # instructions before work order
 
 
 def test_instructions_are_templated(monkeypatch):
@@ -78,7 +78,7 @@ def test_runtime_node_instruction_appended_after_build_time(monkeypatch):
     node = agent_node("analyst", "agent-x", inputs={"K": "v"}, instructions="Prefer a compact table.")
     cap = _capture_prompt(monkeypatch, node, node_instructions={"analyst": "Ignore that; produce the full breakdown."})
     p = cap["prompt"]
-    assert p.find("Prefer a compact table.") < p.find("produce the full breakdown") < p.find("K: v")
+    assert p.find("Prefer a compact table.") < p.find("produce the full breakdown") < p.find("<K>v</K>")
 
 
 def test_runtime_node_instruction_only_targets_named_node(monkeypatch):
@@ -97,7 +97,7 @@ def test_runtime_node_instruction_is_templated(monkeypatch):
 def test_no_instructions_leaves_plain_work_order(monkeypatch):
     node = agent_node("n", "agent-x", inputs={"K": "v"})
     cap = _capture_prompt(monkeypatch, node)
-    assert cap["prompt"].strip() == "K: v"
+    assert cap["prompt"].strip() == "<K>v</K>"
     assert cap["shared"] == ""
 
 
@@ -108,7 +108,7 @@ def test_per_node_context_content_injected_before_instructions(monkeypatch, tmp_
     p = cap["prompt"]
     assert "RULE: always X." in p
     # order: context content -> instructions -> work order
-    assert p.find("RULE: always X.") < p.find("do the thing") < p.find("K: v")
+    assert p.find("RULE: always X.") < p.find("do the thing") < p.find("<K>v</K>")
 
 
 def test_shared_context_sources_read_and_forwarded(monkeypatch, tmp_path):
@@ -122,11 +122,11 @@ def test_shared_context_sources_read_and_forwarded(monkeypatch, tmp_path):
 def test_missing_context_source_does_not_crash(monkeypatch, tmp_path):
     node = agent_node("n", "agent-x", inputs={"K": "v"}, context=("nope.md",))
     cap = _capture_prompt(monkeypatch, node, run_dir=tmp_path)
-    assert "K: v" in cap["prompt"]  # ran fine; missing context skipped
+    assert "<K>v</K>" in cap["prompt"]  # ran fine; missing context skipped
 
 
 def test_gate_still_runs_with_instructions(monkeypatch):
     # Sanity: adding instructions doesn't disturb gate wiring.
     node = agent_node("n", "agent-x", inputs={"K": "v"}, instructions="x", gate=lambda ctx: Continue())
     cap = _capture_prompt(monkeypatch, node)
-    assert "K: v" in cap["prompt"]
+    assert "<K>v</K>" in cap["prompt"]

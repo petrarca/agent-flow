@@ -67,6 +67,10 @@ class FlowRegistry:
         # event -> list of (node_scope, hook). node_scope is None (all nodes) or a
         # frozenset of node names; ignored for group events.
         self._hooks: dict[str, list[tuple[frozenset[str] | None, Hook]]] = {e: [] for e in _EVENTS}
+        # Optional override for how a node's work order is rendered into the
+        # prompt. None = the library default (XML tags). One slot, not a named
+        # map: it is a per-FLOW presentation choice, not something a node picks.
+        self._work_order_renderer: Callable[[dict[str, str]], str] | None = None
         if seed_builtins:
             self._seed_builtin_gates()
 
@@ -189,13 +193,47 @@ class FlowRegistry:
 
         return deco
 
+    def work_order(self, fn: Callable[[dict[str, str]], str]) -> Callable[[dict[str, str]], str]:
+        """Override how the work order is rendered into the prompt (decorator).
+
+        `fn(resolved: dict[str, str]) -> str` receives the node's RESOLVED work
+        order (after `{param}` templating and upstream exports) and returns the
+        prompt text. Registering here rather than passing a parameter keeps
+        `build_flow`/`agent_node` from growing a knob for every presentation
+        choice — consumer code lives in the registry, like gates and exports.
+
+        Unset, the library default is `render_work_order_xml`; the previous
+        `KEY: value` shape ships as `render_work_order_lines`:
+
+            from agent_flow import render_work_order_lines
+            registry.work_order(render_work_order_lines)
+        """
+        self._work_order_renderer = fn
+        return fn
+
+    def get_work_order_renderer(self) -> Callable[[dict[str, str]], str]:
+        """The registered work-order renderer, or the library default (XML)."""
+        if self._work_order_renderer is not None:
+            return self._work_order_renderer
+        from agent_flow.node_builder import DEFAULT_WORK_ORDER_RENDERER
+
+        return DEFAULT_WORK_ORDER_RENDERER
+
     def on(self, event: str, *, node: str | list[str] | tuple[str, ...] | None = None) -> Callable[[Hook], Hook]:
         """Register an OBSERVING hook for a lifecycle `event` (decorator).
 
         `node` scopes a per-node event (before_node/after_node/on_error) to one
         name or a list of names; None (default) means all nodes. `node` is not
         allowed for group events (before_group/after_group), which are not
-        node-scoped. Observers never steer flow — a hook's return is ignored.
+        node-scoped.
+
+        Observers never steer flow: a hook's return value is not interpreted (it
+        cannot redirect or fail the run), and a hook that raises is logged and
+        ignored. It IS awaited when awaitable, so a hook may be `async def`.
+
+        A `before_node` hook runs BEFORE the engine snapshots the run-context for
+        that node, so it is the supported place to fill params just-in-time
+        (`get_run_context().update(...)`) — forward-only, like any export.
         """
         if event not in _EVENTS:
             raise ValueError(f"unknown hook event {event!r} (known: {sorted(_EVENTS)})")

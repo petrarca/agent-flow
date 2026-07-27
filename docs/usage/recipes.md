@@ -208,6 +208,75 @@ interchangeable behind the node. A runnable end-to-end version (sync + async
 impls mixed in one flow, both `run_flow` and `arun_flow` entry points) is
 `examples/inprocess.py`.
 
+## Change how the work order is rendered
+
+A node's `inputs` are rendered into the prompt as **XML tags** (the default):
+
+```
+<PRODUCT_KEY>acme</PRODUCT_KEY>
+<REPORT>/run/report.md</REPORT>
+```
+
+Why tags rather than `KEY: value`: a closing tag **delimits** the value, so a
+multi-line or structured value is unambiguous — a line-oriented work order has no
+continuation marker, so the second line of a value is indistinguishable from the
+next key. Tags are also the shape Anthropic recommends for Claude prompts. Your
+agent `.md` needs no change: it refers to the KEY *name* (`REPORT`), which is
+identical either way.
+
+To override it, register a renderer — it is a **registry registration, not a
+parameter**, so `build_flow`/`agent_node` do not grow a knob per presentation
+choice (the same reasoning as gates and exports):
+
+```python
+from agent_flow import render_work_order_lines
+
+registry.work_order(render_work_order_lines)      # opt back into KEY: value
+```
+
+Or supply your own — any `(resolved: dict[str, str]) -> str`:
+
+```python
+@registry.work_order
+def as_json(resolved):
+    import json
+    return json.dumps(resolved, indent=2)
+```
+
+It receives the **resolved** work order (after templating and upstream exports),
+so a renderer never has to think about `{param}` substitution.
+
+## Fill params just-in-time (`before_node`)
+
+Values usually arrive at flow start (`run_flow(flow, mode="deep")`) or from an
+upstream node (`exports`). When you need to compute one **in code, right before a
+node runs**, use a `before_node` hook: it fires *before* the engine snapshots the
+run-context for that node, so what you write lands in that node's `inputs`.
+
+```python
+from agent_flow.run_context import get_run_context
+
+@registry.on("before_node", node="analysis")     # this node only
+def fill(node):
+    get_run_context().update({"mode": lookup_mode(), "cutoff": today()})
+```
+
+`node=` takes a name or a list; omit it to fire for every node. Group events
+(`before_group`/`after_group`) are not node-scoped and reject it.
+
+Two properties to keep in mind:
+
+- **Forward-only.** Like `exports`, a value reaches the node being started and
+  everything after it — never a node that already ran, and never a sibling in the
+  same parallel group.
+- **Observers can't fail a run.** A hook that raises is logged and ignored. So if
+  a value is mandatory, don't assert in the hook — let it fail loudly at the
+  node's [`input_schema`](#type-a-nodes-inputs-input_schema) instead.
+
+Nothing is validated at compile time: `compile_flow` only checks that referenced
+names exist. Templating and `input_schema` both run per node, at execution, so a
+param filled this late is still checked.
+
 ## See what the engine is doing (logging)
 
 agent-flow is **silent until you ask**. Importing it configures no logging and

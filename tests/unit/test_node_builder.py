@@ -32,13 +32,31 @@ def test_agent_node_builds_a_plain_node():
 
 def test_build_work_order_templates_params():
     order = build_work_order({"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/r.md"}, {"product_key": "acme", "run_dir": "/w"})
-    assert "PRODUCT_KEY: acme" in order
-    assert "REPORT: /w/r.md" in order
+    assert "<PRODUCT_KEY>acme</PRODUCT_KEY>" in order  # XML is the default shape
+    assert "<REPORT>/w/r.md</REPORT>" in order
 
 
 def test_build_work_order_leaves_unknown_placeholders():
     order = build_work_order({"X": "{missing}"}, {})
-    assert order == "X: {missing}"  # graceful, no KeyError
+    assert order == "<X>{missing}</X>"  # graceful, no KeyError
+
+
+def test_build_work_order_accepts_an_explicit_renderer():
+    from agent_flow.node_builder import render_work_order_lines
+
+    order = build_work_order({"X": "1", "Y": "2"}, {}, render=render_work_order_lines)
+    assert order == "X: 1\nY: 2"
+
+
+def test_xml_renderer_delimits_a_multiline_value():
+    """The reason XML is the default: a line-oriented work order cannot mark
+    where a multi-line value ends, so its continuation is indistinguishable from
+    the next key."""
+    from agent_flow.node_builder import render_work_order_lines, render_work_order_xml
+
+    resolved = {"A": "one\ntwo", "B": "3"}
+    assert render_work_order_xml(resolved) == "<A>\none\ntwo\n</A>\n<B>3</B>"
+    assert render_work_order_lines(resolved) == "A: one\ntwo\nB: 3"  # ambiguous by construction
 
 
 def test_control_path_is_per_node():
@@ -302,3 +320,36 @@ def test_gate_node_inputs_do_not_pollute_global_params(tmp_path):
     require_file(ctx, path="{REPORT}")
     assert ctx.params == {"product_key": "acme"}  # unchanged — no REPORT leaked in
     assert "REPORT" not in ctx.params
+
+
+def test_registry_can_override_the_work_order_renderer():
+    """The override is a REGISTRY registration, not a build_flow/agent_node
+    parameter — consumer code lives in the registry, like gates and exports, so
+    the node/flow signatures do not grow a knob per presentation choice."""
+    import tempfile
+
+    import anyio
+
+    from agent_flow import agent_node, build_flow
+    from agent_flow.node_builder import render_work_order_lines
+    from agent_flow.registry import FlowRegistry
+
+    seen = {}
+
+    async def impl(inv):
+        seen[inv.node] = inv.prompt
+        return {"status": "ok"}
+
+    def _run(reg, tag):
+        n = agent_node(tag, "a", impl=impl, inputs={"K": "v"}, registry=reg)
+        with tempfile.TemporaryDirectory() as d:
+            anyio.run(lambda: build_flow([n], name="w", registry=reg)(run_dir=d))
+
+    _run(FlowRegistry(), "default")
+
+    reg = FlowRegistry()
+    reg.work_order(render_work_order_lines)  # opt back into the pre-0.3 shape
+    _run(reg, "overridden")
+
+    assert "<K>v</K>" in seen["default"]
+    assert "K: v" in seen["overridden"]
