@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 from agent_flow.cli.console import get_console
 
@@ -33,8 +34,11 @@ class NodeProgressPrinter:
         "failed": ("red", "x"),
     }
 
-    def __init__(self, *, console=None):
-        self._console = console or get_console()
+    def __init__(self, *, console: Any = None) -> None:
+        # `Any`, not a rich type: rich is the [cli] extra and this module must
+        # keep importing without it (the console is resolved lazily by
+        # get_console, which raises the install hint if it is missing).
+        self._console: Any = console or get_console()
         self._started: dict[str, float] = {}  # node name -> start monotonic time
 
     def on_node_event(self, name: str, phase: str, status: str | None, agent: str) -> None:

@@ -31,6 +31,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import anyio
+
 # MUST run before `prefect` is imported: pins a project-local PREFECT_HOME and
 # disables the startup telemetry races that cause "database is locked".
 # #12: bootstrap() is a no-op when PREFECT_HOME is already set, so test code
@@ -252,7 +254,10 @@ def run_stage(
         inv = AgentInvocation(agent=stage.agent, prompt=prompt, run_dir=run_dir, node=stage.name, model=model or "")
         work_order = {k.split(":", 1)[0].strip(): k.split(":", 1)[1].strip() for k in prompt.splitlines() if ":" in k}
         ex = MockExecutor(_MOCK_BEHAVIOURS[stage.agent], work_order=work_order, tmpl={"run_dir": str(run_dir)})
-        result = ex.run(inv, control_file=control_file)
+        # The executor seam is async (the engine awaits it); this Prefect task is
+        # sync, so bridge it here — exactly what the sync `run_agent` shim below
+        # does internally.
+        result = anyio.run(lambda: ex.run(inv, control_file=control_file))
     else:
         result = run_agent(
             agent=stage.agent,
