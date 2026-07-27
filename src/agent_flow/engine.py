@@ -93,9 +93,13 @@ class RunContext:
     # Default directory where agent DEFINITIONS live (opencode --dir), from
     # build_flow; a node may override via agent_node(agent_dir=...). Templated.
     agent_dir: str = ""
-    # Run-wide instruction/brief injected into EVERY agent (build-time, from the
-    # orchestrator start / CLI). Engine plumbing, not a domain param.
+    # Run-wide STANDING brief injected into EVERY agent, declared on the flow.
+    # Engine plumbing, not a domain param.
     run_instructions: str = ""
+    # This run's ADDITIONAL run-wide brief (the -i / config `instructions` value),
+    # rendered AFTER run_instructions — additive, never replacing it. Its own
+    # channel so the two read as distinct blocks (mirrors the per-node pair).
+    run_additional_instructions: str = ""
     # Run-wide context SOURCES (file paths / globs) whose CONTENT is injected
     # into every agent — rules/standards the agent must actually have. Read at
     # run time (per node, so templating against params works). Build-time
@@ -330,6 +334,7 @@ async def interpret(
     log: Callable[[str], None] = lambda _msg: None,
     on_event_factory: Callable[[str], Any] | None = None,
     run_instructions: str = "",
+    run_additional_instructions: str = "",
     run_context: tuple[str, ...] = (),
     agent_dir: str = "",
     node_overrides: dict[str, dict[str, Any]] | None = None,
@@ -393,6 +398,7 @@ async def interpret(
                         params=eff_params,
                         on_event_factory=on_event_factory,
                         run_instructions=run_instructions,
+                        run_additional_instructions=run_additional_instructions,
                         run_context=run_context,
                         agent_dir=agent_dir,
                         node_overrides=dict(node_overrides or {}),
@@ -583,6 +589,7 @@ def build_flow(
     on_event_factory: Callable[[str], Any] | None = None,
     on_node_event: Callable[[str, str, str | None, str], None] | None = None,
     run_instructions: str = "",
+    run_additional_instructions: str = "",
     run_context: Iterable[str] | None = None,
     agent_dir: str = "",
     node_overrides: dict[str, dict[str, Any]] | None = None,
@@ -709,6 +716,7 @@ def build_flow(
                 log=logger.info,
                 on_event_factory=on_event_factory,
                 run_instructions=run_instructions,
+                run_additional_instructions=run_additional_instructions,
                 run_context=run_context_t,
                 agent_dir=agent_dir,
                 node_overrides=node_overrides_d,

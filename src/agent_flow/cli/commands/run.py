@@ -141,6 +141,7 @@ def register(app, ctx: RunCliContext) -> None:
             only=only or "",
             registry=ctx.registry,
             run_context=ctx.run_context,
+            run_instructions=ctx.run_instructions,
         )
 
 
@@ -218,7 +219,18 @@ def _run_preflight(runtime: str, agent_dir: str, backend: str, console) -> None:
 
 
 def _run_with_view(
-    nodes, params, cfg, console, *, name: str, llm_tag: str, start_from: str = "", only: str = "", registry=None, run_context: tuple[str, ...] = ()
+    nodes,
+    params,
+    cfg,
+    console,
+    *,
+    name: str,
+    llm_tag: str,
+    start_from: str = "",
+    only: str = "",
+    registry=None,
+    run_context: tuple[str, ...] = (),
+    run_instructions: str = "",
 ) -> None:
     """Run the pipeline under the chosen view, then print the results table.
 
@@ -259,6 +271,7 @@ def _run_with_view(
             only=only,
             registry=registry,
             run_context=run_context,
+            run_instructions=run_instructions,
         )
     except KeyboardInterrupt:
         console.print("[yellow]Interrupted[/yellow] — stopped by user (Ctrl-C).")
@@ -286,6 +299,7 @@ def _build_and_run(
     only="",
     registry=None,
     run_context: tuple[str, ...] = (),
+    run_instructions: str = "",
 ):
     """Compile the flow with the given hooks and run it; optionally print results."""
     import anyio
@@ -299,7 +313,8 @@ def _build_and_run(
         llm_concurrency=cfg.llm_concurrency,
         on_event_factory=on_event_factory,
         on_node_event=on_node_event,
-        run_instructions=cfg.resolved_instructions(),
+        run_instructions=run_instructions,
+        run_additional_instructions=cfg.resolved_instructions(),
         run_context=run_context,
         agent_dir=cfg.agent_dir,
         node_overrides={n: nc.model_dump() for n, nc in cfg.nodes.items()},

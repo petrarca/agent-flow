@@ -103,21 +103,25 @@ def run_cli(
         build_nodes = lambda: compile_flow(flow_def, reg)  # noqa: E731
         if name == "agent-flow":
             name = flow_def.name
-        # `run_context` has NO CLI flag — it is a pipeline DECLARATION, not a
-        # per-run knob — so it must be threaded through, or a FlowDef's run-wide
-        # rules would be silently dropped under run_cli while working under
-        # run_flow. (agent_dir/backend/llm_concurrency are no longer on the FlowDef
-        # — they are run config; pass them via run_config= or the CLI/env.)
+        # `run_context` and `run_instructions` are pipeline DECLARATIONS, not
+        # per-run knobs — they must be threaded through, or a FlowDef's run-wide
+        # rules/brief would be silently dropped under run_cli while working under
+        # run_flow. The -i/--instructions value APPENDS to run_instructions (it
+        # does not replace it). (agent_dir/backend/llm_concurrency are no longer
+        # on the FlowDef — they are run config; pass them via run_config=/CLI/env.)
         run_context = tuple(flow_def.run_context)
+        run_instructions = flow_def.run_instructions
     else:
         build_nodes = flow
         run_context = ()
+        run_instructions = ""
 
     from agent_flow.run_config import normalize_run_config
 
     ctx = RunCliContext(
         build_nodes=build_nodes,
         run_context=run_context,
+        run_instructions=run_instructions,
         name=name,
         llm_tag=llm_tag,
         run_config=normalize_run_config(run_config) or {},

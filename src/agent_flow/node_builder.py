@@ -285,6 +285,9 @@ def agent_node(
         parts = PromptParts(
             run_context=read_context_blocks(ctx.run_context, params=ctx.params, run_dir=ctx.run_dir, warn=warn),
             run_instructions=ctx.run_instructions,
+            # This run's ADDITIONAL run-wide brief (-i / config instructions),
+            # after the flow's STANDING run_instructions — additive, not replacing.
+            run_additional_instructions=ctx.run_additional_instructions,
             node_context=read_context_blocks(context, params=ctx.params, run_dir=ctx.run_dir, warn=warn),
             node_instructions=resolve_template(instructions, tmpl) if instructions else "",
             # Run-time per-node instruction (CLI --instruct / config

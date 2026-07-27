@@ -164,7 +164,8 @@ class PromptParts:
     """
 
     run_context: str = ""  # [run] ingested FILE CONTENT for every agent
-    run_instructions: str = ""  # [run] inline text for every agent
+    run_instructions: str = ""  # [run] STANDING brief, declared on the flow
+    run_additional_instructions: str = ""  # [run] inline text supplied at RUN time (-i / config instructions)
     node_context: str = ""  # [node] ingested FILE CONTENT for this node
     node_instructions: str = ""  # [node] inline text, declared at build time
     node_runtime_instructions: str = ""  # [node] inline text supplied at RUN time (--instruct)
@@ -189,6 +190,8 @@ def render_prompt(parts: PromptParts) -> str:
         blocks.append(f"## Run-wide context\n\n{parts.run_context.strip()}")
     if parts.run_instructions.strip():
         blocks.append(f"## Run-wide instructions\n\n{parts.run_instructions.strip()}")
+    if parts.run_additional_instructions.strip():
+        blocks.append(f"## Additional run-wide instructions\n\n{parts.run_additional_instructions.strip()}")
     if parts.node_context.strip():
         blocks.append(f"## Context for this step\n\n{parts.node_context.strip()}")
     if parts.node_instructions.strip():

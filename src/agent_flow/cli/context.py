@@ -25,6 +25,7 @@ class RunCliContext:
     llm_tag: str  # concurrency tag for node execution
     params_model: type | None  # optional pydantic-settings model for -p validation
     run_config: dict[str, Any] = field(default_factory=dict)  # the pipeline's own run-config defaults (run_config=); LOWEST explicit source
+    run_instructions: str = ""  # run-wide standing brief DECLARED on the FlowDef; the -i/config instructions APPEND to it
     run_context: tuple[str, ...] = ()  # run-wide context SOURCES declared on the FlowDef (paths/globs; content read per node)
     registry: object = None  # optional FlowRegistry (named gates/exports/hooks); None -> engine default
     version: str | None = None  # the CONSUMER's app version (shown by `version`); None -> show agent-flow only

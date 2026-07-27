@@ -50,7 +50,10 @@ def _build_pipeline_and_call(
         nodes,
         name=flow_def.name,
         llm_concurrency=cfg.llm_concurrency,
+        # STANDING brief (flow) + this run's ADDITION (run_config instructions) as
+        # SEPARATE channels — neither dropped (the 0.3.0 bug this stage fixes).
         run_instructions=flow_def.run_instructions,
+        run_additional_instructions=cfg.resolved_instructions(),
         run_context=flow_def.run_context,
         agent_dir=cfg.agent_dir,
         backend=cfg.backend,

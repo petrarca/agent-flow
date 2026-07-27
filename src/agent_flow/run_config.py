@@ -311,7 +311,11 @@ class RunConfig(BaseSettings):
         return sources
 
     def resolved_instructions(self) -> str:
-        """The run-wide brief: instructions_file content if given, else instructions."""
+        """This run's ADDITIONAL run-wide brief (the -i/--instructions value):
+        instructions_file content if given, else the inline `instructions`.
+
+        This is the run-config layer only. It is combined with the flow's standing
+        `run_instructions` by `combine_instructions` — it does NOT replace it."""
         if self.instructions_file:
             return Path(self.instructions_file).read_text()
         return self.instructions

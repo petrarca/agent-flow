@@ -1,7 +1,8 @@
 """Unit tests for the instruction input plane: run-wide brief + per-node instructions.
 
 Composition contract (final prompt order):
-    [completion protocol] [run-wide run_instructions] [per-node instructions] [work order]
+    [completion protocol] [run_context] [run_instructions] [run additional instructions]
+    [node context] [node instructions] [node runtime instructions] [attempt] [work order]
 """
 
 import tempfile
