@@ -138,6 +138,10 @@ class AgentInvocation:
     # snapshots owned by this invocation — an impl may read them freely.
     inputs: dict[str, str] = field(default_factory=dict)  # this node's resolved work order ({KEY: value}, templated)
     input_obj: object = None  # `inputs` validated against the node's input_schema (a pydantic instance), else None
+    # The channels this prompt was rendered FROM, when a renderer produced it
+    # (Tier 3 / agent_node). None means `prompt` is a caller's raw text and the
+    # run-wide blocks still have to be prepended — see compose_prompt.
+    parts: PromptParts | None = None
     params: dict[str, Any] = field(default_factory=dict)  # the run's domain params (incl. upstream `exports`)
 
 
@@ -200,18 +204,21 @@ def render_prompt(parts: PromptParts) -> str:
 
 
 def compose_prompt(inv: AgentInvocation) -> str:
-    """Assemble the runtime-neutral prompt for an invocation, in ONE place.
+    """The COMPLETE runtime-neutral prompt for an invocation (minus the
+    subprocess control preamble, which SubprocessExecutor prepends).
 
-    Order: [run-wide context][run-wide instructions][per-node prompt]. The
-    per-node `prompt` already contains, in order, the node's context +
-    instructions + the one-time instruction + the work order (composed by
-    agent_node). This helper only prepends the RUN-WIDE blocks, so the full
-    top-to-bottom prompt order lives here rather than being split across layers.
+    Two kinds of invocation reach here, and conflating them double-injects the
+    run-wide blocks:
 
-    The subprocess control preamble is NOT added here — it is subprocess-specific
-    (it instructs a CLI agent to write a control sidecar) and is prepended by
-    SubprocessExecutor. An in-process executor uses this composed prompt as-is.
+    - **Rendered (Tier 3 / `agent_node`)** — `parts` is set, so `prompt` is
+      already the full body a renderer produced from every channel. Return it
+      unchanged; prepending here would repeat the run-wide context and brief.
+    - **Raw (Tier 1/2 / `run_agent`)** — the caller passed their own `prompt`
+      text plus `run_context` / `run_instructions` as separate arguments, so the
+      run-wide blocks are prepended here in the documented order.
     """
+    if inv.parts is not None:
+        return inv.prompt
     blocks: list[str] = []
     if inv.run_context and inv.run_context.strip():
         blocks.append(f"## Run-wide context\n\n{inv.run_context.strip()}")

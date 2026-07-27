@@ -143,3 +143,47 @@ def test_unset_seams_fall_back_to_the_library_defaults(seam):
     reg = FlowRegistry()
     got = reg.get_work_order_renderer() if seam == "work_order" else reg.get_prompt_renderer()
     assert got.__name__ in ("render_work_order_xml", "render_prompt")
+
+
+# --- the two invocation kinds must not double the run-wide blocks ------------
+
+
+def test_rendered_invocation_is_not_recomposed():
+    """Regression: node_builder renders the FULL body into `prompt`, so
+    compose_prompt must return it unchanged. Prepending the run-wide blocks again
+    duplicated the rules and the brief in every SUBPROCESS prompt — invisible to
+    the unit suite, which reads `inv.prompt` via in-process impls."""
+    from agent_flow.runners.base import compose_prompt
+
+    seen = {}
+
+    async def impl(inv):
+        seen["inv"] = inv
+        return {"status": "ok"}
+
+    n = agent_node("n", "a", impl=impl, inputs={"K": "v"})
+    with tempfile.TemporaryDirectory() as d:
+        rules = f"{d}/rules.md"
+        with open(rules, "w") as fh:
+            fh.write("RULE-MARKER")
+        anyio.run(lambda: build_flow([n], name="t", run_context=[rules], run_instructions="BRIEF-MARKER")(run_dir=d))
+
+    inv = seen["inv"]
+    assert inv.parts is not None, "a rendered invocation must carry its parts"
+    for marker in ("RULE-MARKER", "BRIEF-MARKER"):
+        assert inv.prompt.count(marker) == 1
+        assert compose_prompt(inv).count(marker) == 1, f"{marker} duplicated by compose_prompt"
+
+
+def test_raw_invocation_still_gets_the_run_wide_blocks():
+    """Tier 1/2 (`run_agent`) passes its own prompt plus separate run_* fields —
+    those must still be prepended."""
+    from pathlib import Path
+
+    from agent_flow.runners.base import AgentInvocation, compose_prompt
+
+    raw = AgentInvocation(agent="a", prompt="MY-TASK", run_dir=Path("/tmp"), run_context="RULE-MARKER", run_instructions="BRIEF-MARKER")
+    assert raw.parts is None
+    out = compose_prompt(raw)
+    assert out.count("RULE-MARKER") == 1 and out.count("BRIEF-MARKER") == 1
+    assert out.index("RULE-MARKER") < out.index("BRIEF-MARKER") < out.index("MY-TASK")

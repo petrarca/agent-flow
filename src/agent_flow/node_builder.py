@@ -334,6 +334,10 @@ def agent_node(
             inputs=dict(resolved_inputs),
             input_obj=input_obj,
             params=dict(ctx.params),
+            # `prompt` above is the FULL body a renderer produced from these
+            # channels, so compose_prompt must not prepend the run-wide blocks
+            # again — carrying the parts is what tells it so.
+            parts=parts,
         )
         # Executor selection (the engine is blind to all of this):
         #   1. --mock-agents mode ON + this node has a mock_agent -> MockExecutor
