@@ -101,11 +101,13 @@ class RunContext:
     # run time (per node, so templating against params works). Build-time
     # plumbing, not a domain param.
     run_context: tuple[str, ...] = ()
-    # Run-time per-node instructions {node_name: text}, from CLI --instruct / the
-    # config node_instructions: section. A agent-node appends its own entry
-    # LAST (after the build-time per-node instructions), so it is the most recent
-    # standing guidance before the work order — additive, last-word override.
-    node_instructions: dict[str, str] = field(default_factory=dict)
+    # Run-time per-node overrides {node_name: {instructions, model, agent_dir,
+    # duration, idle_timeout_s}}, from the run config's `nodes:` section (CLI
+    # --instruct populates .instructions). Each entry overrides the flow-declared
+    # value for that one node — this is the "how THIS run behaves" layer, more
+    # specific than the flow's standing declaration. Plain dicts (not the settings
+    # NodeRunConfig type) so the engine stays free of the settings module.
+    node_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
     # The run's duration VOCABULARY {name: seconds}, from build_flow (RunConfig
     # `durations:`). A node declares a portable NAME (Node.duration); this map
     # supplies the environment's concrete seconds. Overlays the shipped defaults.
@@ -325,7 +327,7 @@ async def interpret(
     run_instructions: str = "",
     run_context: tuple[str, ...] = (),
     agent_dir: str = "",
-    node_instructions: dict[str, str] | None = None,
+    node_overrides: dict[str, dict[str, Any]] | None = None,
     durations: dict[str, int] | None = None,
     registry: Any = None,
     one_time_instruction: str = "",
@@ -387,7 +389,7 @@ async def interpret(
                         run_instructions=run_instructions,
                         run_context=run_context,
                         agent_dir=agent_dir,
-                        node_instructions=dict(node_instructions or {}),
+                        node_overrides=dict(node_overrides or {}),
                         durations=dict(durations or {}),
                         one_time_instruction=attempt_instruction,
                     )
@@ -538,15 +540,31 @@ async def _apply_exports(node: Node, result: Any, obj: Any, log: Callable[[str],
         log(f"node {node.name}: exports failed ({exc}) — ignored")
 
 
-def _check_durations(nodes: list[Node], durations: dict[str, int]) -> None:
+def _check_durations(nodes: list[Node], durations: dict[str, int], node_overrides: dict[str, dict[str, Any]]) -> None:
     """Reject an unknown duration name at BUILD time, with the whole graph in hand.
 
     Same instinct as plan_groups rejecting cycles here: a typo'd duration must not
-    survive until that node's turn comes, halfway through a paid run.
+    survive until that node's turn comes, halfway through a paid run. Checks BOTH
+    the flow-declared duration and a run-config per-node duration override, since
+    either can carry the typo.
     """
     for node in nodes:
-        if node.duration:
-            resolve_duration(node.name, node.duration, durations)
+        override = node_overrides.get(node.name, {})
+        name = override.get("duration") or node.duration
+        if name:
+            resolve_duration(node.name, name, durations)
+
+
+def _check_node_overrides(nodes: list[Node], node_overrides: dict[str, dict[str, Any]]) -> None:
+    """Reject a per-node override keyed by a name no node has.
+
+    Before this, `--instruct typo=…` (and a `nodes:` typo) was silently dropped;
+    a whole run could proceed with an override that never applied. Fail at build.
+    """
+    known = {n.name for n in nodes}
+    unknown = set(node_overrides) - known
+    if unknown:
+        raise ValueError(f"per-node run config names unknown node(s) {sorted(unknown)} (flow has: {sorted(known)})")
 
 
 def build_flow(
@@ -560,7 +578,7 @@ def build_flow(
     run_instructions: str = "",
     run_context: Iterable[str] | None = None,
     agent_dir: str = "",
-    node_instructions: dict[str, str] | None = None,
+    node_overrides: dict[str, dict[str, Any]] | None = None,
     durations: dict[str, int] | None = None,
     backend: str = "inprocess",
     registry: Any = None,
@@ -623,9 +641,10 @@ def build_flow(
         registry = FlowRegistry()  # built-in gates only
 
     run_context_t = tuple(run_context or ())
-    node_instructions_d = dict(node_instructions or {})
+    node_overrides_d = dict(node_overrides or {})
     durations_d = dict(durations or {})
-    _check_durations(nodes, durations_d)
+    _check_node_overrides(nodes, node_overrides_d)
+    _check_durations(nodes, durations_d, node_overrides_d)
     planned = plan_groups(nodes)  # fail fast on cycles/unknown deps at build time
     by_name = {n.name: n for n in nodes}
     group_index = {key: i for i, (key, _) in enumerate(planned)}  # group key -> plan position
@@ -683,7 +702,7 @@ def build_flow(
                 run_instructions=run_instructions,
                 run_context=run_context_t,
                 agent_dir=agent_dir,
-                node_instructions=node_instructions_d,
+                node_overrides=node_overrides_d,
                 durations=durations_d,
                 registry=registry,
                 one_time_instruction=attempt_instruction,

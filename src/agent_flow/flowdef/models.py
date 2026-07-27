@@ -68,11 +68,14 @@ class NodeDef(BaseModel):
     # defines). The flow declares the INTENT; the run config maps the name to
     # concrete seconds (`durations:`). A raw second-count does not belong here —
     # it is an environment fact, not a property of the pipeline.
+    #
+    # `model` and `agent_dir` deliberately do NOT live here: a provider/model
+    # string and a filesystem path are environment facts, not properties of the
+    # portable pipeline. Set them per node via the run config's `nodes:` section
+    # (RunConfig.nodes.<name>.model / .agent_dir), or run-wide via the top-level
+    # model / agent_dir. A hand-written (programmatic) flow may still pass them to
+    # agent_node() directly — that path is code, not serialized data.
     duration: str | None = None
-
-    # Per-node runtime overrides.
-    model: str | None = None
-    agent_dir: str | None = None
 
     @model_validator(mode="after")
     def _one_run_source(self) -> NodeDef:

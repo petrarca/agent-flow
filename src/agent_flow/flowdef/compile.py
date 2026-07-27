@@ -16,7 +16,14 @@ from agent_flow.flowdef.models import FlowDef, NodeDef
 
 
 def _build_pipeline_and_call(
-    flow_def: FlowDef, registry, run_dir: str, start_from: str, only: str, params: dict, durations: dict[str, int] | None = None
+    flow_def: FlowDef,
+    registry,
+    run_dir: str,
+    start_from: str,
+    only: str,
+    params: dict,
+    durations: dict[str, int] | None = None,
+    node_overrides: dict[str, dict] | None = None,
 ):
     """Shared plumbing for (a)run_flow: build the flow callable + assemble the
     call kwargs. Returns (pipeline, call_kwargs). Both entry points differ only in
@@ -37,6 +44,7 @@ def _build_pipeline_and_call(
         agent_dir=flow_def.agent_dir,
         backend=flow_def.backend,
         durations=durations,
+        node_overrides=node_overrides,
         registry=registry,
     )
     call = {"run_dir": run_dir, **params}
@@ -48,7 +56,15 @@ def _build_pipeline_and_call(
 
 
 async def arun_flow(
-    flow_def: FlowDef, *, registry=None, run_dir: str = "", start_from: str = "", only: str = "", durations: dict[str, int] | None = None, **params
+    flow_def: FlowDef,
+    *,
+    registry=None,
+    run_dir: str = "",
+    start_from: str = "",
+    only: str = "",
+    durations: dict[str, int] | None = None,
+    node_overrides: dict[str, dict] | None = None,
+    **params,
 ):
     """Compile and RUN a FlowDef in one call — the async programmatic one-liner.
 
@@ -60,13 +76,26 @@ async def arun_flow(
     environment's seconds ({"long": 900}); it overlays the shipped vocabulary. It
     is an explicit keyword, NOT a param: `**params` would swallow it silently and
     every node would quietly fall back to a default.
+
+    `node_overrides` is {node: {model, agent_dir, duration, idle_timeout_s,
+    instructions}} — the run config's `nodes:` section as plain dicts, each entry
+    overriding that one node's flow-declared value. (Stage E folds both this and
+    `durations` into a single `run_config=`.)
     """
-    pipeline, call = _build_pipeline_and_call(flow_def, registry, run_dir, start_from, only, params, durations)
+    pipeline, call = _build_pipeline_and_call(flow_def, registry, run_dir, start_from, only, params, durations, node_overrides)
     return await pipeline(**call)
 
 
 def run_flow(
-    flow_def: FlowDef, *, registry=None, run_dir: str = "", start_from: str = "", only: str = "", durations: dict[str, int] | None = None, **params
+    flow_def: FlowDef,
+    *,
+    registry=None,
+    run_dir: str = "",
+    start_from: str = "",
+    only: str = "",
+    durations: dict[str, int] | None = None,
+    node_overrides: dict[str, dict] | None = None,
+    **params,
 ):
     """Compile and RUN a FlowDef in one call — the sync programmatic one-liner.
 
@@ -81,7 +110,18 @@ def run_flow(
     `durations` maps declared duration NAMES to this environment's seconds — see
     arun_flow.
     """
-    return anyio.run(lambda: arun_flow(flow_def, registry=registry, run_dir=run_dir, start_from=start_from, only=only, durations=durations, **params))
+    return anyio.run(
+        lambda: arun_flow(
+            flow_def,
+            registry=registry,
+            run_dir=run_dir,
+            start_from=start_from,
+            only=only,
+            durations=durations,
+            node_overrides=node_overrides,
+            **params,
+        )
+    )
 
 
 def compile_flow(flow_def: FlowDef, registry) -> list[Node]:
@@ -148,9 +188,7 @@ def _compile_agent_node(nd: NodeDef, registry, schema) -> Node:
         input_schema=registry.get_schema(nd.input_schema) if nd.input_schema else None,
         exports=nd.exports,
         export_ref=nd.export_ref,
-        model=nd.model,
         duration=nd.duration,
-        agent_dir=nd.agent_dir,
         impl=impl,
         registry=registry,
     )

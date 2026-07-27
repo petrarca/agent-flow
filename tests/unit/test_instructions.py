@@ -43,7 +43,9 @@ def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, 
             on_error=lambda n, e: "degraded",
             run_instructions=shared,
             run_context=tuple(run_context),
-            node_instructions=node_instructions or {},
+            # The {node: text} the tests pass is projected into the richer
+            # per-node override shape the engine now consumes.
+            node_overrides={n: {"instructions": t} for n, t in (node_instructions or {}).items()},
         )
     )
     return captured

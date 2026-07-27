@@ -22,6 +22,7 @@ class _Cfg:
     run_dir = ""
     model = ""
     idle_timeout_s = 120
+    nodes: dict = {}
 
 
 def test_runtime_param_helper_shape():
@@ -62,3 +63,22 @@ def test_summary_shows_all_when_nothing_hidden(capsys):
     _print_run_summary("t", _Cfg(), params, console)
     out = capsys.readouterr().out
     assert "analysis_timestamp" in out  # not hidden without the marker
+
+
+def test_summary_lists_per_node_config_when_present(capsys):
+    from rich.console import Console
+
+    from agent_flow import NodeRunConfig
+
+    cfg = _Cfg()
+    cfg.nodes = {"analyst": NodeRunConfig(model="prov/big")}
+    _print_run_summary("t", cfg, {}, Console(force_terminal=False))
+    out = capsys.readouterr().out
+    assert "per-node config" in out and "analyst" in out
+
+
+def test_summary_omits_per_node_row_when_empty(capsys):
+    from rich.console import Console
+
+    _print_run_summary("t", _Cfg(), {}, Console(force_terminal=False))
+    assert "per-node config" not in capsys.readouterr().out

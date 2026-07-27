@@ -255,6 +255,10 @@ def agent_node(
         from agent_flow.core import read_context_blocks
 
         warn = logger.warning
+        # This node's per-node run-config overrides (a plain dict; may be empty).
+        # Read once here; each `ov.get(...)` below is the most-specific source in
+        # its setting's precedence chain.
+        ov = ctx.node_overrides.get(name, {})
         # Expose the run_dir to input templates as {run_dir}, alongside params.
         tmpl = {**ctx.params, "run_dir": str(ctx.run_dir)}
         resolved_inputs = resolve_work_order(inputs, tmpl)
@@ -284,9 +288,9 @@ def agent_node(
             node_context=read_context_blocks(context, params=ctx.params, run_dir=ctx.run_dir, warn=warn),
             node_instructions=resolve_template(instructions, tmpl) if instructions else "",
             # Run-time per-node instruction (CLI --instruct / config
-            # node_instructions): AFTER the build-time one, so it is the last
+            # nodes.<n>.instructions): AFTER the build-time one, so it is the last
             # standing guidance — additive, last-word override.
-            node_runtime_instructions=resolve_template(ctx.node_instructions.get(name) or "", tmpl),
+            node_runtime_instructions=resolve_template(str(ov.get("instructions") or ""), tmpl),
             # One-time instruction for THIS attempt, set by the engine from a
             # gate's Restart/GoTo. Rendered VERBATIM (no library heading) and last
             # before the work order — the freshest, most specific guidance, whose
@@ -299,25 +303,32 @@ def agent_node(
         prompt = render_body(parts)
         shared_ctx = parts.run_context
 
-        # Per-node agent_dir overrides the flow default; both are templated.
-        eff_agent_dir = resolve_template(agent_dir, tmpl) if agent_dir else resolve_template(ctx.agent_dir, tmpl)
+        # Per-setting precedence (most specific first): the run config's per-node
+        # entry (this run) > the agent_node() arg (the flow's standing declaration)
+        # > the run-wide value > the library default. `ov` is that per-node entry.
+        # agent_dir / model are templated; empty model ("") means "no model" — the
+        # runner omits --model and the runtime resolves it (never a hardcoded one).
+        eff_agent_dir = resolve_template(ov.get("agent_dir") or agent_dir or ctx.agent_dir or "", tmpl)
 
         runtime = ctx.params.get("runtime", "opencode")
-        # A per-node model (agent_node arg) wins; else the run-wide model from
-        # params. Empty ("") means "no model" -> the runner omits --model and the
-        # runtime resolves it. The library never substitutes a hardcoded model.
-        eff_model = model or ctx.params.get("model") or ""
-        # Liveness budget: the node's declared `duration` NAME resolves against
-        # the run's vocabulary (build_flow already rejected an unknown name; this
-        # is the sole guard when a Tier-2 flow calls interpret() without
-        # build_flow). Unset falls back to the run-wide value, which still rides
-        # `params` (read per node at run time) rather than the build-time
-        # `durations` map — the two differ by TIMING, not inconsistency. No number
-        # is hardcoded on the node: the flow carries intent, the run carries seconds.
+        eff_model = ov.get("model") or model or ctx.params.get("model") or ""
+        # Liveness budget resolution, most specific first:
+        #   1. the per-node run-config idle_timeout_s (a raw second-count override),
+        #   2. the per-node duration NAME (run config's, then the flow-declared),
+        #   3. the run-wide idle timeout (rides `params`, read per node at run time),
+        #   4. the library default.
+        # build_flow already rejected an unknown duration name; the resolve here is
+        # also the sole guard when a Tier-2 flow calls interpret() without build_flow.
         run_wide_idle = int(ctx.params.get("idle_timeout_s") or DEFAULT_IDLE_TIMEOUT_S)
-        eff_idle = resolve_duration(name, duration, ctx.durations) if duration else run_wide_idle
+        eff_duration = ov.get("duration") or duration
+        if ov.get("idle_timeout_s") is not None:
+            eff_idle = int(ov["idle_timeout_s"])
+        elif eff_duration:
+            eff_idle = resolve_duration(name, eff_duration, ctx.durations)
+        else:
+            eff_idle = run_wide_idle
         log = _node_logger()
-        log(f"node {name}: agent={agent} runtime={runtime} model={eff_model} duration={duration or '(run-wide)'} idle_timeout_s={eff_idle}")
+        log(f"node {name}: agent={agent} runtime={runtime} model={eff_model} duration={eff_duration or '(run-wide)'} idle_timeout_s={eff_idle}")
         # on_event_factory is a typed RunContext field (engine plumbing), NOT a
         # params key — see RunContext.on_event_factory. We build the per-event
         # callback with the NODE name (not the agent): the node is the DAG unit

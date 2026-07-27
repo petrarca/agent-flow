@@ -38,7 +38,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -53,6 +53,26 @@ from agent_flow.core import DEFAULT_IDLE_TIMEOUT_S
 # both the writer (a consumer's Field) and the reader (runtime_param_fields) share
 # one source of truth instead of a hand-typed string.
 RUNTIME_PARAM_KEY = "runtime"
+
+
+class NodeRunConfig(BaseModel):
+    """Per-node RUN settings — the shadow of a NodeDef, keyed by node name.
+
+    Everything here is an environment fact (a model string, a path, a timeout),
+    NOT a property of the pipeline, so it lives in the run config rather than on
+    the portable NodeDef. Each field is None/empty = "not set for this node", so a
+    node entry can override just one setting and inherit the rest from the
+    run-wide value. Overrides the flow-declared (agent_node) value: this layer is
+    "how THIS run behaves", more specific than the flow's standing declaration.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    instructions: str = Field(default="", description="Per-node brief, appended LAST to this node's prompt (from config or CLI --instruct).")
+    duration: str | None = Field(default=None, description="Duration NAME for this node (overrides the flow-declared duration).")
+    idle_timeout_s: int | None = Field(default=None, description="Liveness timeout (s) for this node, bypassing the duration vocabulary.")
+    model: str | None = Field(default=None, description="Model for this node (overrides the run-wide and flow-declared model).")
+    agent_dir: str | None = Field(default=None, description="agent_dir for this node (overrides the run-wide and flow-declared agent_dir).")
 
 
 def runtime_param(**extra: Any) -> dict[str, Any]:
@@ -149,9 +169,13 @@ class RunConfig(BaseSettings):
     show_events: bool = Field(default=False, description="Stream live agent events to the console.")
     show_diffs: bool = Field(default=False, description="Render file-change diffs (edit/write) as blocks. Composes with show_events.")
     diff_style: str = Field(default="unified", description="Diff layout when show_diffs is on: 'unified' (one column) or 'split' (side-by-side).")
-    node_instructions: dict[str, str] = Field(
+    nodes: dict[str, NodeRunConfig] = Field(
         default_factory=dict,
-        description="Per-node instructions {node: text}, appended LAST to the node's prompt (additive override). From config or CLI --instruct.",
+        description=(
+            "Per-node run settings {node: {instructions, duration, idle_timeout_s, model, agent_dir}}. "
+            "Each field overrides the run-wide value for that one node. Node keys are validated against the "
+            "flow (an unknown name is a hard error). --instruct NODE=text populates nodes.<node>.instructions."
+        ),
     )
     model: str = Field(
         default="",
@@ -207,6 +231,11 @@ class RunConfig(BaseSettings):
         if self.instructions_file:
             return Path(self.instructions_file).read_text()
         return self.instructions
+
+    def set_node_instruction(self, node: str, text: str) -> None:
+        """Set nodes.<node>.instructions, creating the entry if absent (CLI --instruct)."""
+        entry = self.nodes.get(node) or NodeRunConfig()
+        self.nodes[node] = entry.model_copy(update={"instructions": text})
 
 
 def build_run_config(config_file: str | Path | None = None, **cli_overrides: Any) -> RunConfig:

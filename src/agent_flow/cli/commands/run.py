@@ -92,9 +92,10 @@ def register(app, ctx: RunCliContext) -> None:
             model=model,
             idle_timeout_s=idle_timeout,
         )
-        # Per-node instructions: CLI --instruct NODE=text merges OVER the config
-        # node_instructions: (CLI wins per node).
-        cfg.node_instructions = {**cfg.node_instructions, **parse_params(instruct)}
+        # Per-node instructions: CLI --instruct NODE=text populates
+        # nodes.<node>.instructions, winning over a config `nodes:` entry per node.
+        for node_name, text in parse_params(instruct).items():
+            cfg.set_node_instruction(node_name, text)
         params = _resolve_params(ctx.params_model, parse_params(param), console)
         runtime_fields = runtime_param_fields(ctx.params_model)
         # model / idle_timeout_s are run-wide knobs an agent-node reads from
@@ -154,6 +155,11 @@ def _print_run_summary(name: str, cfg, params: dict, console, *, hide: set[str] 
         "model": cfg.model or "(runtime default)",  # empty -> the runtime resolves it
         "idle_timeout_s": cfg.idle_timeout_s,
     }
+    per_node = getattr(cfg, "nodes", None)
+    if per_node:
+        # Name the nodes carrying a per-node override, so a `nodes:` entry is
+        # visible in the pre-run summary rather than only taking effect silently.
+        settings["per-node config"] = ", ".join(sorted(per_node))
     rows = {**settings, **params}
     width = max((len(k) for k in rows), default=0)
     for k, v in settings.items():
@@ -282,7 +288,7 @@ def _build_and_run(
         run_instructions=cfg.resolved_instructions(),
         run_context=run_context,
         agent_dir=cfg.agent_dir,
-        node_instructions=cfg.node_instructions,
+        node_overrides={n: nc.model_dump() for n, nc in cfg.nodes.items()},
         durations=cfg.durations,
         backend=cfg.backend,
         registry=registry,

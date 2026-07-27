@@ -38,7 +38,7 @@ Public API (the authoritative list is `__all__` below):
         run_cli, NodeProgressPrinter,
         event_printer, get_console, print_results_table, print_preflight_results,
         # run configuration / settings
-        RunConfig, build_run_config, get_settings, init_settings, clear_settings,
+        RunConfig, NodeRunConfig, build_run_config, get_settings, init_settings, clear_settings,
         parse_params, resolve_run_dir, default_temp_base,
         # duration vocabulary (portable node intent -> seconds)
         DEFAULT_DURATIONS, duration_table,
@@ -110,6 +110,7 @@ from agent_flow.node_builder import (
 from agent_flow.preflight import Check, check, fatal_failures
 from agent_flow.registry import FlowRegistry
 from agent_flow.run_config import (
+    NodeRunConfig,
     RunConfig,
     build_run_config,
     clear_settings,
@@ -210,6 +211,7 @@ __all__ = [
     "NodeProgressPrinter",
     "run_cli",
     "RunConfig",
+    "NodeRunConfig",
     "build_run_config",
     "get_settings",
     "init_settings",
