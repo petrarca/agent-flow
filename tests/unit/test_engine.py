@@ -50,6 +50,18 @@ def test_plan_groups_unknown_dependency():
         plan_groups([Node("a", run=_noop, depends_on=("ghost",))])
 
 
+def test_plan_groups_rejects_duplicate_node_names():
+    """A duplicate name must fail at BUILD time, not silently misbehave.
+
+    Names key by_name / results / depends_on / --only / GoTo. With a duplicate,
+    the last definition won: the earlier node's `run` never executed and the
+    later one ran once per duplicate, collapsing to a single result key — a
+    wrong result with no error.
+    """
+    with pytest.raises(ValueError, match="duplicate node name"):
+        plan_groups([Node("dup", run=_noop), Node("dup", run=_noop), Node("other", run=_noop)])
+
+
 def test_plan_groups_cycle():
     nodes = [
         Node("a", run=_noop, depends_on=("b",)),

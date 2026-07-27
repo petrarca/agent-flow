@@ -221,6 +221,25 @@ def _toposort(order: list[str], group_deps: dict[str, set[str]]) -> list[str]:
     return planned
 
 
+def _check_unique_names(nodes: list[Node]) -> None:
+    """Raise unless every node name is unique — `Node.name` IS the node's id.
+
+    Names key the whole engine: `by_name`, results, `depends_on`, `--only` /
+    `--start-from`, and GoTo targets. A duplicate silently collapses those (the
+    last definition wins, so an earlier node's `run` never executes while the
+    later one runs once per duplicate) — a wrong result with no error. Caught
+    here at build time, alongside cycles and unknown deps.
+    """
+    seen: set[str] = set()
+    dupes: list[str] = []
+    for n in nodes:
+        if n.name in seen and n.name not in dupes:
+            dupes.append(n.name)
+        seen.add(n.name)
+    if dupes:
+        raise ValueError(f"duplicate node name(s): {sorted(dupes)} — every Node.name must be unique (it is the node's id)")
+
+
 def plan_groups(nodes: Iterable[Node]) -> list[tuple[str, list[Node]]]:
     """Order nodes into execution groups honoring depends_on and parallel_group.
 
@@ -228,9 +247,11 @@ def plan_groups(nodes: Iterable[Node]) -> list[tuple[str, list[Node]]]:
     group's dependencies appear in an earlier group. Nodes sharing a
     parallel_group run together; solo nodes are their own single-member group.
 
-    Raises ValueError on an unknown dependency or a dependency cycle.
+    Raises ValueError on a DUPLICATE node name, an unknown dependency, or a
+    dependency cycle — all caught at BUILD time, before anything runs.
     """
     nodes = list(nodes)
+    _check_unique_names(nodes)
     by_name = {n.name: n for n in nodes}
     groups, order = _group_membership(nodes)
     group_deps = _group_dependencies(groups, order, by_name)
