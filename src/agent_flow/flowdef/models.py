@@ -90,9 +90,11 @@ class FlowDef(BaseModel):
     name: str = "agent-flow"
     nodes: list[NodeDef] = Field(min_length=1)
 
-    # Flow-wide (mirror build_flow's run-wide knobs).
-    shared_instructions: str = ""
-    shared_context: list[str] = Field(default_factory=list)
+    # Flow-wide (mirror build_flow's run-wide knobs). Named for their SCOPE:
+    # `run_*` spans the whole run; a NodeDef's `instructions`/`context` are one
+    # node. Same word, different scope — see docs/design/orchestrator/input-plane.md.
+    run_instructions: str = ""
+    run_context: list[str] = Field(default_factory=list)
     agent_dir: str = ""
     backend: str = "inprocess"
     llm_concurrency: int | None = None

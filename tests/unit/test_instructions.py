@@ -1,7 +1,7 @@
 """Unit tests for the instruction input plane: run-wide brief + per-node instructions.
 
 Composition contract (final prompt order):
-    [completion protocol] [run-wide shared_instructions] [per-node instructions] [work order]
+    [completion protocol] [run-wide run_instructions] [per-node instructions] [work order]
 """
 
 import tempfile
@@ -14,7 +14,7 @@ from agent_flow.gates import Continue
 from agent_flow.node_builder import agent_node
 
 
-def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, shared_context=(), node_instructions=None):
+def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, run_context=(), node_instructions=None):
     """Run a agent-node with a stubbed EXECUTOR that captures the invocation.
 
     the agent-node builds a neutral AgentInvocation and hands it to an AgentExecutor;
@@ -30,8 +30,8 @@ def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, 
 
         async def run(self, inv):
             captured["prompt"] = inv.prompt
-            captured["shared"] = inv.shared_instructions
-            captured["shared_context"] = inv.shared_context
+            captured["shared"] = inv.run_instructions
+            captured["run_context"] = inv.run_context
             return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "ok"}, completion="completed")
 
     monkeypatch.setattr("agent_flow.node_builder.get_executor", lambda _runtime: _FakeExecutor())
@@ -41,15 +41,15 @@ def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, 
             run_dir=Path(run_dir) if run_dir else Path(tempfile.gettempdir()),
             params=params or {},
             on_error=lambda n, e: "degraded",
-            shared_instructions=shared,
-            shared_context=tuple(shared_context),
+            run_instructions=shared,
+            run_context=tuple(run_context),
             node_instructions=node_instructions or {},
         )
     )
     return captured
 
 
-def test_shared_instructions_forwarded_to_run_agent(monkeypatch, tmp_path):
+def test_run_instructions_forwarded_to_run_agent(monkeypatch, tmp_path):
     node = agent_node("n", "agent-x", inputs={"K": "v"})
     cap = _capture_prompt(monkeypatch, node, shared="Use code-graph alongside RAG.")
     # The agent-node forwards the run-wide brief to run_agent verbatim.
@@ -111,12 +111,12 @@ def test_per_node_context_content_injected_before_instructions(monkeypatch, tmp_
     assert p.find("RULE: always X.") < p.find("do the thing") < p.find("<K>v</K>")
 
 
-def test_shared_context_sources_read_and_forwarded(monkeypatch, tmp_path):
+def test_run_context_sources_read_and_forwarded(monkeypatch, tmp_path):
     (tmp_path / "sec.md").write_text("SECURITY: never log secrets.")
     node = agent_node("n", "agent-x", inputs={"K": "v"})
-    cap = _capture_prompt(monkeypatch, node, run_dir=tmp_path, shared_context=("sec.md",))
+    cap = _capture_prompt(monkeypatch, node, run_dir=tmp_path, run_context=("sec.md",))
     # The agent-node reads the run-wide sources into CONTENT and forwards it.
-    assert "SECURITY: never log secrets." in cap["shared_context"]
+    assert "SECURITY: never log secrets." in cap["run_context"]
 
 
 def test_missing_context_source_does_not_crash(monkeypatch, tmp_path):

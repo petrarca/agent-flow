@@ -57,7 +57,7 @@ class MockAgentContext:
 
     def __init__(self, inv: AgentInvocation, work_order: dict[str, str], tmpl: dict[str, Any]) -> None:
         # inv is kept for callers that need access to the full invocation context
-        # (e.g. shared_context, instructions) for diagnostic/logging purposes.
+        # (e.g. run_context, instructions) for diagnostic/logging purposes.
         # It is deliberately NOT the primary input channel: structured inputs go
         # via work_order / self.input(); the composed prompt is for diagnostics.
         self.inv = inv

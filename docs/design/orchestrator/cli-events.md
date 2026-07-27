@@ -123,7 +123,7 @@ name, not the same parameter renamed. It is engine plumbing, not a domain param,
 and a callable is not serializable — so it is a **build-time** value, not a
 `params` key: `build_flow(on_event_factory=<factory>)` -> `RunContext.on_event_factory`
 -> `agent_node` calls it with its own agent name and passes the result to
-`run_agent(on_event=...)`. (Same precedent as `shared_instructions`; see
+`run_agent(on_event=...)`. (Same precedent as `run_instructions`; see
 [input-plane](input-plane.md).)
 
 ## The CLI (optional `cli` extra: typer + rich)

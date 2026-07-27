@@ -613,8 +613,8 @@ async def arun_agent(
     control_file: Path | None = None,
     result_schema: ResultSchema | dict | type | None = None,
     on_event: Callable[[Event], None] | None = None,
-    shared_instructions: str = "",
-    shared_context: str = "",
+    run_instructions: str = "",
+    run_context: str = "",
     node: str = "",
 ) -> AgentResult:
     """Run one agent as a supervised subprocess (async — the native entry point).
@@ -635,8 +635,8 @@ async def arun_agent(
         model=model,
         agent_dir=str(agent_dir) if agent_dir else "",
         instructions=instructions,
-        shared_instructions=shared_instructions,
-        shared_context=shared_context,
+        run_instructions=run_instructions,
+        run_context=run_context,
         idle_timeout_s=idle_timeout_s,
         on_event=on_event,
     )
@@ -657,8 +657,8 @@ def run_agent(
     control_file: Path | None = None,
     result_schema: ResultSchema | dict | type | None = None,
     on_event: Callable[[Event], None] | None = None,
-    shared_instructions: str = "",
-    shared_context: str = "",
+    run_instructions: str = "",
+    run_context: str = "",
     node: str = "",
 ) -> AgentResult:
     """Run one agent as a supervised subprocess (sync back-compatible shim).
@@ -684,8 +684,8 @@ def run_agent(
             control_file=control_file,
             result_schema=result_schema,
             on_event=on_event,
-            shared_instructions=shared_instructions,
-            shared_context=shared_context,
+            run_instructions=run_instructions,
+            run_context=run_context,
             node=node,
         )
     )

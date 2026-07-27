@@ -1,8 +1,8 @@
 ---
 type: Concept
 title: The input plane — how instructions reach an agent
-description: The prompt channels (completion protocol, run-wide context/brief, per-node context/instructions, run-time instructions, work order) plus persona; templating; the CLI brief.
-tags: [agent-flow, input-plane, instructions, prompt, templating, cli]
+description: The prompt channels named by scope x kind (completion protocol, run context/instructions, node context/instructions, run-time and attempt instructions, work order) plus persona; the two rendering seams; templating; the CLI brief.
+tags: [agent-flow, input-plane, instructions, prompt, templating, cli, prompt-parts]
 timestamp: 2026-07-23T07:51:35Z
 ---
 
@@ -13,13 +13,44 @@ lifetime. They compose in a **fixed order** into the final prompt:
 
 ```
 [1 completion protocol]        library, ALWAYS      where to write status + the control JSON shape
-[2 run-wide context]           consumer, at START   ingested FILE CONTENT for every agent (rules/standards)
-[3 run-wide brief]             consumer, at START   inline text for every agent (the global directive)
-[4 per-node context]           consumer, declared   ingested FILE CONTENT for this node only
-[5 per-node instructions]      consumer, declared   inline text for this node only (build time)
-[6 per-node RUN-TIME instr]    consumer, at RUN     inline text for this node only (CLI/config), additive LAST
-[7 work order]                 consumer, declared   KEY: value, templated
+[2 run context]                consumer, at START   ingested FILE CONTENT for every agent (rules/standards)
+[3 run instructions]           consumer, at START   inline text for every agent (the global brief)
+[4 node context]               consumer, declared   ingested FILE CONTENT for this node only
+[5 node instructions]          consumer, declared   inline text for this node only (build time)
+[6 node RUN-TIME instructions] consumer, at RUN     inline text for this node only (CLI/config), additive LAST
+[7 attempt instruction]        gate, per ATTEMPT    one-time text from Restart/GoTo, verbatim, ephemeral
+[8 work order]                 consumer, declared   the node's input DATA, templated
 ```
+
+## Naming: scope × kind
+
+Every channel is one cell of a small grid, which is why the order above is
+self-explanatory rather than arbitrary:
+
+- **scope** — how far it reaches and how long it lives: **run** → **node** →
+  **attempt**.
+- **kind** — what it is: **context** (ingested FILE CONTENT), **instructions**
+  (inline text), **data** (the work order).
+
+| # | scope | kind | name | code |
+|---|---|---|---|---|
+| 1 | library | protocol | completion protocol | `build_verdict_preamble` (runner) |
+| 2 | run | context | run context | `run_context` |
+| 3 | run | instructions | run instructions | `run_instructions` |
+| 4 | node | context | node context | `context` |
+| 5 | node | instructions | node instructions | `instructions` |
+| 6 | node (at run time) | instructions | node run-time instructions | `node_instructions` |
+| 7 | attempt | instructions | attempt instruction | `one_time_instruction` |
+| 8 | node | data | work order | `inputs` |
+
+The same word means the same thing at every scope — `run_instructions` and a
+node's `instructions` are both inline guidance, differing only in reach. That is
+why the CLI keeps `--instructions` (run) beside `--instruct NODE=…` (node): one
+concept, two scopes.
+
+Broadest scope first, and within a scope **context precedes instructions
+precedes data** — the agent reads the authoritative rules, then the guidance,
+then the concrete task.
 
 Note the pattern: at each scope, **ingested context (files) precedes inline
 instructions (text)** — the agent reads the authoritative rules first, then the
@@ -40,16 +71,16 @@ Plus a **separate** channel that is NOT part of this prompt:
 
 - **(1) completion protocol** — injected by the library (see
   [control-file](control-file.md)); the consumer never writes it.
-- **(2) run-wide context** — file SOURCES whose content is injected into every
-  agent: `build_flow(shared_context=["{run_dir}/rules/security.md", …])`. The
+- **(2) run context** — file SOURCES whose content is injected into every
+  agent: `build_flow(run_context=["{run_dir}/rules/security.md", …])`. The
   engine reads each file at run time and concatenates its content. This is how
   you guarantee an agent *has* the security rules / coding standards, rather
   than telling it to read them (the failure that motivated nested `AGENTS.md`).
-- **(3) run-wide brief** — the global directive you pass when the run starts,
+- **(3) run instructions** — the global brief you pass when the run starts,
   including from the CLI: `--instructions/-i "…"` or `--instructions-file`. It
-  reaches the library as the **typed** `build_flow(shared_instructions=…)`
-  argument (or `run_agent(shared_instructions=…)` at Tier 1/2), threaded via
-  `RunContext.shared_instructions`. It is deliberately a typed build-time value,
+  reaches the library as the **typed** `build_flow(run_instructions=…)`
+  argument (or `run_agent(run_instructions=…)` at Tier 1/2), threaded via
+  `RunContext.run_instructions`. It is deliberately a typed build-time value,
   **not** a `params` key — so it stays off the task-serialization path and out of
   the domain grab-bag (same precedent as [`on_event_factory`](cli-events.md)).
   Example: *"Follow the team's coding standards and cite a source for every
@@ -66,17 +97,20 @@ Plus a **separate** channel that is NOT part of this prompt:
   makes it an additive, last-word override ("ignore the prior instruction; do X
   instead"). CLI `--instruct` merges over the config section (CLI wins per node).
   May template run params. See [Per-node run-time instructions](#per-node-run-time-instructions).
-- **(7) work order** — `agent_node(inputs={KEY: "value-or-{template}"})`, the
+- **(7) attempt instruction** — one-time text a gate attaches to `Restart`/`GoTo`
+  (see [gates](gates.md)). Rendered VERBATIM, with no library heading — the gate
+  owns its framing — and cleared after that attempt.
+- **(8) work order** — `agent_node(inputs={KEY: "value-or-{template}"})`, the
   per-run values (product key, report path, focus).
 
 Context sources (2, 4) accept file paths or globs; a source matching no file is
 warned about and skipped, never a crash. `run_agent` itself (Tier 1) takes the
-already-read content string (`shared_context=...`); the node-builder layer reads the
+already-read content string (`run_context=...`); the node-builder layer reads the
 files for you.
 
 ## Templating
 
-Instruction blocks (3, 5, 6), context sources (2, 4), and work-order values (7) may
+Instruction blocks (3, 5, 6, 7), context sources (2, 4), and work-order values (8) may
 reference run params via `{name}` (one-level `str.format`). `{run_dir}` is
 provided automatically; other `{name}`s resolve from what you pass to
 `pipeline(**params)` at start. A missing placeholder is left literal rather than
@@ -184,18 +218,54 @@ differently.
 ## Mapping to the old orchestrator vocabulary
 
 - "stuff currently in the orchestrator" → **(5)** per-node `instructions` and
-  **(7)** `inputs`.
+  **(8)** `inputs`.
 - "stuff passed when we start the orchestrator" → **(3)** the CLI/`build_flow`
-  brief, and params interpolated into **(7)**.
+  brief, and params interpolated into **(8)**.
+
+## Rendering: two seams, one invariant
+
+Channels 2–8 reach a renderer as **parts**, never pre-joined (`PromptParts`).
+Two seams compose as a pipeline, so overriding either — or both — is well
+defined:
+
+```
+resolved inputs (dict)
+      │  registry.work_order(fn)     INNER: data -> text   (restyle the work order)
+      ▼
+parts.work_order (str) + the other channels
+      │  registry.prompt(fn)         OUTER: parts -> body  (control the whole layout)
+      ▼
+prompt body
+      │  runner.build_verdict_preamble   prepended by the executor
+      ▼
+the agent's prompt
+```
+
+Defaults: `render_prompt` (markdown headings, the order above) and
+`render_work_order_xml` (`<KEY>value</KEY>`; `render_work_order_lines` ships for
+the pre-0.3 `KEY: value` shape). `PromptParts` also carries `inputs`, the work
+order still structured, so an outer renderer may lay the data out itself rather
+than consume the inner one's text.
+
+**The invariant: channel 1 is not renderable.** The completion protocol is half
+of the verdict contract — the executor injects a sidecar path and then reads back
+that exact path — so a prompt renderer cannot touch it. A runner may *replace* it
+(`build_verdict_preamble`) precisely because a runner owns **both** halves and
+keeps them in step; a structured-output runner would swap the instruction and the
+harvest together.
 
 ## Where it lives
 
 `src/agent_flow/core/control_protocol.py` (block 1, the control preamble —
 prepended by `SubprocessExecutor` in `core/agent_runtime.py`, subprocess-only).
-`runners/base.compose_prompt` prepends the run-wide blocks 2 + 3 onto the
-per-node prompt. `node_builder.agent_node` composes 4 + 5 + 6 + the work order
-(7) via `resolve_work_order`. The `RunContext.shared_instructions` /
-`shared_context` / `node_instructions` / `one_time_instruction` plumbing lives in
-`engine.py` (`build_flow`); the CLI `--instruct` + config `node_instructions:`
-handling lives in `cli/commands/run.py`, with the `node_instructions` field on
-`run_config.py`.
+`runners/base.py` holds `PromptParts` and the default `render_prompt`;
+`node_builder.agent_node` fills the parts (reading context files into content,
+templating, rendering the work order) and calls the registered renderer.
+`compose_prompt(inv)` remains for a Tier-1/2 caller assembling a prompt from an
+invocation directly. The `RunContext.run_instructions` / `run_context` /
+`node_instructions` / `one_time_instruction` plumbing lives in `engine.py`
+(`build_flow`); the CLI `--instruct` + config `node_instructions:` handling lives
+in `cli/commands/run.py`, with the `node_instructions` field on `run_config.py`.
+A FlowDef's `run_context` is threaded onto `RunCliContext` by `cli/app.py` — it
+has no CLI flag (it is a pipeline declaration, not a per-run knob), so without
+that wire `run_cli` would silently drop it while `run_flow` honoured it.

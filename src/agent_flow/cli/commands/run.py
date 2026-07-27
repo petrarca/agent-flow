@@ -125,6 +125,7 @@ def register(app, ctx: RunCliContext) -> None:
             start_from=start_from or "",
             only=only or "",
             registry=ctx.registry,
+            run_context=ctx.run_context,
         )
 
 
@@ -196,7 +197,9 @@ def _run_preflight(runtime: str, agent_dir: str, backend: str, console) -> None:
         sys.exit(2)
 
 
-def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str, start_from: str = "", only: str = "", registry=None) -> None:
+def _run_with_view(
+    nodes, params, cfg, console, *, name: str, llm_tag: str, start_from: str = "", only: str = "", registry=None, run_context: tuple[str, ...] = ()
+) -> None:
     """Run the pipeline under the chosen view, then print the results table.
 
       | flags                       | base view      | diff blocks |
@@ -235,6 +238,7 @@ def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str, star
             start_from=start_from,
             only=only,
             registry=registry,
+            run_context=run_context,
         )
     except KeyboardInterrupt:
         console.print("[yellow]Interrupted[/yellow] — stopped by user (Ctrl-C).")
@@ -248,7 +252,20 @@ def _run_with_view(nodes, params, cfg, console, *, name: str, llm_tag: str, star
 
 
 def _build_and_run(
-    nodes, params, cfg, console, *, name, llm_tag, on_event_factory, on_node_event, render_results, start_from="", only="", registry=None
+    nodes,
+    params,
+    cfg,
+    console,
+    *,
+    name,
+    llm_tag,
+    on_event_factory,
+    on_node_event,
+    render_results,
+    start_from="",
+    only="",
+    registry=None,
+    run_context: tuple[str, ...] = (),
 ):
     """Compile the flow with the given hooks and run it; optionally print results."""
     import anyio
@@ -262,7 +279,8 @@ def _build_and_run(
         llm_concurrency=cfg.llm_concurrency,
         on_event_factory=on_event_factory,
         on_node_event=on_node_event,
-        shared_instructions=cfg.resolved_instructions(),
+        run_instructions=cfg.resolved_instructions(),
+        run_context=run_context,
         agent_dir=cfg.agent_dir,
         node_instructions=cfg.node_instructions,
         backend=cfg.backend,

@@ -26,6 +26,7 @@ from agent_flow.core import DEFAULT_IDLE_TIMEOUT_S
 from agent_flow.engine import Criticality, Node, RunContext
 from agent_flow.gates import Gate
 from agent_flow.runners import AgentInvocation, MockExecutor, get_executor
+from agent_flow.runners.base import PromptParts, render_prompt
 from agent_flow.runners.executor import AgentExecutor
 from agent_flow.runners.inprocess import InProcessExecutor
 from agent_flow.utils import resolve_template
@@ -190,7 +191,7 @@ def agent_node(
             are recommended for files (opencode resolves relative paths against
             its project root, not the subprocess cwd).
         instructions: optional per-node instruction block, ADDITIVE to the
-            always-injected control protocol and any run-wide shared_instructions.
+            always-injected control protocol and any run-wide run_instructions.
             "For this node specifically, also do X." May template run params via
             `{name}`. Prepended to the KEY: value work order.
         context: optional per-node context SOURCES (file paths / globs) whose
@@ -263,39 +264,34 @@ def agent_node(
         render = registry.get_work_order_renderer() if registry is not None else DEFAULT_WORK_ORDER_RENDERER
         work_order = render(resolved_inputs)
 
-        # The caller-visible prompt, composed in order:
-        #   [per-node context] [per-node instructions] [additional (standing)]
-        #   [one-time instruction] [work order]
-        # (Run-wide context + instructions are prepended by the executor via
-        # compose_prompt; a subprocess executor also prepends the control preamble.)
-        parts: list[str] = []
-        node_ctx = read_context_blocks(context, params=ctx.params, run_dir=ctx.run_dir, warn=warn)
-        if node_ctx:
-            parts.append(f"## Context for this step\n\n{node_ctx}")
-        if instructions and instructions.strip():
-            parts.append(f"## Instructions for this step\n\n{resolve_template(instructions, tmpl)}")
-        # Run-time per-node instruction (CLI --instruct / config node_instructions),
-        # appended AFTER the build-time per-node instructions so it is the LAST
-        # standing guidance before the work order — additive, last-word override.
-        runtime_instr = (ctx.node_instructions.get(name) or "").strip()
-        if runtime_instr:
-            parts.append(f"## Additional instructions for this run\n\n{resolve_template(runtime_instr, tmpl)}")
-        # One-time instruction for THIS attempt, set by the engine from a gate's
-        # Restart/GoTo `instruction`. Injected VERBATIM (no engine-imposed heading)
-        # and LAST, right before the work order, so it is the freshest, most
-        # specific guidance the agent sees — the CALLER owns its full framing
-        # (write "## ...\n\n..." in the gate if a heading is wanted). Ephemeral:
-        # the engine clears it after this attempt (see
-        # RunContext.one_time_instruction). Templated like the other blocks.
-        one_time_instr = (getattr(ctx, "one_time_instruction", "") or "").strip()
-        if one_time_instr:
-            parts.append(resolve_template(one_time_instr, tmpl))
-        parts.append(work_order)
-        prompt = "\n\n".join(parts)
-
-        # Read the run-wide context SOURCES into content here (per node, so
-        # templating works) and hand the content to run_agent.
-        shared_ctx = read_context_blocks(ctx.shared_context, params=ctx.params, run_dir=ctx.run_dir, warn=warn)
+        # Collect the prompt's CHANNELS, each still separate, and hand them to a
+        # renderer. Nothing is pre-joined here: a consumer's `registry.prompt`
+        # override needs the parts, not a finished string (and an in-process impl
+        # can read them off the invocation). The completion protocol is NOT a part
+        # — it belongs to the runner, which prepends it after rendering.
+        #
+        # Run-wide context SOURCES are read into CONTENT here (per node, so
+        # `{param}` templating in a path works).
+        parts = PromptParts(
+            run_context=read_context_blocks(ctx.run_context, params=ctx.params, run_dir=ctx.run_dir, warn=warn),
+            run_instructions=ctx.run_instructions,
+            node_context=read_context_blocks(context, params=ctx.params, run_dir=ctx.run_dir, warn=warn),
+            node_instructions=resolve_template(instructions, tmpl) if instructions else "",
+            # Run-time per-node instruction (CLI --instruct / config
+            # node_instructions): AFTER the build-time one, so it is the last
+            # standing guidance — additive, last-word override.
+            node_runtime_instructions=resolve_template(ctx.node_instructions.get(name) or "", tmpl),
+            # One-time instruction for THIS attempt, set by the engine from a
+            # gate's Restart/GoTo. Rendered VERBATIM (no library heading) and last
+            # before the work order — the freshest, most specific guidance, whose
+            # framing the gate owns. Ephemeral: the engine clears it afterwards.
+            attempt_instruction=resolve_template(getattr(ctx, "one_time_instruction", "") or "", tmpl),
+            work_order=work_order,
+            inputs=dict(resolved_inputs),
+        )
+        render_body = registry.get_prompt_renderer() if registry is not None else render_prompt
+        prompt = render_body(parts)
+        shared_ctx = parts.run_context
 
         # Per-node agent_dir overrides the flow default; both are templated.
         eff_agent_dir = resolve_template(agent_dir, tmpl) if agent_dir else resolve_template(ctx.agent_dir, tmpl)
@@ -327,8 +323,8 @@ def agent_node(
             result_schema=result_schema,
             model=eff_model,
             agent_dir=eff_agent_dir or "",
-            shared_instructions=ctx.shared_instructions,
-            shared_context=shared_ctx,
+            run_instructions=ctx.run_instructions,
+            run_context=shared_ctx,
             idle_timeout_s=eff_idle,
             on_event=make_printer(name) if callable(make_printer) else None,
             # The structured twin of `prompt`, for in-process impls that want the

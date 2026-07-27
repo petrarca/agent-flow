@@ -79,7 +79,7 @@ The whole pipeline plus flow-wide settings.
 FlowDef(
     name="tech-assessment",
     nodes=[NodeDef(...), NodeDef(...), …],
-    shared_instructions="…", shared_context=["{repos_root}/rules/*.md"],
+    run_instructions="…", run_context=["{repos_root}/rules/*.md"],
     agent_dir="…",           # where the agents' .md live (opencode --dir)
     backend="inprocess",     # or "prefect"
     llm_concurrency=None,

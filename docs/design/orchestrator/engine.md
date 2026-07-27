@@ -65,7 +65,7 @@ control files + relative-path base; NOT a cwd and NOT where agents live),
 `cycles`, `params` (domain inputs, threaded from the flow call), and the
 engine-plumbing fields `agent_dir` (default dir where agent definitions live →
 opencode `--dir`; per-node override on `agent_node`), `on_event_factory`,
-`shared_instructions`, `shared_context`, `node_instructions` (run-time per-node
+`run_instructions`, `run_context`, `node_instructions` (run-time per-node
 instructions from `--instruct`/config), and `one_time_instruction` (the
 single-attempt instruction a gate's `Restart`/`GoTo` delivers to the target
 node's next run) — all typed, not `params` keys — see
@@ -100,7 +100,7 @@ callback: `blocking` → `NodeBlocked`; `degrade` → status `degraded`.
 
 ## `build_flow` — compile to a runnable flow callable
 
-`build_flow(nodes, *, name, llm_tag, llm_concurrency, on_event_factory, on_node_event, shared_instructions, shared_context, agent_dir, node_instructions, backend="inprocess", registry=None)`
+`build_flow(nodes, *, name, llm_tag, llm_concurrency, on_event_factory, on_node_event, run_instructions, run_context, agent_dir, node_instructions, backend="inprocess", registry=None)`
 returns an **async** callable `async f(run_dir="", start_from="", only="", **params) -> dict[str, NodeOutcome]`
 (`build_flow`'s own body stays sync — only the returned callable is a coroutine;
 `await` it, or use the sync `run_flow` / `run_cli` wrappers that bridge it with

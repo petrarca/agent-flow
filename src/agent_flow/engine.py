@@ -94,12 +94,12 @@ class RunContext:
     agent_dir: str = ""
     # Run-wide instruction/brief injected into EVERY agent (build-time, from the
     # orchestrator start / CLI). Engine plumbing, not a domain param.
-    shared_instructions: str = ""
+    run_instructions: str = ""
     # Run-wide context SOURCES (file paths / globs) whose CONTENT is injected
     # into every agent — rules/standards the agent must actually have. Read at
     # run time (per node, so templating against params works). Build-time
     # plumbing, not a domain param.
-    shared_context: tuple[str, ...] = ()
+    run_context: tuple[str, ...] = ()
     # Run-time per-node instructions {node_name: text}, from CLI --instruct / the
     # config node_instructions: section. A agent-node appends its own entry
     # LAST (after the build-time per-node instructions), so it is the most recent
@@ -312,8 +312,8 @@ async def interpret(
     on_error: Callable[[Node, Exception], str],
     log: Callable[[str], None] = lambda _msg: None,
     on_event_factory: Callable[[str], Any] | None = None,
-    shared_instructions: str = "",
-    shared_context: tuple[str, ...] = (),
+    run_instructions: str = "",
+    run_context: tuple[str, ...] = (),
     agent_dir: str = "",
     node_instructions: dict[str, str] | None = None,
     registry: Any = None,
@@ -373,8 +373,8 @@ async def interpret(
                         cycles=cycles,
                         params=eff_params,
                         on_event_factory=on_event_factory,
-                        shared_instructions=shared_instructions,
-                        shared_context=shared_context,
+                        run_instructions=run_instructions,
+                        run_context=run_context,
                         agent_dir=agent_dir,
                         node_instructions=dict(node_instructions or {}),
                         one_time_instruction=attempt_instruction,
@@ -534,8 +534,8 @@ def build_flow(
     llm_concurrency: int | None = None,
     on_event_factory: Callable[[str], Any] | None = None,
     on_node_event: Callable[[str, str, str | None, str], None] | None = None,
-    shared_instructions: str = "",
-    shared_context: Iterable[str] | None = None,
+    run_instructions: str = "",
+    run_context: Iterable[str] | None = None,
     agent_dir: str = "",
     node_instructions: dict[str, str] | None = None,
     backend: str = "inprocess",
@@ -577,14 +577,14 @@ def build_flow(
             hand-written nodes). Pure data (no rendering); a CLI turns it into a
             live view. Bound here at build time like on_event_factory (a
             non-serializable closure, engine plumbing not a domain input).
-        shared_instructions: optional run-wide brief injected into EVERY agent's
+        run_instructions: optional run-wide brief injected into EVERY agent's
             prompt (e.g. a global directive from the CLI/start). Reaches each node
-            via RunContext.shared_instructions; an agent-node forwards it to
+            via RunContext.run_instructions; an agent-node forwards it to
             run_agent.
-        shared_context: optional run-wide context SOURCES (file paths / globs)
+        run_context: optional run-wide context SOURCES (file paths / globs)
             whose CONTENT is injected into every agent — rules/standards the
             agent must actually have. Read at run time (per node, so `{name}`
-            templating works). Reaches each node via RunContext.shared_context.
+            templating works). Reaches each node via RunContext.run_context.
         agent_dir: optional DEFAULT directory where agent definitions live
             (opencode `--dir`); a node may override via agent_node(agent_dir=...).
             Reaches each node via RunContext.agent_dir. Templated at run time.
@@ -598,7 +598,7 @@ def build_flow(
 
         registry = FlowRegistry()  # built-in gates only
 
-    shared_context_t = tuple(shared_context or ())
+    run_context_t = tuple(run_context or ())
     node_instructions_d = dict(node_instructions or {})
     planned = plan_groups(nodes)  # fail fast on cycles/unknown deps at build time
     by_name = {n.name: n for n in nodes}
@@ -645,7 +645,7 @@ def build_flow(
 
             logger.info(f"node {node.name}: start (criticality={node.criticality})")
             _emit(node.name, "start", None, node.agent)
-            # on_event_factory / shared_instructions / shared_context / agent_dir
+            # on_event_factory / run_instructions / run_context / agent_dir
             # are build-time values threaded into every node.
             outcome = await interpret(
                 node,
@@ -654,8 +654,8 @@ def build_flow(
                 on_error=_on_error,
                 log=logger.info,
                 on_event_factory=on_event_factory,
-                shared_instructions=shared_instructions,
-                shared_context=shared_context_t,
+                run_instructions=run_instructions,
+                run_context=run_context_t,
                 agent_dir=agent_dir,
                 node_instructions=node_instructions_d,
                 registry=registry,

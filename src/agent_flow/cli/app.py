@@ -103,16 +103,22 @@ def run_cli(
         if name == "agent-flow":
             name = flow_def.name
         # The FlowDef's flow-level agent_dir is the pipeline's own default (used
-        # unless the CLI/env/config sets --agent-dir). Other flow-level fields
-        # (backend, shared_*, llm_concurrency) are honored via the CLI flags/env
-        # on the run command; the FlowDef values act as documentation there.
+        # unless the CLI/env/config sets --agent-dir). backend / run_instructions /
+        # llm_concurrency each have a CLI flag + env var, so the FlowDef values are
+        # documentation here. `run_context` has NO flag — it is a pipeline
+        # DECLARATION, not a per-run knob — so it must be threaded through, or a
+        # FlowDef's run-wide rules would be silently dropped under run_cli while
+        # working under run_flow.
         if not default_agent_dir and flow_def.agent_dir:
             default_agent_dir = flow_def.agent_dir
+        run_context = tuple(flow_def.run_context)
     else:
         build_nodes = flow
+        run_context = ()
 
     ctx = RunCliContext(
         build_nodes=build_nodes,
+        run_context=run_context,
         name=name,
         llm_tag=llm_tag,
         default_agent_dir=default_agent_dir,

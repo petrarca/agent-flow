@@ -102,8 +102,8 @@ Two explicit parameters — no signature sniffing:
 
 - **`inv: AgentInvocation`** — the full neutral invocation, identical to what
   `SubprocessExecutor` and `InProcessExecutor` receive (`agent`, `run_dir`,
-  `model`, `result_schema`, `instructions`, `shared_instructions`,
-  `shared_context`, the composed `prompt`, ...). It is **fully available**, but
+  `model`, `result_schema`, `instructions`, `run_instructions`,
+  `run_context`, the composed `prompt`, ...). It is **fully available**, but
   the prompt / context / instructions are **diagnostic only** — a mock may
   inspect them for logging or explanation, but it does not drive behavior off
   prose (that would be pretending to reason). Behavior is driven by structured

@@ -81,7 +81,7 @@ composition, small-file reads — is synchronous inline. Inside it, `agent_node`
   one-time instruction (from a gate's `Restart`/`GoTo`), then the work order (see
   [input-plane.md](input-plane.md)),
 - builds a neutral `AgentInvocation` (prompt, run_dir, node, model, idle timeout,
-  `result_schema`, run-wide `shared_instructions`/`shared_context`, and an
+  `result_schema`, run-wide `run_instructions`/`run_context`, and an
   `on_event` callback built from `RunContext.on_event_factory` under the NODE
   name),
 - selects an executor and `await`s `executor.run(inv)` (the executor seam is

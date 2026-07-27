@@ -44,9 +44,11 @@ from agent_flow.runners.base import (
     AgentRunnerInfo,
     Event,
     LaunchSpec,
+    PromptParts,
     RunnerBase,
     RunnerSpec,
     compose_prompt,
+    render_prompt,
 )
 from agent_flow.runners.claude_code import ClaudeCodeRunner
 from agent_flow.runners.executor import AgentExecutor
@@ -151,6 +153,8 @@ __all__ = [
     "MockAgent",
     "Event",
     "compose_prompt",
+    "PromptParts",
+    "render_prompt",
     "LaunchSpec",
     "DEFAULT_IDLE_TIMEOUT_S",
     "MODE_PROCESS",

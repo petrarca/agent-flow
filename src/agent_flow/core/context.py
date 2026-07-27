@@ -8,7 +8,7 @@ content into the prompt as delimited blocks — the agent physically has the
 rules in front of it, not a pointer to go fetch.
 
 This produces a plain string block that is concatenated alongside the inline
-instruction strings (shared_instructions / per-node instructions). It is
+instruction strings (run_instructions / per-node instructions). It is
 additive: files and inline text end up in the same prompt.
 
 Sources may be file paths or globs, and may template run params via `{name}`

@@ -121,7 +121,8 @@ also why new capabilities land here rather than as extra `build_flow` /
 | `@registry.agent_impl("name")` | `(inv) -> AgentResult / model / dict` — an in-process agent | `impl_ref="name"` |
 | `@registry.mock_agent("agent")` | `(inv, ctx) -> envelope` — a token-free stand-in | *(matched by AGENT name under `--mock-agents`)* |
 | `@registry.on("event", node=…)` | an observing hook; never steers flow | *(fires automatically; `node=` scopes it)* |
-| `registry.work_order(fn)` | `(resolved: dict[str, str]) -> str` — the prompt shape ([advanced](advanced-recipes.md#change-how-the-work-order-is-rendered)) | *(flow-wide; no reference)* |
+| `registry.work_order(fn)` | `(resolved: dict[str, str]) -> str` — restyle the work order ([advanced](advanced-recipes.md#change-how-the-work-order-is-rendered)) | *(flow-wide; no reference)* |
+| `registry.prompt(fn)` | `(parts: PromptParts) -> str` — assemble the whole prompt body ([advanced](advanced-recipes.md#change-how-the-work-order-is-rendered)) | *(flow-wide; no reference)* |
 
 Each takes a decorator or a direct call — `@registry.schema("TriageIn")` above a
 class, or `registry.schema("TriageIn")(TriageIn)` for a model defined elsewhere.
@@ -129,8 +130,8 @@ Referencing a name that is not registered fails at **compile**, before anything
 runs: `node 'n': unknown input_schema 'Nope'`.
 
 Note `schema` serves **both** ends: one registration is usable as a node's
-`input_schema` and as its `result_schema`. And `work_order` is the one singleton
-— it is a per-flow presentation choice, not something a node selects.
+`input_schema` and as its `result_schema`. `work_order` and `prompt` are the two
+singletons — per-flow presentation choices, not something a node selects.
 
 Working imperatively (`agent_node`) you can skip the registry entirely and pass
 the callable or class directly (`gate=fn`, `input_schema=TriageIn`,
@@ -298,8 +299,8 @@ Inject a directive / rules into every agent:
 
 ```python
 FlowDef(name="p",
-        shared_instructions="Follow the team's coding standards and cite a source for every finding.",
-        shared_context=["{repos_root}/rules/security.md"],
+        run_instructions="Follow the team's coding standards and cite a source for every finding.",
+        run_context=["{repos_root}/rules/security.md"],
         nodes=[...])
 ```
 

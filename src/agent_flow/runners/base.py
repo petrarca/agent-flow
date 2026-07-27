@@ -6,8 +6,8 @@ This module is the COMMON FOUNDATION for the two-level execution seam:
                    Input to AgentExecutor.run (see runners/executor.py).
   AgentResult      the outcome — control envelope + telemetry + typed object.
                    Output from AgentExecutor.run (defined in executor.py).
-  compose_prompt   assemble the runtime-neutral prompt (shared_context +
-                   shared_instructions + per-node prompt) in one place.
+  compose_prompt   assemble the runtime-neutral prompt (run_context +
+                   run_instructions + per-node prompt) in one place.
   DEFAULT_IDLE_TIMEOUT_S  the liveness/timeout budget default.
 
 Two execution seams consume these types:
@@ -100,9 +100,9 @@ class AgentInvocation:
 
     Prompt layering. `prompt` is the fully-composed PER-NODE prompt (per-node
     context + instructions + the one-time instruction + the work order — already
-    joined by agent_node). `shared_context` / `shared_instructions` are the
+    joined by agent_node). `run_context` / `run_instructions` are the
     RUN-WIDE blocks, kept separate so a single composer (`compose_prompt`) lays
-    the final order in ONE place: [shared_context][shared_instructions][prompt].
+    the final order in ONE place: [run_context][run_instructions][prompt].
     A subprocess executor additionally prepends the control preamble (its own
     mechanism); an in-process executor uses the composed prompt as-is.
 
@@ -130,8 +130,8 @@ class AgentInvocation:
     model: str | None = None
     agent_dir: str = ""  # absolute dir where agent DEFINITIONS live (opencode: --dir); "" = runtime default
     instructions: str = ""  # resolved standing instructions (for runners without named agents)
-    shared_instructions: str = ""  # run-wide brief injected into every agent
-    shared_context: str = ""  # run-wide context CONTENT (already read from files)
+    run_instructions: str = ""  # run-wide brief injected into every agent
+    run_context: str = ""  # run-wide context CONTENT (already read from files)
     idle_timeout_s: int = DEFAULT_IDLE_TIMEOUT_S  # liveness budget (subprocess) / cap hint (in-process)
     on_event: Callable[[Event], None] | None = None  # live progress callback (both kinds may emit)
     # The STRUCTURED twin of `prompt` (see "Text AND data" above). Both are
@@ -139,6 +139,64 @@ class AgentInvocation:
     inputs: dict[str, str] = field(default_factory=dict)  # this node's resolved work order ({KEY: value}, templated)
     input_obj: object = None  # `inputs` validated against the node's input_schema (a pydantic instance), else None
     params: dict[str, Any] = field(default_factory=dict)  # the run's domain params (incl. upstream `exports`)
+
+
+@dataclass(frozen=True)
+class PromptParts:
+    """The prompt's channels, UNASSEMBLED — the input to a prompt renderer.
+
+    Every channel the library composes, in scope order, each still separate so a
+    renderer decides the wording, headings and order. Fields are "" (or {}) when
+    the channel is unused. See docs/design/orchestrator/input-plane.md.
+
+    NOT here: the COMPLETION PROTOCOL. That block is half of the verdict contract
+    — the executor injects a sidecar path and then reads back that exact path —
+    so it is owned by the runner (`build_verdict_preamble`) and prepended after
+    rendering. A prompt renderer cannot break it.
+
+    `work_order` is the already-rendered data block; `inputs` is the same data
+    still structured, so a renderer may ignore the rendered form and lay the
+    values out itself.
+    """
+
+    run_context: str = ""  # [run] ingested FILE CONTENT for every agent
+    run_instructions: str = ""  # [run] inline text for every agent
+    node_context: str = ""  # [node] ingested FILE CONTENT for this node
+    node_instructions: str = ""  # [node] inline text, declared at build time
+    node_runtime_instructions: str = ""  # [node] inline text supplied at RUN time (--instruct)
+    attempt_instruction: str = ""  # [attempt] one-time text from a gate's Restart/GoTo
+    work_order: str = ""  # [node] the rendered data block
+    inputs: dict[str, str] = field(default_factory=dict)  # the same data, structured
+
+
+def render_prompt(parts: PromptParts) -> str:
+    """Assemble the prompt body from its parts — the DEFAULT renderer.
+
+    Order is scope-outward: run -> node -> attempt -> data; and within a scope,
+    ingested context precedes inline instructions, so an agent reads the
+    authoritative rules first, then guidance, then the concrete task. Empty
+    channels are skipped entirely (no stray headings).
+
+    Override wholesale with `FlowRegistry.prompt`; to change only the data block,
+    override the inner `FlowRegistry.work_order` instead.
+    """
+    blocks: list[str] = []
+    if parts.run_context.strip():
+        blocks.append(f"## Run-wide context\n\n{parts.run_context.strip()}")
+    if parts.run_instructions.strip():
+        blocks.append(f"## Run-wide instructions\n\n{parts.run_instructions.strip()}")
+    if parts.node_context.strip():
+        blocks.append(f"## Context for this step\n\n{parts.node_context.strip()}")
+    if parts.node_instructions.strip():
+        blocks.append(f"## Instructions for this step\n\n{parts.node_instructions.strip()}")
+    if parts.node_runtime_instructions.strip():
+        blocks.append(f"## Additional instructions for this run\n\n{parts.node_runtime_instructions.strip()}")
+    if parts.attempt_instruction.strip():
+        # Verbatim, no library heading: the gate that produced it owns its framing.
+        blocks.append(parts.attempt_instruction.strip())
+    if parts.work_order:
+        blocks.append(parts.work_order)
+    return "\n\n".join(blocks)
 
 
 def compose_prompt(inv: AgentInvocation) -> str:
@@ -155,10 +213,10 @@ def compose_prompt(inv: AgentInvocation) -> str:
     SubprocessExecutor. An in-process executor uses this composed prompt as-is.
     """
     blocks: list[str] = []
-    if inv.shared_context and inv.shared_context.strip():
-        blocks.append(f"## Run-wide context\n\n{inv.shared_context.strip()}")
-    if inv.shared_instructions and inv.shared_instructions.strip():
-        blocks.append(f"## Run-wide instructions\n\n{inv.shared_instructions.strip()}")
+    if inv.run_context and inv.run_context.strip():
+        blocks.append(f"## Run-wide context\n\n{inv.run_context.strip()}")
+    if inv.run_instructions and inv.run_instructions.strip():
+        blocks.append(f"## Run-wide instructions\n\n{inv.run_instructions.strip()}")
     blocks.append(inv.prompt)
     return "\n\n".join(blocks)
 

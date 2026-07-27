@@ -71,6 +71,10 @@ class FlowRegistry:
         # prompt. None = the library default (XML tags). One slot, not a named
         # map: it is a per-FLOW presentation choice, not something a node picks.
         self._work_order_renderer: Callable[[dict[str, str]], str] | None = None
+        # Optional override for how the prompt BODY is assembled from its parts.
+        # None = the library default (`render_prompt`). The outer of the two
+        # prompt seams; see `prompt()` / `work_order()`.
+        self._prompt_renderer: Callable[[Any], str] | None = None
         if seed_builtins:
             self._seed_builtin_gates()
 
@@ -218,6 +222,37 @@ class FlowRegistry:
         from agent_flow.node_builder import DEFAULT_WORK_ORDER_RENDERER
 
         return DEFAULT_WORK_ORDER_RENDERER
+
+    def prompt(self, fn: Callable[[Any], str]) -> Callable[[Any], str]:
+        """Override how the prompt BODY is assembled from its parts (decorator).
+
+        `fn(parts: PromptParts) -> str` receives every channel separately — run
+        context/instructions, node context/instructions, the run-time and
+        one-time instructions, and the work order (both rendered and as the raw
+        `inputs` dict) — and returns the body. Unset, the default is
+        `render_prompt` (markdown headings, scope-outward order).
+
+        This is the OUTER of two seams; `work_order` is the inner one, and they
+        compose as a pipeline: the work-order renderer turns the resolved inputs
+        into `parts.work_order`, then this assembles the body. Setting both is
+        well defined — override only `work_order` to restyle the data block,
+        override `prompt` to control the whole layout.
+
+        NOT included: the completion protocol. That block is half of the verdict
+        contract (the executor injects a sidecar path, then reads back that exact
+        path), so it belongs to the runner (`build_verdict_preamble`) and is
+        prepended after rendering — a prompt renderer cannot break it.
+        """
+        self._prompt_renderer = fn
+        return fn
+
+    def get_prompt_renderer(self) -> Callable[[Any], str]:
+        """The registered prompt-body renderer, or the library default."""
+        if self._prompt_renderer is not None:
+            return self._prompt_renderer
+        from agent_flow.runners.base import render_prompt
+
+        return render_prompt
 
     def on(self, event: str, *, node: str | list[str] | tuple[str, ...] | None = None) -> Callable[[Hook], Hook]:
         """Register an OBSERVING hook for a lifecycle `event` (decorator).

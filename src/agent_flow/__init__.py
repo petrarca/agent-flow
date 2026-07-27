@@ -135,9 +135,11 @@ from agent_flow.runners import (
     MockAgentContext,
     MockExecutor,
     OpenCodeRunner,
+    PromptParts,
     compose_prompt,
     get_executor,
     get_runner,
+    render_prompt,
 )
 from agent_flow.runners.executor import AgentContentFailedError, AgentCrashError, AgentTimeoutError
 from agent_flow.utils import default_temp_base, resolve_run_dir
@@ -242,7 +244,9 @@ __all__ = [
     # node builder: one-call node for the common "run one agent" case
     "agent_node",
     "build_work_order",
-    # work-order rendering (override via FlowRegistry.work_order)
+    # prompt rendering (override via FlowRegistry.prompt / .work_order)
+    "PromptParts",
+    "render_prompt",
     "render_work_order_xml",
     "render_work_order_lines",
     "DEFAULT_WORK_ORDER_RENDERER",

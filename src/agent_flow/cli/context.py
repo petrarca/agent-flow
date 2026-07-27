@@ -25,5 +25,6 @@ class RunCliContext:
     default_agent_dir: str  # fallback agent-definitions dir when unset by CLI/env
     default_run_dir: str  # fallback run_dir ({param} templating allowed)
     params_model: type | None  # optional pydantic-settings model for -p validation
+    run_context: tuple[str, ...] = ()  # run-wide context SOURCES declared on the FlowDef (paths/globs; content read per node)
     registry: object = None  # optional FlowRegistry (named gates/exports/hooks); None -> engine default
     version: str | None = None  # the CONSUMER's app version (shown by `version`); None -> show agent-flow only

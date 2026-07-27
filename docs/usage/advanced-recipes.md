@@ -171,7 +171,7 @@ concurrently. Cap total concurrency with `build_flow(..., llm_concurrency=2)`.
 A global directive every agent should see — e.g. from your CLI:
 
 ```python
-build_flow(nodes, name="my-pipeline", shared_instructions=brief)
+build_flow(nodes, name="my-pipeline", run_instructions=brief)
 ```
 
 ```bash
@@ -281,7 +281,7 @@ already exist (runtime-populated params fall back to their defaults). `--only`
 and `--start-from` are **mutually exclusive** — setting both is an error.
 CLI/programmatic only — not a persisted config setting.
 
-## Change how the work order is rendered
+## Change how the prompt is rendered
 
 A node's `inputs` are rendered into the prompt as **XML tags** (the default):
 
@@ -307,6 +307,38 @@ from agent_flow import render_work_order_lines
 registry.work_order(render_work_order_lines)      # opt back into KEY: value
 ```
 
+### Take over the whole prompt body
+
+`work_order` restyles the data block. To control the **entire** layout — every
+channel, in your own order and wording — register a prompt renderer instead. It
+receives the channels unassembled:
+
+```python
+from agent_flow import render_prompt   # the default, if you want to fall back
+
+@registry.prompt
+def all_xml(parts):
+    out = []
+    for tag in ("run_context", "run_instructions", "node_context",
+                "node_instructions", "node_runtime_instructions", "attempt_instruction"):
+        if (val := getattr(parts, tag)):
+            out.append(f"<{tag}>\n{val}\n</{tag}>")
+    out.append(f"<work_order>\n{parts.work_order}\n</work_order>")
+    return "\n".join(out)
+```
+
+The two seams compose as a **pipeline**, so setting both is unambiguous: the
+work-order renderer produces `parts.work_order`, then the prompt renderer lays
+out the body. `parts.inputs` keeps the work order structured, so a prompt
+renderer can ignore the rendered text and format the data itself.
+
+**One thing you cannot render: the completion protocol.** That block is half of
+the verdict contract — the executor injects a control-file path and then reads
+back that exact path — so it is owned by the runner and prepended after your
+renderer runs. To change it, implement `build_verdict_preamble` on a runner,
+which moves the instruction and the harvest together. See
+[input-plane](../design/orchestrator/input-plane.md).
+
 Or supply your own — any `(resolved: dict[str, str]) -> str`:
 
 ```python
@@ -328,7 +360,7 @@ per node — and the engine reads them and puts their content in the prompt:
 ```python
 # every agent gets the security + style rules:
 build_flow(nodes, name="p",
-           shared_context=["{run_dir}/rules/security.md", "{run_dir}/rules/coding-standards.md"])
+           run_context=["{run_dir}/rules/security.md", "{run_dir}/rules/coding-standards.md"])
 
 # only the architecture node also gets the architecture rules:
 agent_node("architecture", "architecture-analyst",
@@ -341,7 +373,7 @@ Sources are paths or globs, may template run params (`{run_dir}`, `{product_key}
 Content is injected *before* the inline instructions at each scope. See
 [input-plane.md](../design/orchestrator/input-plane.md). (At Tier 1/2, read the
 files yourself — or use `agent_flow.read_context_blocks(...)` — and pass the
-resulting string as `run_agent(shared_context=...)`.)
+resulting string as `run_agent(run_context=...)`.)
 
 ## Get typed output from an agent
 
