@@ -44,11 +44,11 @@ from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
-# Liveness / timeout budget default (seconds). Owned here (the neutral runner
-# contract) because it is a field default on AgentInvocation. The subprocess
-# executor treats it as an idle deadline; an in-process executor may use it as a
-# wall-clock cap hint. agent_runtime re-exports it for backward compatibility.
-DEFAULT_IDLE_TIMEOUT_S = 120
+# Liveness / timeout budget default (seconds). Defined in the pure `const` leaf
+# (both this Tier-1 module and the Tier-3 engine need it, so it cannot live in
+# either) and re-exported from here — it is a field default on AgentInvocation
+# below, and agent_runtime + node_builder import it from this module.
+from agent_flow.const import DEFAULT_IDLE_TIMEOUT_S as DEFAULT_IDLE_TIMEOUT_S
 
 # Model contract. The library NEVER hardcodes a model. When no model is
 # configured (param/env/CLI/programmatic), the runner omits --model so the

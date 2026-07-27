@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from agent_flow.gates import Continue, Gate, GateContext, GoTo, Restart, Stop
+from agent_flow.utils import resolve_duration
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -105,6 +106,10 @@ class RunContext:
     # LAST (after the build-time per-node instructions), so it is the most recent
     # standing guidance before the work order — additive, last-word override.
     node_instructions: dict[str, str] = field(default_factory=dict)
+    # The run's duration VOCABULARY {name: seconds}, from build_flow (RunConfig
+    # `durations:`). A node declares a portable NAME (Node.duration); this map
+    # supplies the environment's concrete seconds. Overlays the shipped defaults.
+    durations: dict[str, int] = field(default_factory=dict)
     # A ONE-TIME instruction for THIS run attempt only. Today it is set by the
     # engine from a gate's Restart/GoTo `instruction`, but the field's nature is
     # general: a single-attempt instruction handed to a node's next run, not
@@ -149,6 +154,10 @@ class Node:
                    input fails the node BEFORE its agent runs, mapped through
                    `criticality` like any other node error. An in-process impl
                    receives the validated instance as `inv.input_obj`.
+    duration       optional DECLARED duration name ("short"/"normal"/"long", or
+                   any name the run's `durations` map defines). Portable intent;
+                   build_flow resolves it to seconds and REJECTS an unknown name
+                   at build time, so a typo cannot survive to run time.
     agent          optional INFORMAL display label: the agent this node runs.
                    Purely cosmetic — the engine never uses it for logic (a node's
                    work is its `run` callable). Set automatically by agent_node;
@@ -165,6 +174,7 @@ class Node:
     max_cycles: int = DEFAULT_MAX_CYCLES
     result_schema: object = None
     input_schema: object = None
+    duration: str = ""
     agent: str = ""
     # Optional result->params export hook. After the node completes (and is not
     # re-running), the engine derives keys from the node's result and merges them
@@ -316,6 +326,7 @@ async def interpret(
     run_context: tuple[str, ...] = (),
     agent_dir: str = "",
     node_instructions: dict[str, str] | None = None,
+    durations: dict[str, int] | None = None,
     registry: Any = None,
     one_time_instruction: str = "",
 ) -> NodeOutcome:
@@ -377,6 +388,7 @@ async def interpret(
                         run_context=run_context,
                         agent_dir=agent_dir,
                         node_instructions=dict(node_instructions or {}),
+                        durations=dict(durations or {}),
                         one_time_instruction=attempt_instruction,
                     )
                 )
@@ -526,6 +538,17 @@ async def _apply_exports(node: Node, result: Any, obj: Any, log: Callable[[str],
         log(f"node {node.name}: exports failed ({exc}) — ignored")
 
 
+def _check_durations(nodes: list[Node], durations: dict[str, int]) -> None:
+    """Reject an unknown duration name at BUILD time, with the whole graph in hand.
+
+    Same instinct as plan_groups rejecting cycles here: a typo'd duration must not
+    survive until that node's turn comes, halfway through a paid run.
+    """
+    for node in nodes:
+        if node.duration:
+            resolve_duration(node.name, node.duration, durations)
+
+
 def build_flow(
     nodes: list[Node],
     *,
@@ -538,6 +561,7 @@ def build_flow(
     run_context: Iterable[str] | None = None,
     agent_dir: str = "",
     node_instructions: dict[str, str] | None = None,
+    durations: dict[str, int] | None = None,
     backend: str = "inprocess",
     registry: Any = None,
 ):
@@ -600,6 +624,8 @@ def build_flow(
 
     run_context_t = tuple(run_context or ())
     node_instructions_d = dict(node_instructions or {})
+    durations_d = dict(durations or {})
+    _check_durations(nodes, durations_d)
     planned = plan_groups(nodes)  # fail fast on cycles/unknown deps at build time
     by_name = {n.name: n for n in nodes}
     group_index = {key: i for i, (key, _) in enumerate(planned)}  # group key -> plan position
@@ -658,6 +684,7 @@ def build_flow(
                 run_context=run_context_t,
                 agent_dir=agent_dir,
                 node_instructions=node_instructions_d,
+                durations=durations_d,
                 registry=registry,
                 one_time_instruction=attempt_instruction,
             )

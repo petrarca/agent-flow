@@ -159,7 +159,14 @@ class RunConfig(BaseSettings):
     )
     idle_timeout_s: int = Field(
         default=DEFAULT_IDLE_TIMEOUT_S,
-        description="Liveness timeout (s): kill an agent only after this long with no event/sidecar. Per-node idle_timeout_s overrides.",
+        description="Liveness timeout (s): kill an agent only after this long with no event/sidecar. Used by nodes that declare no `duration`.",
+    )
+    durations: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Duration vocabulary {name: seconds} for nodes that declare a portable `duration` "
+            "(e.g. {long: 900}). Overlays the shipped short/normal/long, so retuning one name keeps the rest."
+        ),
     )
 
     # The YAML --config path for the current construction. Stashed on the class

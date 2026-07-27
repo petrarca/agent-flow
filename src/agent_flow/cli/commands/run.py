@@ -283,6 +283,7 @@ def _build_and_run(
         run_context=run_context,
         agent_dir=cfg.agent_dir,
         node_instructions=cfg.node_instructions,
+        durations=cfg.durations,
         backend=cfg.backend,
         registry=registry,
     )

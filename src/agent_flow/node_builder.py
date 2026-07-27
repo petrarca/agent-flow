@@ -29,7 +29,7 @@ from agent_flow.runners import AgentInvocation, MockExecutor, get_executor
 from agent_flow.runners.base import PromptParts, render_prompt
 from agent_flow.runners.executor import AgentExecutor
 from agent_flow.runners.inprocess import InProcessExecutor
-from agent_flow.utils import resolve_template
+from agent_flow.utils import resolve_duration, resolve_template
 
 
 def control_path(node_name: str) -> str:
@@ -172,7 +172,7 @@ def agent_node(
     input_schema: object = None,
     max_cycles: int = 1,
     model: str | None = None,
-    idle_timeout_s: int | None = None,
+    duration: str | None = None,
     agent_dir: str | None = None,
     exports: Callable[[dict], Any] | dict[str, str] | None = None,
     export_ref: str | None = None,
@@ -204,7 +204,13 @@ def agent_node(
         result_schema: optional ResultSchema | JSON-schema dict | pydantic
             BaseModel subclass for the agent's `result` payload (injected +
             validated, never fails the run).
-        model / idle_timeout_s: per-node runtime overrides.
+        model: per-node runtime override.
+        duration: how long this node is EXPECTED to take, as a name from the
+            duration vocabulary ("short"/"normal"/"long", or any name the run
+            config's `durations:` defines). Portable INTENT — the run config maps
+            it to concrete seconds. Unset means the run-wide idle timeout. An
+            unknown name is a hard error at BUILD time (build_flow validates the
+            whole graph), never a silent fallback.
         agent_dir: optional per-node override of where agent DEFINITIONS live
             (opencode `--dir`). Defaults to the flow's build_flow(agent_dir=...).
             Templated; absolute after templating.
@@ -301,12 +307,17 @@ def agent_node(
         # params. Empty ("") means "no model" -> the runner omits --model and the
         # runtime resolves it. The library never substitutes a hardcoded model.
         eff_model = model or ctx.params.get("model") or ""
-        # idle_timeout_s: a per-node override (agent_node arg) wins; else the
-        # run-wide value from params (RunConfig / CLI --idle-timeout); else the
-        # library default. No number is hardcoded on the node.
-        eff_idle = int(idle_timeout_s if idle_timeout_s is not None else (ctx.params.get("idle_timeout_s") or DEFAULT_IDLE_TIMEOUT_S))
+        # Liveness budget: the node's declared `duration` NAME resolves against
+        # the run's vocabulary (build_flow already rejected an unknown name; this
+        # is the sole guard when a Tier-2 flow calls interpret() without
+        # build_flow). Unset falls back to the run-wide value, which still rides
+        # `params` (read per node at run time) rather than the build-time
+        # `durations` map — the two differ by TIMING, not inconsistency. No number
+        # is hardcoded on the node: the flow carries intent, the run carries seconds.
+        run_wide_idle = int(ctx.params.get("idle_timeout_s") or DEFAULT_IDLE_TIMEOUT_S)
+        eff_idle = resolve_duration(name, duration, ctx.durations) if duration else run_wide_idle
         log = _node_logger()
-        log(f"node {name}: agent={agent} runtime={runtime} model={eff_model} idle_timeout_s={eff_idle}")
+        log(f"node {name}: agent={agent} runtime={runtime} model={eff_model} duration={duration or '(run-wide)'} idle_timeout_s={eff_idle}")
         # on_event_factory is a typed RunContext field (engine plumbing), NOT a
         # params key — see RunContext.on_event_factory. We build the per-event
         # callback with the NODE name (not the agent): the node is the DAG unit
@@ -410,6 +421,7 @@ def agent_node(
         max_cycles=max_cycles,
         result_schema=result_schema,
         input_schema=input_schema,
+        duration=duration or "",
         agent=agent,
         exports=exports,
         export_ref=export_ref,

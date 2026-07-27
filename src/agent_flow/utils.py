@@ -1,14 +1,43 @@
 """Small general-purpose utilities (no library-domain concepts).
 
 Currently: `{param}` template expansion, resolving the run directory (including a
-per-platform temp default when the consumer specifies none), and a friendly
-optional-dependency guard.
+per-platform temp default when the consumer specifies none), the duration-name
+lookup (over the vocabulary in `const`), and a friendly optional-dependency guard.
+
+Depends only on the pure `const` leaf, so both the engine (tier 3) and the
+runners (tier 1) may use these helpers without creating a cycle. The duration
+NUMBERS live in `const`; the LOOKUP behaviour lives here.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+
+from agent_flow.const import DEFAULT_DURATIONS
+
+
+def duration_table(durations: dict[str, int] | None) -> dict[str, int]:
+    """The run's duration vocabulary: the shipped names, overlaid by the run's own.
+
+    Merged (not replaced) so a run config that retunes one name — `{long: 900}` —
+    keeps `short`/`normal` working instead of silently emptying the vocabulary.
+    """
+    return {**DEFAULT_DURATIONS, **(durations or {})}
+
+
+def resolve_duration(node: str, name: str, durations: dict[str, int] | None) -> int:
+    """Map a declared duration NAME to seconds; an unknown name is a hard error.
+
+    Deliberately not a fallback: a typo'd duration must fail loudly, naming the
+    vocabulary it could have used. Silent degradation to a default is the exact
+    failure mode the flow/run split exists to remove.
+    """
+    table = duration_table(durations)
+    if name not in table:
+        known = ", ".join(sorted(table))
+        raise ValueError(f"node {node!r}: unknown duration {name!r} (known: {known}) — define it in the run config's `durations:` map")
+    return int(table[name])
 
 
 def require_extra(module: str, extra: str, feature: str):

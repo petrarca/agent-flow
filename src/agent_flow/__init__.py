@@ -40,6 +40,8 @@ Public API (the authoritative list is `__all__` below):
         # run configuration / settings
         RunConfig, build_run_config, get_settings, init_settings, clear_settings,
         parse_params, resolve_run_dir, default_temp_base,
+        # duration vocabulary (portable node intent -> seconds)
+        DEFAULT_DURATIONS, duration_table,
         # runtime pre-flight checks
         Check, check, fatal_failures,
         # environment
@@ -142,7 +144,7 @@ from agent_flow.runners import (
     render_prompt,
 )
 from agent_flow.runners.executor import AgentContentFailedError, AgentCrashError, AgentTimeoutError
-from agent_flow.utils import default_temp_base, resolve_run_dir
+from agent_flow.utils import DEFAULT_DURATIONS, default_temp_base, duration_table, resolve_run_dir
 
 
 def _resolve_version() -> str:
@@ -216,6 +218,8 @@ __all__ = [
     "runtime_param",
     "runtime_param_fields",
     "resolve_run_dir",
+    "DEFAULT_DURATIONS",
+    "duration_table",
     "default_temp_base",
     # result-schema seam (typed agent output)
     "ResultSchema",

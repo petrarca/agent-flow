@@ -63,9 +63,15 @@ class NodeDef(BaseModel):
     # defaults to `name` (the common case where name == agent == impl_ref).
     impl_ref: str | None = None
 
+    # How long this node is EXPECTED to take, as a portable name from the
+    # duration vocabulary ("short"/"normal"/"long", or any name the run config
+    # defines). The flow declares the INTENT; the run config maps the name to
+    # concrete seconds (`durations:`). A raw second-count does not belong here —
+    # it is an environment fact, not a property of the pipeline.
+    duration: str | None = None
+
     # Per-node runtime overrides.
     model: str | None = None
-    idle_timeout_s: int | None = None
     agent_dir: str | None = None
 
     @model_validator(mode="after")
