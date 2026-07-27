@@ -59,7 +59,8 @@ def _node(name, run, **kw):
     return Node(name=name, run=run, **kw)
 
 
-def test_declarative_exports_merge_into_run_context():
+@pytest.mark.anyio
+async def test_declarative_exports_merge_into_run_context():
     init_run_context({"product_key": "demo"})
 
     def run(ctx):
@@ -67,7 +68,7 @@ def test_declarative_exports_merge_into_run_context():
         return {"analysis_timestamp": "2026-07-25T00:00:00Z", "pipeline_commit": "abc1234", "status": "ok"}
 
     node = _node("readiness", run, exports={"analysis_timestamp": "analysis_timestamp", "pipeline_commit": "pipeline_commit"})
-    out = interpret(node, run_dir=__import__("pathlib").Path("/tmp"), params={"product_key": "demo"}, on_error=lambda n, e: "degraded")
+    out = await interpret(node, run_dir=__import__("pathlib").Path("/tmp"), params={"product_key": "demo"}, on_error=lambda n, e: "degraded")
     assert out.status == "ok"
     ctx = get_run_context()
     assert ctx.get("analysis_timestamp") == "2026-07-25T00:00:00Z"
@@ -76,18 +77,20 @@ def test_declarative_exports_merge_into_run_context():
     assert ctx.get("status") is None
 
 
-def test_callable_exports_full_control():
+@pytest.mark.anyio
+async def test_callable_exports_full_control():
     init_run_context({})
 
     def run(ctx):
         return {"result": {"mode": "validation"}}
 
     node = _node("readiness", run, exports=lambda r: {"mode": r["result"]["mode"].upper()})
-    interpret(node, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
+    await interpret(node, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
     assert get_run_context().get("mode") == "VALIDATION"
 
 
-def test_exports_reads_typed_object_when_result_schema_set():
+@pytest.mark.anyio
+async def test_exports_reads_typed_object_when_result_schema_set():
     # When a result_schema is used, the result dict carries the validated object
     # under _result_obj; exports (declarative AND callable) see the TYPED object,
     # so a consumer reads attributes directly — no _result_obj key digging.
@@ -101,30 +104,32 @@ def test_exports_reads_typed_object_when_result_schema_set():
 
     # declarative: field name resolves as an ATTRIBUTE on the typed object
     node = _node("readiness", run, exports={"pipeline_commit": "pipeline_commit"})
-    interpret(node, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
+    await interpret(node, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
     assert get_run_context().get("pipeline_commit") == "abc1234"
 
     # callable: receives the typed object directly
     clear_run_context()
     init_run_context({})
     node2 = _node("r2", run, exports=lambda o: {"ready": o.ready})
-    interpret(node2, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
+    await interpret(node2, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
     assert get_run_context().get("ready") == "yes"
 
 
-def test_missing_result_field_is_skipped_not_error():
+@pytest.mark.anyio
+async def test_missing_result_field_is_skipped_not_error():
     init_run_context({})
 
     def run(ctx):
         return {"status": "ok"}  # no 'mode' field
 
     node = _node("n", run, exports={"mode": "mode"})
-    out = interpret(node, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
+    out = await interpret(node, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
     assert out.status == "ok"
     assert get_run_context().get("mode") is None
 
 
-def test_exports_error_is_ignored():
+@pytest.mark.anyio
+async def test_exports_error_is_ignored():
     init_run_context({})
 
     def run(ctx):
@@ -134,11 +139,12 @@ def test_exports_error_is_ignored():
         raise RuntimeError("boom")
 
     node = _node("n", run, exports=bad)
-    out = interpret(node, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
+    out = await interpret(node, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
     assert out.status == "ok"  # exports failure never fails the node
 
 
-def test_downstream_node_sees_exported_value_in_params():
+@pytest.mark.anyio
+async def test_downstream_node_sees_exported_value_in_params():
     init_run_context({"product_key": "demo"})
     seen = {}
 
@@ -151,19 +157,20 @@ def test_downstream_node_sees_exported_value_in_params():
         return {"status": "ok"}
 
     up = _node("up", upstream, exports={"mode": "mode"})
-    interpret(up, run_dir=__import__("pathlib").Path("/tmp"), params={"product_key": "demo"}, on_error=lambda n, e: "degraded")
+    await interpret(up, run_dir=__import__("pathlib").Path("/tmp"), params={"product_key": "demo"}, on_error=lambda n, e: "degraded")
     down = _node("down", downstream)
-    interpret(down, run_dir=__import__("pathlib").Path("/tmp"), params={"product_key": "demo"}, on_error=lambda n, e: "degraded")
+    await interpret(down, run_dir=__import__("pathlib").Path("/tmp"), params={"product_key": "demo"}, on_error=lambda n, e: "degraded")
     assert seen["mode"] == "validation"
 
 
-def test_exports_applied_on_cross_node_goto_too():
+@pytest.mark.anyio
+async def test_exports_applied_on_cross_node_goto_too():
     init_run_context({})
 
     def run(ctx):
         return {"mode": "migration"}
 
     node = _node("n", run, exports={"mode": "mode"}, gate=lambda ctx: GoTo("other"))
-    out = interpret(node, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
+    out = await interpret(node, run_dir=__import__("pathlib").Path("/tmp"), params={}, on_error=lambda n, e: "degraded")
     assert out.goto == "other"
     assert get_run_context().get("mode") == "migration"  # published before the jump

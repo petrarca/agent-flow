@@ -118,6 +118,14 @@ print(result)  # {'hello': NodeOutcome(status='ok', ...)}
 subprocess inherits it. Call it first. `run_flow` compiles the FlowDef and runs
 it in one call; the default **in-process backend** needs no further setup.
 
+> **Already on an event loop?** `run_flow` is a blocking one-liner (it starts an
+> event loop for you). From inside a FastAPI handler or a notebook that is already
+> running a loop, call the async twin instead — same arguments, same result:
+> `result = await arun_flow(flow, registry=registry, mock_agents=True)`. The
+> engine is async-first; the sync `run_flow` / `run_cli` are thin wrappers over
+> it. (Your `mock_agent` / in-process `impl` may also be `async def` if it awaits
+> an async agent library — see [recipes.md](recipes.md).)
+
 `--mock-agents` (the `mock_agents=True` run param) is a **substitution mode**,
 not a runtime: for any node whose agent has a registered `mock_agent`, that
 deterministic behaviour runs in-process — no subprocess, no tokens. Nodes without

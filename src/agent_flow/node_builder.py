@@ -42,14 +42,14 @@ def _node_logger():
     same formatted stream as the engine's node logs; standalone (Tier-1/2 without
     a Prefect run context) it degrades to the plain logger.
     """
-    import logging
-
     try:
         from prefect.logging import get_run_logger
 
         return get_run_logger().info
-    except Exception:  # noqa: BLE001 - no active run context (or Prefect absent) -> stdlib
-        return logging.getLogger("agent_flow").info
+    except Exception:  # noqa: BLE001 - no active run context (or Prefect absent) -> loguru
+        from loguru import logger
+
+        return logger.info
 
 
 def resolve_work_order(inputs: dict[str, str], params: dict[str, Any]) -> dict[str, str]:
@@ -161,12 +161,12 @@ def agent_node(
     """
     inputs = inputs or {}
 
-    def run(ctx: RunContext) -> dict:
-        import logging
+    async def run(ctx: RunContext) -> dict:
+        from loguru import logger
 
         from agent_flow.core import read_context_blocks
 
-        warn = logging.getLogger("agent_flow").warning
+        warn = logger.warning
         # Expose the run_dir to input templates as {run_dir}, alongside params.
         tmpl = {**ctx.params, "run_dir": str(ctx.run_dir)}
         resolved_inputs = resolve_work_order(inputs, tmpl)
@@ -219,7 +219,7 @@ def agent_node(
         # library default. No number is hardcoded on the node.
         eff_idle = int(idle_timeout_s if idle_timeout_s is not None else (ctx.params.get("idle_timeout_s") or DEFAULT_IDLE_TIMEOUT_S))
         log = _node_logger()
-        log("node %s: agent=%s runtime=%s model=%s idle_timeout_s=%s", name, agent, runtime, eff_model, eff_idle)
+        log(f"node {name}: agent={agent} runtime={runtime} model={eff_model} idle_timeout_s={eff_idle}")
         # on_event_factory is a typed RunContext field (engine plumbing), NOT a
         # params key — see RunContext.on_event_factory. We build the per-event
         # callback with the NODE name (not the agent): the node is the DAG unit
@@ -259,12 +259,8 @@ def agent_node(
         # mode is designed to override everything, including impl nodes).
         _mock_behaviour = registry.get_mock_agent(agent) if (mock_on and registry is not None and registry.has_mock_agent(agent)) else None
         if _mock_behaviour is not None:
-            log(
-                "node %s: --mock-agents ON -> MockExecutor (agent=%s behaviour=%s)",
-                name,
-                agent,
-                getattr(_mock_behaviour, "__name__", repr(_mock_behaviour)),
-            )
+            _behaviour_name = getattr(_mock_behaviour, "__name__", repr(_mock_behaviour))
+            log(f"node {name}: --mock-agents ON -> MockExecutor (agent={agent} behaviour={_behaviour_name})")
             executor = MockExecutor(_mock_behaviour, work_order=resolved_inputs, tmpl=tmpl)
         elif impl is not None:
             # In-process runs are labeled "inproc" (their canonical runtime), NOT
@@ -273,16 +269,11 @@ def agent_node(
             executor = InProcessExecutor(impl)
         else:
             executor = get_executor(runtime)
-        result = executor.run(inv)
+        logger.debug(f"node {name}: executor={type(executor).__name__} prompt_chars={len(inv.prompt)} inputs={list(resolved_inputs)}")
+        result = await executor.run(inv)
         log(
-            "node %s: agent=%s -> %s in %.1fs (tokens=%d cost=$%.4f completion=%s)",
-            name,
-            agent,
-            result.control.get("status"),
-            result.duration_s,
-            result.tokens,
-            result.cost,
-            result.completion,
+            f"node {name}: agent={agent} -> {result.control.get('status')} in {result.duration_s:.1f}s "
+            f"(tokens={result.tokens} cost=${result.cost:.4f} completion={result.completion})"
         )
         # Hand the gate the control envelope plus a little telemetry, under keys
         # unlikely to collide with the agent's own result fields. `_result_obj`

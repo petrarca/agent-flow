@@ -1,5 +1,6 @@
 """Unit tests for FlowRegistry + its wiring into the engine (interpret/build_flow)."""
 
+import anyio
 import pytest
 
 from agent_flow.engine import Node, build_flow, interpret
@@ -110,7 +111,9 @@ def test_fire_observing_hooks():
 def _run_one(node, registry=None):
     init_run_context({})
     try:
-        return interpret(node, run_dir=__import__("pathlib").Path("."), params={}, on_error=lambda n, e: "degraded", registry=registry)
+        return anyio.run(
+            lambda: interpret(node, run_dir=__import__("pathlib").Path("."), params={}, on_error=lambda n, e: "degraded", registry=registry)
+        )
     finally:
         clear_run_context()
 
@@ -147,7 +150,7 @@ def test_export_ref_applied_to_run_context():
     init_run_context({})
     try:
         node = Node(name="a", run=lambda ctx: {"stack": "python"}, export_ref="pub")
-        interpret(node, run_dir=__import__("pathlib").Path("."), params={}, on_error=lambda n, e: "degraded", registry=r)
+        anyio.run(lambda: interpret(node, run_dir=__import__("pathlib").Path("."), params={}, on_error=lambda n, e: "degraded", registry=r))
         from agent_flow.run_context import get_run_context
 
         assert get_run_context().get("stack") == "python"
@@ -155,7 +158,8 @@ def test_export_ref_applied_to_run_context():
         clear_run_context()
 
 
-def test_after_node_hook_fires_via_build_flow():
+@pytest.mark.anyio
+async def test_after_node_hook_fires_via_build_flow():
     r = FlowRegistry()
     fired = []
 
@@ -164,12 +168,13 @@ def test_after_node_hook_fires_via_build_flow():
         fired.append((node.name, outcome.status))
 
     node = Node(name="a", run=lambda ctx: {"ok": True})
-    result = build_flow([node], name="t", registry=r)(run_dir="")
+    result = await build_flow([node], name="t", registry=r)(run_dir="")
     assert result["a"].status == "ok"
     assert fired == [("a", "ok")]
 
 
-def test_all_lifecycle_events_fire_in_order():
+@pytest.mark.anyio
+async def test_all_lifecycle_events_fire_in_order():
     r = FlowRegistry()
     ev = []
     r.on("before_group")(lambda group: ev.append(("bg", [n.name for n in group])))
@@ -180,7 +185,7 @@ def test_all_lifecycle_events_fire_in_order():
         Node(name="a", run=lambda ctx: {}),
         Node(name="b", run=lambda ctx: {}, depends_on=["a"]),
     ]
-    build_flow(nodes, name="t", registry=r)(run_dir="")
+    await build_flow(nodes, name="t", registry=r)(run_dir="")
     assert ev == [
         ("bg", ["a"]),
         ("bn", "a"),
@@ -193,16 +198,18 @@ def test_all_lifecycle_events_fire_in_order():
     ]
 
 
-def test_node_scoped_hook_fires_only_for_target():
+@pytest.mark.anyio
+async def test_node_scoped_hook_fires_only_for_target():
     r = FlowRegistry()
     hit = []
     r.on("after_node", node="b")(lambda node, out: hit.append(node.name))
     nodes = [Node(name="a", run=lambda ctx: {}), Node(name="b", run=lambda ctx: {}, depends_on=["a"])]
-    build_flow(nodes, name="t", registry=r)(run_dir="")
+    await build_flow(nodes, name="t", registry=r)(run_dir="")
     assert hit == ["b"]  # only the scoped node, not 'a'
 
 
-def test_node_scoped_list():
+@pytest.mark.anyio
+async def test_node_scoped_list():
     r = FlowRegistry()
     hit = []
     r.on("before_node", node=["a", "c"])(lambda node: hit.append(node.name))
@@ -211,11 +218,12 @@ def test_node_scoped_list():
         Node(name="b", run=lambda ctx: {}, depends_on=["a"]),
         Node(name="c", run=lambda ctx: {}, depends_on=["b"]),
     ]
-    build_flow(nodes, name="t", registry=r)(run_dir="")
+    await build_flow(nodes, name="t", registry=r)(run_dir="")
     assert sorted(hit) == ["a", "c"]
 
 
-def test_on_error_hook_fires():
+@pytest.mark.anyio
+async def test_on_error_hook_fires():
     r = FlowRegistry()
     errs = []
     r.on("on_error")(lambda node, exc: errs.append((node.name, str(exc))))
@@ -224,7 +232,7 @@ def test_on_error_hook_fires():
         raise RuntimeError("kaboom")
 
     nodes = [Node(name="a", run=boom, criticality="degrade")]
-    build_flow(nodes, name="t", registry=r)(run_dir="")
+    await build_flow(nodes, name="t", registry=r)(run_dir="")
     assert errs and errs[0][0] == "a" and "kaboom" in errs[0][1]
 
 
@@ -233,9 +241,10 @@ def test_node_scope_rejected_for_group_event():
         FlowRegistry().on("before_group", node="a")
 
 
-def test_default_registry_when_none():
+@pytest.mark.anyio
+async def test_default_registry_when_none():
     # build_flow with no registry seeds a default (built-in gates); a node using
     # a built-in gate ref resolves without the caller supplying a registry.
     node = Node(name="a", run=lambda ctx: {"ok": True}, gate_ref="rerun_on_signal", gate_args={"target": "a"})
-    result = build_flow([node], name="t")(run_dir="")
+    result = await build_flow([node], name="t")(run_dir="")
     assert result["a"].status == "ok"  # no sidecar -> rerun_on_signal returns Continue

@@ -8,6 +8,7 @@ result_obj surfaced to the gate as ctx.obj) holds as for the subprocess path.
 
 from pathlib import Path
 
+import pytest
 from pydantic import BaseModel
 
 from agent_flow.core.agent_runtime import AgentResult
@@ -66,49 +67,66 @@ def test_adapt_result_rejects_unsupported():
 # --- InProcessExecutor ------------------------------------------------------
 
 
-def test_inprocess_executor_calls_impl_and_adapts(tmp_path):
+@pytest.mark.anyio
+async def test_inprocess_executor_calls_impl_and_adapts(tmp_path):
     def impl(inv):
         # A mock PydanticAI-like agent: reads the (composed) prompt, returns typed.
         assert "PRODUCT_KEY" in inv.prompt
         return Classification(label="ok", confidence=1.0)
 
     ex = InProcessExecutor(impl, name="pydantic")
-    res = ex.run(_inv(run_dir=tmp_path, result_schema=PydanticSchema(Classification)))
+    res = await ex.run(_inv(run_dir=tmp_path, result_schema=PydanticSchema(Classification)))
     assert isinstance(res.result_obj, Classification)
     assert res.completion == "completed"
     assert res.duration_s >= 0.0
     assert res.runtime == "pydantic"  # the executor stamps its own name
 
 
-def test_inprocess_executor_default_runtime_label(tmp_path):
+@pytest.mark.anyio
+async def test_inprocess_executor_supports_async_impl(tmp_path):
+    # An async impl (the PydanticAI shape: `await agent.run(...)`) is awaited
+    # inline on the loop — the payoff of the async-first migration.
+    async def impl(inv):
+        return Classification(label="async", confidence=0.99)
+
+    res = await InProcessExecutor(impl, name="pydantic-ai").run(_inv(run_dir=tmp_path, result_schema=PydanticSchema(Classification)))
+    assert isinstance(res.result_obj, Classification)
+    assert res.result_obj.label == "async"
+
+
+@pytest.mark.anyio
+async def test_inprocess_executor_default_runtime_label(tmp_path):
     # The default in-process runtime label is "inproc".
-    res = InProcessExecutor(lambda inv: {"status": "ok"}).run(_inv(run_dir=tmp_path))
+    res = await InProcessExecutor(lambda inv: {"status": "ok"}).run(_inv(run_dir=tmp_path))
     assert res.runtime == "inproc"
 
 
-def test_inprocess_executor_stamps_runtime_over_impl_result(tmp_path):
+@pytest.mark.anyio
+async def test_inprocess_executor_stamps_runtime_over_impl_result(tmp_path):
     # An impl returning a bare AgentResult (own runtime) does NOT override the
     # executor's authoritative label — the executor stamps it.
     def impl(inv):
         return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.5, runtime="bogus", control={"status": "ok"})
 
-    res = InProcessExecutor(impl).run(_inv(run_dir=tmp_path))
+    res = await InProcessExecutor(impl).run(_inv(run_dir=tmp_path))
     assert res.runtime == "inproc"
 
 
-def test_inprocess_executor_writes_no_sidecar(tmp_path):
+@pytest.mark.anyio
+async def test_inprocess_executor_writes_no_sidecar(tmp_path):
     # The whole point: no control sidecar on disk for an in-process run.
     def impl(inv):
         return {"status": "ok"}
 
-    InProcessExecutor(impl).run(_inv(run_dir=tmp_path))
+    await InProcessExecutor(impl).run(_inv(run_dir=tmp_path))
     assert list(tmp_path.iterdir()) == []  # nothing written
 
 
 # --- end-to-end through a node + gate ---------------------------------------
 
 
-def test_agent_node_impl_runs_in_process_and_gate_reads_typed_obj(tmp_path):
+@pytest.mark.anyio
+async def test_agent_node_impl_runs_in_process_and_gate_reads_typed_obj(tmp_path):
     def classify(inv):
         return Classification(label="incident", confidence=0.8)
 
@@ -126,14 +144,15 @@ def test_agent_node_impl_runs_in_process_and_gate_reads_typed_obj(tmp_path):
         gate=gate,
         impl=classify,
     )
-    interpret(node, run_dir=tmp_path, params={}, on_error=lambda n, e: "degraded")
+    await interpret(node, run_dir=tmp_path, params={}, on_error=lambda n, e: "degraded")
     assert isinstance(seen["obj"], Classification)
     assert seen["obj"].label == "incident"
     # No sidecar for the in-process node.
     assert not any(p.name.endswith(".control.json") for p in tmp_path.iterdir())
 
 
-def test_agent_node_impl_content_failure_surfaces_to_gate(tmp_path):
+@pytest.mark.anyio
+async def test_agent_node_impl_content_failure_surfaces_to_gate(tmp_path):
     # An impl signals a content verdict by returning a non-ok AgentResult; the
     # agent-node surfaces it to the gate exactly like a sidecar status.
     def impl(inv):
@@ -146,14 +165,15 @@ def test_agent_node_impl_content_failure_surfaces_to_gate(tmp_path):
         return Continue()
 
     node = agent_node("n", "a", inputs={"K": "v"}, gate=gate, impl=impl)
-    interpret(node, run_dir=tmp_path, params={}, on_error=lambda n, e: "degraded")
+    await interpret(node, run_dir=tmp_path, params={}, on_error=lambda n, e: "degraded")
     assert seen["status"] == "needs_rerun"
 
 
 # --- FlowDef impl_ref + registry.agent_impl ---------------------------------
 
 
-def test_registry_agent_impl_and_flowdef_impl_ref(tmp_path):
+@pytest.mark.anyio
+async def test_registry_agent_impl_and_flowdef_impl_ref(tmp_path):
     from agent_flow.flowdef import FlowDef, NodeDef, compile_flow
 
     reg = FlowRegistry()
@@ -177,7 +197,7 @@ def test_registry_agent_impl_and_flowdef_impl_ref(tmp_path):
     from dataclasses import replace as dc_replace
 
     node = dc_replace(node, gate=_gate)
-    interpret(node, run_dir=tmp_path, params={}, on_error=lambda n, e: "degraded", registry=reg)
+    await interpret(node, run_dir=tmp_path, params={}, on_error=lambda n, e: "degraded", registry=reg)
     assert isinstance(seen["obj"], Classification)
     assert seen["obj"].label == "from-registry"
 

@@ -63,11 +63,23 @@ pipeline comes down to five capabilities. agent-flow delivers each directly:
 
 ## Feature shortlist
 
+- **Async-first, sync-friendly** — the engine core runs on
+  [`anyio`](https://anyio.readthedocs.io/): async-native agent libraries
+  (**PydanticAI**) are first-class in-process citizens (write an `async def` impl
+  that `await`s the agent — no bridge), and you can embed the flow in a
+  consumer's own event loop with `await arun_flow(...)` (a FastAPI handler, a
+  notebook). It stays additive: `run_flow` / `run_cli` / `run_agent` keep their
+  blocking signatures (thin `anyio.run` wrappers over the async natives
+  `arun_flow` / `arun_agent`), and every consumer callable — impls, gates,
+  exports, hooks — may be **sync OR async**; the engine does the right thing
+  either way. Write async where your agent library is async, plain `def` where it
+  isn't.
 - **Declarative FlowDef surface** — author a pipeline as DATA: a `FlowDef` of
   `NodeDef`s (pydantic, serializable to JSON/YAML, validated before it runs).
   Gates/exports/runs/schemas are referenced BY NAME and resolved via a
-  `FlowRegistry`; `run_flow(flow, …)` runs it, `run_cli(flow)` gives a CLI. It
-  compiles to the same runtime nodes as the lower-level `agent_node` form.
+  `FlowRegistry`; `run_flow(flow, …)` (or `await arun_flow(flow, …)`) runs it,
+  `run_cli(flow)` gives a CLI. It compiles to the same runtime nodes as the
+  lower-level `agent_node` form.
 - **Flow engine** — `depends_on` dependencies, `parallel_group` fan-out, a
   fail-fast plan (cycles/unknown deps caught at build time); with gates it is a
   flow (not a pure DAG — see jump-back below).
@@ -104,13 +116,15 @@ pipeline comes down to five capabilities. agent-flow delivers each directly:
 - **The input plane** — ordered prompt composition with **content injection** of
   context files/globs, `{param}` templating, a per-run brief (`-i` / file), and
   per-node run-time instructions (`--instruct NODE=…` / config, additive last-word).
-- **Agent execution seam** — `AgentExecutor` (ABC). `SubprocessExecutor`'s
-  per-runtime wire details are an `AgentRunner` strategy (OpenCode today, Claude
-  Code stubbed) with per-runner preflight checks and an `AgentRunnerInfo` doctor
-  view. An **in-process** agent (e.g. PydanticAI) skips the subprocess/sidecar
-  entirely — a direct call returning a typed object into the same result
-  contract — attached via `agent_node(impl=…)` or `registry.agent_impl(name)` +
-  `NodeDef.impl_ref`.
+- **Agent execution seam** — `AgentExecutor` (ABC; `async def run`).
+  `SubprocessExecutor`'s per-runtime wire details are an `AgentRunner` strategy
+  (OpenCode today, Claude Code stubbed) with per-runner preflight checks and an
+  `AgentRunnerInfo` doctor view. An **in-process** agent (e.g. PydanticAI) skips
+  the subprocess/sidecar entirely — a direct call returning a typed object into
+  the same result contract — attached via `agent_node(impl=…)` or
+  `registry.agent_impl(name)` + `NodeDef.impl_ref`. The impl may be `async def`
+  (awaited inline on the loop) or plain `def` (a blocking sync impl is offloaded
+  to a worker thread so it never stalls the loop).
 - **Mock agents for tests & dev (`--mock-agents`)** — a substitution MODE, not a
   runtime: register a deterministic `mock_agent(inv, ctx) -> envelope` by agent
   name (`FlowRegistry.mock_agent`), and any node running that agent executes it
@@ -125,8 +139,9 @@ pipeline comes down to five capabilities. agent-flow delivers each directly:
   precedence chain; domain params typed via a `params_model` (missing required →
   fail fast, exit 2).
 - **Pluggable execution backend** — `FlowBackend` (ABC): a Prefect-free
-  **InProcessBackend** (default; threadpool + semaphore + stdlib logging, no temp
-  server) or an opt-in **PrefectBackend** (`--backend prefect` / `build_flow(...,
+  **InProcessBackend** (default; an `anyio` task group for parallel fan-out +
+  `anyio.Semaphore` for the concurrency limit + stdlib logging, no temp server)
+  or an opt-in **PrefectBackend** (`--backend prefect` / `build_flow(...,
   backend="prefect")`) for the run UI, scheduling, and scale. The core
   primitives + flow logic stay Prefect-free (import-isolation-guarded).
 - **Three usage tiers** — from one supervised agent up to a declared graph (below).
@@ -198,7 +213,12 @@ flow = FlowDef(
 )
 
 run_flow(flow, product_key="acme", runtime="opencode")
+# …or, on an event loop:  await arun_flow(flow, product_key="acme", runtime="opencode")
 ```
+
+`run_flow` is the blocking one-liner (a thin `anyio.run` wrapper); from inside an
+event loop (a FastAPI handler, a notebook), call its async twin
+`await arun_flow(flow, …)` instead so it composes on the same loop with no bridge.
 
 Hand `flow` to the reusable CLI instead of calling `run_flow` directly to get
 `run_cli(flow)`'s `run` / `flow nodes` / `version` subcommands for free. Pass
@@ -269,8 +289,9 @@ a structured work-order value — no prompt parsing, no LLM. See
 [`docs/design/orchestrator/mock-agent.md`](docs/design/orchestrator/mock-agent.md).
 
 **Orchestration backend.** `build_flow` compiles your graph into a runnable flow
-callable that dispatches execution to the selected backend. The default
-`InProcessBackend` runs in-process (threadpool + semaphore + stdlib logging, no
+callable (an async coroutine — `run_flow` / `run_cli` bridge it for you) that
+dispatches execution to the selected backend. The default `InProcessBackend` runs
+in-process (an `anyio` task group + `anyio.Semaphore` + stdlib logging, no
 Prefect); the opt-in `PrefectBackend` (`build_flow(..., backend="prefect")`)
 routes execution through [**Prefect**](https://www.prefect.io/) for parallel
 fan-out, concurrency limits, and a run UI. The backend is a swappable seam — the

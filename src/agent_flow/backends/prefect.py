@@ -7,6 +7,12 @@ server-side limit on the task tag. Choose it (`--backend prefect` /
 AGENT_FLOW_BACKEND=prefect) when you want the Prefect UI, run history,
 scheduling, or scale. The lightweight default is InProcessBackend.
 
+Since the async-first migration the node closure is a coroutine, so nodes run as
+ASYNC Prefect tasks inside an ASYNC `@flow` — Prefect 3 is async underneath, so
+this is a more natural fit. `.submit()` stays synchronous (it only blocks while
+submitting), and the blocking future gather is offloaded to a worker thread so it
+never stalls the engine's event loop.
+
 Prefect is imported lazily INSIDE the methods so that importing this module (or
 `agent_flow.backends`) never pulls Prefect — the core primitives stay
 Prefect-free, guarded by the import-isolation test.
@@ -14,15 +20,17 @@ Prefect-free, guarded by the import-isolation test.
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+import anyio
 
 from agent_flow.backends.base import FlowBackend, RunNode
 from agent_flow.engine import NodeOutcome
 
 
 class PrefectBackend(FlowBackend):
-    """Prefect-3 backed backend: @task/@flow, submit/wait, server-side limit."""
+    """Prefect-3 backed backend: async @task/@flow, submit/wait, server-side limit."""
 
     name = "prefect"
 
@@ -30,14 +38,20 @@ class PrefectBackend(FlowBackend):
         # The concurrency tag applied to every node task (for a shared limit).
         self._llm_tag = llm_tag
 
-    def run_session(self, name: str, work: Callable[[], dict[str, NodeOutcome]]) -> dict[str, NodeOutcome]:
-        """Run the walk inside a Prefect @flow so submit()/get_run_logger() work."""
+    async def run_session(self, name: str, work: Callable[[], Awaitable[dict[str, NodeOutcome]]]) -> dict[str, NodeOutcome]:
+        """Run the walk inside an async Prefect @flow so submit()/get_run_logger() work."""
         from prefect import flow
 
-        return flow(work, name=name)()
+        return await flow(work, name=name)()
 
-    def _execute_parallel(self, node_names: list[str], run_node: RunNode) -> dict[str, NodeOutcome]:
-        """Fan out nodes as Prefect tasks and gather; a non-completed task degrades."""
+    async def _execute_parallel(self, node_names: list[str], run_node: RunNode) -> dict[str, NodeOutcome]:
+        """Fan out nodes as async Prefect tasks and gather; a non-completed task degrades.
+
+        `run_node` is a coroutine function, so `task(run_node)` is an async task.
+        `.submit()` is synchronous (submission only); the blocking `wait` + result
+        gather is run in a worker thread via anyio.to_thread so the engine's event
+        loop is never stalled while the task runner drains.
+        """
         from prefect import task
         from prefect.futures import wait
 
@@ -45,42 +59,45 @@ class PrefectBackend(FlowBackend):
         # it participates in the run UI + the tag concurrency limit.
         node_task = task(run_node, tags=[self._llm_tag], name="node")
         futures = {name: node_task.submit(name) for name in node_names}
-        wait(list(futures.values()))
-        out: dict[str, NodeOutcome] = {}
-        for name, fut in futures.items():
-            out[name] = fut.result() if fut.state.is_completed() else NodeOutcome(status="degraded")
-        return out
 
-    def apply_concurrency_limit(self, tag: str, limit: int, info: Callable[[str], None], warn: Callable[[str], None]) -> None:
+        def _gather() -> dict[str, NodeOutcome]:
+            wait(list(futures.values()))
+            return {name: (fut.result() if fut.state.is_completed() else NodeOutcome(status="degraded")) for name, fut in futures.items()}
+
+        return await anyio.to_thread.run_sync(_gather)
+
+    async def apply_concurrency_limit(self, tag: str, limit: int, info: Callable[[str], None], warn: Callable[[str], None]) -> None:
         """Best-effort GLOBAL concurrency limit on a task tag (idempotent)."""
-        import anyio
         import httpx
         from prefect.client.orchestration import get_client
         from prefect.exceptions import PrefectException
 
-        async def _create() -> None:
+        # Already inside the engine's event loop — await the client directly
+        # (no nested anyio.run, which would fail with a running loop).
+        try:
             async with get_client() as client:
                 await client.create_concurrency_limit(tag=tag, concurrency_limit=limit)
-
-        # A pre-existing limit or a transient client error must not fail the run.
-        try:
-            anyio.run(_create)
             info(f"LLM concurrency limit set to {limit}")
         except (PrefectException, httpx.HTTPError, OSError) as exc:
             warn(f"concurrency limit setup skipped: {exc}")
 
-    def get_logger(self) -> logging.Logger:
-        """Prefect's run logger inside a flow, else the stdlib logger.
+    def get_logger(self) -> Any:
+        """Prefect's run logger inside a flow, else loguru.
 
-        run_group / build_flow call this outside a task context too, so degrade
-        gracefully when there is no active run (mirrors node_builder._node_logger).
+        Inside a flow/task, Prefect's `get_run_logger()` routes node lines into
+        the run UI; both it and loguru accept a single pre-formatted message, and
+        the engine only passes f-strings, so either works. run_group / build_flow
+        call this outside a task context too, so degrade gracefully to loguru when
+        there is no active run.
         """
         try:
             from prefect import get_run_logger
 
             return get_run_logger()
-        except Exception:  # noqa: BLE001 - no active run context -> stdlib
-            return logging.getLogger("agent_flow")
+        except Exception:  # noqa: BLE001 - no active run context -> loguru (house default)
+            from loguru import logger
+
+            return logger
 
     def bootstrap(self) -> None:
         """Set Prefect env defaults for a robust, self-contained local run.

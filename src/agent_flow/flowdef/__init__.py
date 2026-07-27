@@ -9,7 +9,7 @@ designer. `compile_flow(flow_def, registry)` turns it into the internal runtime
 
 from __future__ import annotations
 
-from agent_flow.flowdef.compile import compile_flow, run_flow
+from agent_flow.flowdef.compile import arun_flow, compile_flow, run_flow
 from agent_flow.flowdef.models import FlowDef, NodeDef
 
-__all__ = ["FlowDef", "NodeDef", "compile_flow", "run_flow"]
+__all__ = ["FlowDef", "NodeDef", "arun_flow", "compile_flow", "run_flow"]

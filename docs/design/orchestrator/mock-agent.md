@@ -250,14 +250,14 @@ mock run from a real one.
 ### `MockExecutor` is a sibling `AgentExecutor`
 
 `MockExecutor` implements the **`AgentExecutor`** seam (`runners/executor.py`,
-`run(inv) -> AgentResult`) — the same seam `SubprocessExecutor` and
+`async run(inv) -> AgentResult`) — the same seam `SubprocessExecutor` and
 `InProcessExecutor` implement. It is a **sibling** of them at the ABC level, not a
 subclass of either:
 
 - It is **not** a `SubprocessExecutor` subclass. `SubprocessExecutor`'s defining
-  behavior — always `Popen` a fresh process, supervise it by liveness, kill on
-  stale — is exactly what a mock lacks; subclassing would drag in machinery it
-  cannot use. (Note the precedent: opencode itself is **not** an executor subclass
+  behavior — always `anyio.open_process` a fresh process, supervise it by
+  liveness, kill on stale — is exactly what a mock lacks; subclassing would drag in
+  machinery it cannot use. (Note the precedent: opencode itself is **not** an executor subclass
   either — it is an `AgentRunner` that `SubprocessExecutor` *composes*. Runtimes
   plug in by composition, not inheritance.)
 - What `MockExecutor` and `SubprocessExecutor` genuinely **share** is only the

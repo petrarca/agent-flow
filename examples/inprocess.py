@@ -7,9 +7,17 @@ calls and maps the typed return onto the same `AgentResult` a subprocess agent
 would produce — so gates read `ctx.obj` identically, and nothing spawns a process
 or writes a control file.
 
+This example is also the ASYNC-FIRST showcase: an in-process impl may be a plain
+`def` OR an `async def`, and the two mix freely in one flow. `respond` is written
+`async def` — the exact shape a real PydanticAI agent takes (`await agent.run(…)`)
+— and the engine awaits it inline on its event loop. `classify` stays sync (the
+engine offloads a blocking sync impl to a worker thread so it never stalls the
+loop). Nothing about the FlowDef changes; you write async where your agent library
+is async, sync where it isn't.
+
 The pipeline:
 
-    classify  ->  respond
+    classify (sync)  ->  respond (async)
 
   - classify: reads the ticket text from the work order, returns a
     Classification{category, urgency}.
@@ -21,18 +29,22 @@ Two ways to attach an in-process impl are shown:
     the definition stays serializable;
   - (see the comment on `classify`) the imperative agent_node(impl=fn) form.
 
-Because every node is in-process, this example runs the flow PROGRAMMATICALLY via
-`run_flow` — there is no runtime to select, no agent-dir, and the opencode
-pre-flight (which the CLI `run_cli` applies) does not apply. `flow nodes`-style
-introspection is still available via `compile_flow` if you want it.
+Because every node is in-process, this example runs the flow PROGRAMMATICALLY.
+Two entry points are shown: `main` uses the sync `run_flow` (an anyio.run wrapper,
+for a plain script) and `amain` uses the async-native `arun_flow` (what you'd
+`await` from a FastAPI handler or notebook, on the same event loop). Neither
+selects a runtime or agent-dir; the opencode pre-flight (which the CLI applies)
+does not apply.
 
 Run:
     python -m examples.inprocess "the app crashes on login, urgent"
     python -m examples.inprocess            # uses the default ticket
+    python -m examples.inprocess --async "…" # drive it via arun_flow instead
 """
 
 from __future__ import annotations
 
+import anyio
 from pydantic import BaseModel
 
 from agent_flow import AgentInvocation, FlowDef, FlowRegistry, NodeDef
@@ -77,8 +89,14 @@ def classify(inv: AgentInvocation) -> Classification:
 
 
 @REGISTRY.agent_impl("respond")
-def respond(inv: AgentInvocation) -> DraftReply:
-    """A second mock agent: drafts a reply from the upstream classification.
+async def respond(inv: AgentInvocation) -> DraftReply:
+    """A second mock agent — written `async def`, the real PydanticAI shape.
+
+    This is the async-first payoff: a PydanticAI agent is driven with
+    `result = await agent.run(inv.prompt)`, so its agent-flow impl is naturally an
+    `async def`. The engine awaits it inline on its event loop — no thread bridge,
+    no wrapper. Here we `await anyio.sleep(0)` to stand in for that real await and
+    keep the example dependency-free; everything else is identical to a sync impl.
 
     The classify node publishes `category`/`urgency` downstream via `exports`
     (see the FlowDef). The engine templates them into THIS node's work-order
@@ -86,6 +104,7 @@ def respond(inv: AgentInvocation) -> DraftReply:
     — which is all an in-process impl receives. We parse them back out below; a
     real agent would just reason over `inv.prompt` as its input text.
     """
+    await anyio.sleep(0)  # stand-in for `await agent.run(...)` in a real PydanticAI agent
     category = inv_params(inv).get("category", "general")
     urgency = inv_params(inv).get("urgency", "normal")
     channel = "phone" if urgency == "high" else "email"
@@ -169,25 +188,55 @@ def capture(ctx):  # noqa: ANN001
     return Continue()
 
 
-def main(ticket: str = "the app crashes on login, urgent") -> None:
-    """Run the two in-process agents via run_flow and print their typed results.
-
-    We run PROGRAMMATICALLY (run_flow), not via run_cli, because the CLI's
-    pre-flight is currently subprocess-oriented (it defaults runtime=opencode and
-    requires an agent-dir) and would abort an all-in-process flow. See issue #11.
-    run_flow skips that gate — nothing here spawns a process.
-    """
-    from agent_flow import run_flow
-
-    CAPTURED.clear()
-    result = run_flow(FLOW, registry=REGISTRY, ticket=ticket)
-
+def _print_results(ticket: str, result: dict) -> None:
     print(f"\nticket: {ticket!r}\n")
     for name in ("classify", "respond"):
         print(f"  [{name}] {result[name].status} -> {CAPTURED.get(name)!r}")
 
 
+def main(ticket: str = "the app crashes on login, urgent") -> None:
+    """Run the two in-process agents via the SYNC `run_flow` and print results.
+
+    We run PROGRAMMATICALLY (run_flow), not via run_cli, because the CLI's
+    pre-flight is currently subprocess-oriented (it defaults runtime=opencode and
+    requires an agent-dir) and would abort an all-in-process flow. See issue #11.
+    run_flow skips that gate — nothing here spawns a process.
+
+    `run_flow` is a thin `anyio.run` wrapper: it starts an event loop, awaits the
+    flow (so the async `respond` impl runs), and returns the result — the right
+    entry for a plain blocking script.
+    """
+    from agent_flow import run_flow
+
+    CAPTURED.clear()
+    result = run_flow(FLOW, registry=REGISTRY, ticket=ticket)
+    _print_results(ticket, result)
+
+
+async def amain(ticket: str = "the app crashes on login, urgent") -> None:
+    """Run the same flow via the ASYNC-NATIVE `arun_flow` — no event-loop bridge.
+
+    This is what you'd `await` from inside a FastAPI handler or a notebook that is
+    already on an event loop: `await arun_flow(...)` composes on the SAME loop, so
+    the async `respond` impl and any async gates/hooks run without a nested
+    `anyio.run`. Behaviour and output are identical to `main`; only the entry
+    point differs.
+    """
+    from agent_flow import arun_flow
+
+    CAPTURED.clear()
+    result = await arun_flow(FLOW, registry=REGISTRY, ticket=ticket)
+    _print_results(ticket, result)
+
+
 if __name__ == "__main__":
     import sys
 
-    main(sys.argv[1] if len(sys.argv) > 1 else "the app crashes on login, urgent")
+    args = [a for a in sys.argv[1:] if a != "--async"]
+    ticket_arg = args[0] if args else "the app crashes on login, urgent"
+    if "--async" in sys.argv[1:]:
+        # Demonstrate the async-native entry (here we start the loop ourselves;
+        # a FastAPI/notebook caller would just `await amain(...)` on its own loop).
+        anyio.run(amain, ticket_arg)
+    else:
+        main(ticket_arg)

@@ -31,7 +31,7 @@ boundary crossing and avoids import cycles.
 
 from __future__ import annotations
 
-from agent_flow.core.agent_runtime import DEFAULT_IDLE_TIMEOUT_S, AgentResult, run_agent
+from agent_flow.core.agent_runtime import DEFAULT_IDLE_TIMEOUT_S, AgentResult, arun_agent, run_agent
 from agent_flow.core.context import read_context_blocks
 from agent_flow.core.control_protocol import build_control_preamble
 from agent_flow.core.env import load_env
@@ -43,6 +43,7 @@ from agent_flow.runners.executor import AgentContentFailedError, AgentCrashError
 __all__ = [
     # one supervised agent
     "run_agent",
+    "arun_agent",
     "AgentResult",
     "AgentTimeoutError",
     "AgentContentFailedError",

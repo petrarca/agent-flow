@@ -13,6 +13,14 @@ timestamp: 2026-07-23T07:51:35Z
 on stale, and reads its outcome from the [control sidecar](control-file.md). It
 is Prefect-agnostic and reused verbatim across all tiers.
 
+The supervisor is built on [`anyio`](https://anyio.readthedocs.io/): the process
+is spawned with `anyio.open_process`, reader tasks stream its stdout/stderr into
+memory object streams, and the liveness loop uses `anyio.move_on_after` for the
+idle deadline. The native entry is the coroutine **`arun_agent`**; the historical
+`run_agent` name is kept as a thin `anyio.run` wrapper so existing sync callers
+and examples are unchanged. The supervision *semantics* below are identical to
+the previous thread+queue implementation.
+
 Two directories, kept separate: **`run_dir`** is where the control sidecar is
 written and the base for relative artifact paths; **`agent_dir`** (optional) is
 where the runtime finds agent DEFINITIONS — for opencode it becomes `--dir`, and
@@ -33,7 +41,10 @@ not a working directory in the OS sense.
   process is finished immediately rather than waited on (opencode does not
   always exit promptly after the work is done).
 - On any stop the child **process group** is killed (SIGTERM → SIGKILL →
-  `proc.kill()`), so helper children never linger.
+  `proc.kill()`), so helper children never linger. The kill runs inside a
+  **shielded** anyio cancel scope, so cancellation (Ctrl-C, or a cancelled parent
+  task group) still reaps the whole group before propagating — no orphaned
+  opencode + MCP children, ever.
 
 This is agent-runtime supervision that no general-purpose orchestrator provides;
 it is the heart of Tier 1.
@@ -79,9 +90,9 @@ class AgentRunner(Protocol):
 ```
 
 `LaunchSpec` carries two things the executor needs but must not conflate: `argv`
-(the exact list passed to `Popen`) and `display` (a prompt-elided, human-safe
-one-liner for error messages — only the runner knows which part of the argv is the
-huge prompt payload).
+(the exact list passed to `anyio.open_process`) and `display` (a prompt-elided,
+human-safe one-liner for error messages — only the runner knows which part of the
+argv is the huge prompt payload).
 
 Everything else — supervision, kill, sidecar reading, telemetry, the DAG — is
 runtime-agnostic and written once. `AgentInvocation` carries the agent **name**
@@ -129,8 +140,9 @@ neutral view to one readable line when `--show-events` is on.
 ## Where it lives
 
 `src/agent_flow/core/agent_runtime.py` holds `SubprocessExecutor` (spawn +
-`_supervise` + kill + sidecar read) and the `run_agent` shim that delegates to
-it. The `src/agent_flow/runners/` package holds the seam types: `executor.py`
+`_supervise` + shielded kill + sidecar read; its `run` is `async def`) and the
+async `arun_agent` shim that delegates to it, plus the sync `run_agent`
+`anyio.run` wrapper. The `src/agent_flow/runners/` package holds the seam types: `executor.py`
 (`AgentExecutor` ABC, `AgentResult`, the shared `assemble_result` /
 `check_content_status`, and the `AgentTimeoutError` / `AgentContentFailedError` /
 `AgentCrashError` classes), `base.py` (`AgentRunner`, `AgentInvocation`, `Event`,

@@ -27,12 +27,28 @@ with no execution backend.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field, replace
+from inspect import isawaitable
 from pathlib import Path
 from typing import Any, Literal
 
 from agent_flow.gates import Continue, Gate, GateContext, GoTo, Restart, Stop
+
+
+async def _maybe_await(value: Any) -> Any:
+    """Await `value` if it is awaitable, else return it as-is.
+
+    The single dispatch point that makes every consumer callable additive: a
+    node's `run`, a gate, an export, and observing hooks may each be sync OR
+    async. Sync callables return a plain value (passed through); async ones
+    return a coroutine (awaited here). Miss a call site and async consumers
+    silently break — so ALL of them route through this.
+    """
+    if isawaitable(value):
+        return await value
+    return value
+
 
 Criticality = Literal["blocking", "degrade"]
 
@@ -103,7 +119,10 @@ class RunContext:
 
 # A node's work: perform the invocation, return whatever the gate will inspect
 # (typically the control dict or an AgentResult). May raise on hard failure.
-RunFn = Callable[[RunContext], Any]
+# Additive since the async-first migration: the callable may be sync (`def`) OR async (`async def`) —
+# the engine awaits an awaitable return via _maybe_await. agent_node's closure is
+# async; hand-written `run` nodes may be either.
+RunFn = Callable[[RunContext], Awaitable[Any] | Any]
 
 
 @dataclass(frozen=True)
@@ -255,7 +274,7 @@ def _make_node_emitter(on_node_event: Callable[[str, str, str | None, str], None
     return on_node_event
 
 
-def interpret(
+async def interpret(
     node: Node,
     *,
     run_dir: Path,
@@ -305,7 +324,7 @@ def interpret(
     pending_instruction = one_time_instruction
     while True:
         # Observing hook: before each run attempt (fires again on re-run cycles).
-        _fire_hook(registry, "before_node", node, log, node)
+        await _fire_hook(registry, "before_node", node, log, node)
         # Effective params = the passed params overlaid with the live run-context
         # snapshot, so this node sees any values UPSTREAM nodes exported. Snapshot
         # is taken at THIS node's start -> a stable view for its whole execution.
@@ -316,22 +335,24 @@ def interpret(
         attempt_instruction = pending_instruction
         pending_instruction = ""
         try:
-            result = node.run(
-                RunContext(
-                    node=node,
-                    run_dir=run_dir,
-                    cycles=cycles,
-                    params=eff_params,
-                    on_event_factory=on_event_factory,
-                    shared_instructions=shared_instructions,
-                    shared_context=shared_context,
-                    agent_dir=agent_dir,
-                    node_instructions=dict(node_instructions or {}),
-                    one_time_instruction=attempt_instruction,
+            result = await _maybe_await(
+                node.run(
+                    RunContext(
+                        node=node,
+                        run_dir=run_dir,
+                        cycles=cycles,
+                        params=eff_params,
+                        on_event_factory=on_event_factory,
+                        shared_instructions=shared_instructions,
+                        shared_context=shared_context,
+                        agent_dir=agent_dir,
+                        node_instructions=dict(node_instructions or {}),
+                        one_time_instruction=attempt_instruction,
+                    )
                 )
             )
         except Exception as exc:  # noqa: BLE001 - deliberately broad: the run callable is caller code
-            _fire_hook(registry, "on_error", node, log, node, exc)
+            await _fire_hook(registry, "on_error", node, log, node, exc)
             return NodeOutcome(status=on_error(node, exc))
 
         # The validated typed object (a pydantic instance when a result_schema was
@@ -341,11 +362,11 @@ def interpret(
         # The runtime label the executor stamped (agent nodes only; empty for a
         # hand-written run node). Carried onto every settled NodeOutcome below.
         runtime = result.get("_runtime", "") if isinstance(result, dict) else ""
-        directive = (
-            gate(GateContext(result=result, obj=obj, node=node, run_dir=run_dir, cycles=cycles, params=eff_params, agent_dir=agent_dir))
-            if gate
-            else Continue()
-        )
+        if gate:
+            gctx = GateContext(result=result, obj=obj, node=node, run_dir=run_dir, cycles=cycles, params=eff_params, agent_dir=agent_dir)
+            directive = await _maybe_await(gate(gctx))
+        else:
+            directive = Continue()
 
         if isinstance(directive, Stop):
             log(f"node {node.name}: gate -> Stop ({directive.reason})")
@@ -361,7 +382,7 @@ def interpret(
 
         # Node is settling (Continue / cross-node GoTo / exhausted Restart): apply
         # its result->params exports to the run-context for DOWNSTREAM nodes.
-        _apply_exports(node, result, obj, log, registry)
+        await _apply_exports(node, result, obj, log, registry)
 
         if isinstance(directive, GoTo) and directive.node != node.name:
             # Cross-node jump-back: the node itself is done; the walker decides
@@ -370,12 +391,12 @@ def interpret(
             # node's next run.
             log(f"node {node.name}: gate -> GoTo {directive.node} ({directive.instruction})")
             outcome = NodeOutcome(status="ok", goto=directive.node, instruction=directive.instruction, runtime=runtime)
-            _fire_hook(registry, "after_node", node, log, node, outcome)
+            await _fire_hook(registry, "after_node", node, log, node, outcome)
             return outcome
 
         # Continue, or an exhausted Restart.
         outcome = NodeOutcome(status="ok", runtime=runtime)
-        _fire_hook(registry, "after_node", node, log, node, outcome)
+        await _fire_hook(registry, "after_node", node, log, node, outcome)
         return outcome
 
 
@@ -402,23 +423,25 @@ def _resolve_gate(node: Node, registry: Any):
     return None
 
 
-def _fire_hook(registry: Any, event: str, node: Node, log: Callable[[str], None], *fire_args: Any) -> None:
+async def _fire_hook(registry: Any, event: str, node: Node, log: Callable[[str], None], *fire_args: Any) -> None:
     """Fire an observing per-node hook (scoped to node.name). Never steers flow.
 
     An observer must never break the run — a failing hook is logged and ignored.
     `fire_args` are the event's payload (e.g. (node,) / (node, outcome) /
     (node, exc)); node.name is passed as the scope key so node-scoped hooks match.
+    A hook may be sync or async: registry.fire returns whatever the handlers
+    returned, and any awaitables are awaited here (async observers welcome).
     """
     try:
-        registry.fire(event, *fire_args, _node_name=node.name)
+        await _maybe_await(registry.fire(event, *fire_args, _node_name=node.name))
     except Exception as exc:  # noqa: BLE001 - an observer must never break the run
         log(f"node {node.name}: {event} hook failed ({exc}) — ignored")
 
 
-def _fire_group_hook(registry: Any, event: str, group: list[Node], warn: Callable[[str], None], *extra: Any) -> None:
+async def _fire_group_hook(registry: Any, event: str, group: list[Node], warn: Callable[[str], None], *extra: Any) -> None:
     """Fire an observing group hook (before_group/after_group). Not node-scoped."""
     try:
-        registry.fire(event, group, *extra)
+        await _maybe_await(registry.fire(event, group, *extra))
     except Exception as exc:  # noqa: BLE001 - an observer must never break the run
         warn(f"{event} hook failed ({exc}) — ignored")
 
@@ -426,16 +449,16 @@ def _fire_group_hook(registry: Any, event: str, group: list[Node], warn: Callabl
 def _make_group_runner(backend_impl: Any, registry: Any, run_node: Any, logger: Any):
     """Wrap the backend's group execution with before_group/after_group hooks."""
 
-    def run_group(group: list[Node]) -> dict[str, NodeOutcome]:
-        _fire_group_hook(registry, "before_group", group, logger.warning)
-        outcomes = backend_impl.run_group(group, run_node)
-        _fire_group_hook(registry, "after_group", group, logger.warning, outcomes)
+    async def run_group(group: list[Node]) -> dict[str, NodeOutcome]:
+        await _fire_group_hook(registry, "before_group", group, logger.warning)
+        outcomes = await backend_impl.run_group(group, run_node)
+        await _fire_group_hook(registry, "after_group", group, logger.warning, outcomes)
         return outcomes
 
     return run_group
 
 
-def _apply_exports(node: Node, result: Any, obj: Any, log: Callable[[str], None], registry: Any) -> None:
+async def _apply_exports(node: Node, result: Any, obj: Any, log: Callable[[str], None], registry: Any) -> None:
     """Merge a node's result-derived exports into the run-context service.
 
     The consumer's exports see the VALIDATED typed object when the node declared
@@ -454,9 +477,9 @@ def _apply_exports(node: Node, result: Any, obj: Any, log: Callable[[str], None]
     payload = obj if obj is not None else result
     try:
         if node.export_ref:
-            derived = dict(registry.get_export(node.export_ref)(payload) or {})
+            derived = dict(await _maybe_await(registry.get_export(node.export_ref)(payload)) or {})
         elif callable(spec):
-            derived = dict(spec(payload) or {})
+            derived = dict(await _maybe_await(spec(payload)) or {})
         else:
             derived = {param: v for param, fld in spec.items() if (v := _read_field(payload, fld)) is not _MISSING}
         if derived:
@@ -560,7 +583,7 @@ def build_flow(
         instruction. Empty for a normal forward run.
         """
 
-        def run_node(node_name: str) -> NodeOutcome:
+        async def run_node(node_name: str) -> NodeOutcome:
             node = by_name[node_name]
             started = time.monotonic()
             # Pop this node's pending one-time instruction (from a prior cross-node
@@ -574,17 +597,17 @@ def build_flow(
                 # duplicate the multi-line reason in the log.
                 summary = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
                 if n.criticality == "blocking":
-                    logger.error("BLOCKING node %s failed: %s", n.name, summary)
+                    logger.error(f"BLOCKING node {n.name} failed: {summary}")
                     _emit(n.name, "finish", "failed", n.agent)
                     raise NodeBlocked(f"{n.name}: {exc}") from exc
-                logger.warning("DEGRADE node %s failed: %s — continuing", n.name, summary)
+                logger.warning(f"DEGRADE node {n.name} failed: {summary} — continuing")
                 return "degraded"
 
-            logger.info("node %s: start (criticality=%s)", node.name, node.criticality)
+            logger.info(f"node {node.name}: start (criticality={node.criticality})")
             _emit(node.name, "start", None, node.agent)
             # on_event_factory / shared_instructions / shared_context / agent_dir
             # are build-time values threaded into every node.
-            outcome = interpret(
+            outcome = await interpret(
                 node,
                 run_dir=wd,
                 params=params,
@@ -600,13 +623,13 @@ def build_flow(
             )
             # Stamp the node's wall-clock duration (timed here, where it runs).
             outcome = replace(outcome, duration_s=time.monotonic() - started)
-            logger.info("node %s: %s (%.1fs)", node.name, outcome.status, outcome.duration_s)
+            logger.info(f"node {node.name}: {outcome.status} ({outcome.duration_s:.1f}s)")
             _emit(node.name, "finish", outcome.status, node.agent)
             return outcome
 
         return run_node
 
-    def _pipeline(run_dir: str = "", start_from: str = "", only: str = "", **params: Any) -> dict:
+    async def _pipeline(run_dir: str = "", start_from: str = "", only: str = "", **params: Any) -> dict:
         from agent_flow.run_context import init_run_context
         from agent_flow.utils import resolve_run_dir, resolve_template
 
@@ -625,21 +648,21 @@ def build_flow(
         wd = resolve_run_dir(resolved_run_dir, name=name)
         wd.mkdir(parents=True, exist_ok=True)
 
-        def _walk_session() -> dict[str, NodeOutcome]:
+        async def _walk_session() -> dict[str, NodeOutcome]:
             # Runs INSIDE the backend's execution context (a Prefect @flow for the
             # prefect backend; directly for local) — so the logger, concurrency
             # limit, and node submission all bind to that context here.
             logger = backend_impl.get_logger()
-            logger.info("run_dir: %s", wd)
+            logger.info(f"run_dir: {wd}")
             if llm_concurrency is not None:
-                backend_impl.apply_concurrency_limit(llm_tag, llm_concurrency, logger.info, logger.warning)
+                await backend_impl.apply_concurrency_limit(llm_tag, llm_concurrency, logger.info, logger.warning)
             # Run-scoped {node: one-time instruction} store; the walker fills it on
             # a cross-node GoTo, run_node drains it into the target's re-run.
             pending_instructions: dict[str, str] = {}
             run_node = _make_run_node(wd, params, logger, pending_instructions)
             run_group = _make_group_runner(backend_impl, registry, run_node, logger)
             start_index, single_group = _resolve_entry(start_from, only, by_name, group_index, node_group, logger)
-            results = _walk(
+            results = await _walk(
                 planned,
                 run_group=run_group,
                 group_index=group_index,
@@ -651,12 +674,12 @@ def build_flow(
                 pending_instructions=pending_instructions,
             )
             # Compact {node: status} summary — not the verbose NodeOutcome reprs.
-            logger.info("%s done: %s", name, {n: oc.status for n, oc in results.items()})
+            logger.info(f"{name} done: { {n: oc.status for n, oc in results.items()} }")
             return results
 
         backend_impl.bootstrap()
         try:
-            return backend_impl.run_session(name, _walk_session)
+            return await backend_impl.run_session(name, _walk_session)
         finally:
             backend_impl.teardown()
 
@@ -716,9 +739,9 @@ def _resolve_start_index(start_from: str, by_name, group_index, node_group, logg
     entry = sorted(n for n in by_name if group_index[node_group[n]] == start_index)
     skipped = sorted(n for n in by_name if group_index[node_group[n]] < start_index)
     if len(entry) > 1:
-        logger.info("start_from=%s: entering at PARALLEL group %s (all run), skipping %s", start_from, entry, skipped)
+        logger.info(f"start_from={start_from}: entering at PARALLEL group {entry} (all run), skipping {skipped}")
     else:
-        logger.info("start_from=%s: entering at %s, skipping %s", start_from, entry, skipped)
+        logger.info(f"start_from={start_from}: entering at {entry}, skipping {skipped}")
     return start_index
 
 
@@ -735,13 +758,13 @@ def _resolve_only_index(only: str, by_name, group_index, node_group, logger) -> 
     idx = _name_to_group_index(only, by_name, group_index, node_group, "only")
     members = sorted(n for n in by_name if group_index[node_group[n]] == idx)
     if len(members) > 1:
-        logger.info("only=%s: running PARALLEL group %s (all run), skipping everything else", only, members)
+        logger.info(f"only={only}: running PARALLEL group {members} (all run), skipping everything else")
     else:
-        logger.info("only=%s: running %s, skipping everything else", only, members)
+        logger.info(f"only={only}: running {members}, skipping everything else")
     return idx
 
 
-def _walk(
+async def _walk(
     planned,
     *,
     run_group,
@@ -773,7 +796,8 @@ def _walk(
     i = start_index
     while i < len(planned):
         _key, group = planned[i]
-        outcomes = run_group(group)
+        logger.debug(f"walk: group[{i}] {_key!r} -> nodes {[getattr(n, 'name', n) for n in group]}")
+        outcomes = await run_group(group)
         for n_name, oc in outcomes.items():
             results[n_name] = oc
         if single_group:
@@ -812,15 +836,15 @@ def _pick_jump_back(outcomes, node_group, group_index, current_i, jumps, by_name
         if target is None:
             continue
         if target not in by_name:
-            logger.warning("GoTo target %r is not a known node — ignoring", target)
+            logger.warning(f"GoTo target {target!r} is not a known node — ignoring")
             continue
         target_i = group_index[node_group[target]]
         if target_i >= current_i:
-            logger.warning("GoTo %r is not a backward jump — ignoring", target)
+            logger.warning(f"GoTo {target!r} is not a backward jump — ignoring")
             continue
         if jumps.get(target, 0) >= by_name[target].max_cycles:
-            logger.warning("GoTo %r exhausted (max_cycles) — proceeding", target)
+            logger.warning(f"GoTo {target!r} exhausted (max_cycles) — proceeding")
             continue
-        logger.info("jump-back to %r (re-running from its group)", target)
+        logger.info(f"jump-back to {target!r} (re-running from its group)")
         return target
     return None

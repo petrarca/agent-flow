@@ -12,6 +12,9 @@ class _Logger:
     def warning(self, *a, **k):
         pass
 
+    def debug(self, *a, **k):
+        pass
+
 
 def _linear(names):
     """A linear plan of solo groups + the index maps _walk/_resolve need."""
@@ -56,29 +59,32 @@ def test_resolve_accepts_group_name_and_member_node():
 
 
 def _run_recording(ran):
-    def run_group(group):
+    async def run_group(group):
         ran.append(group[0])
         return {group[0]: NodeOutcome(status="ok")}
 
     return run_group
 
 
-def test_walk_from_zero_runs_all():
+@pytest.mark.anyio
+async def test_walk_from_zero_runs_all():
     planned, gi, ng, bn = _linear(["a", "b", "c"])
     ran: list = []
-    _walk(planned, run_group=_run_recording(ran), group_index=gi, node_group=ng, by_name=bn, logger=_Logger())
+    await _walk(planned, run_group=_run_recording(ran), group_index=gi, node_group=ng, by_name=bn, logger=_Logger())
     assert ran == ["a", "b", "c"]
 
 
-def test_walk_start_index_skips_upstream_runs_forward():
+@pytest.mark.anyio
+async def test_walk_start_index_skips_upstream_runs_forward():
     planned, gi, ng, bn = _linear(["a", "b", "c"])
     ran: list = []
-    _walk(planned, run_group=_run_recording(ran), group_index=gi, node_group=ng, by_name=bn, logger=_Logger(), start_index=1)
+    await _walk(planned, run_group=_run_recording(ran), group_index=gi, node_group=ng, by_name=bn, logger=_Logger(), start_index=1)
     assert ran == ["b", "c"]  # 'a' skipped; entry at 'b', forward from there
 
 
-def test_walk_start_at_last_runs_only_it():
+@pytest.mark.anyio
+async def test_walk_start_at_last_runs_only_it():
     planned, gi, ng, bn = _linear(["a", "b", "c"])
     ran: list = []
-    _walk(planned, run_group=_run_recording(ran), group_index=gi, node_group=ng, by_name=bn, logger=_Logger(), start_index=2)
+    await _walk(planned, run_group=_run_recording(ran), group_index=gi, node_group=ng, by_name=bn, logger=_Logger(), start_index=2)
     assert ran == ["c"]

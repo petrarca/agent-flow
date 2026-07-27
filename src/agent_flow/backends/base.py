@@ -23,15 +23,16 @@ PRIMITIVE differs (a threadpool vs Prefect task submission). So this seam is an
 from __future__ import annotations
 
 import abc
-import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from agent_flow.engine import Node, NodeOutcome
 
-# A closure the engine hands the backend: run ONE node to a NodeOutcome. It is
-# fully backend-agnostic (it calls interpret + emits node events). The backend
-# only decides WHEN/HOW MANY run concurrently, never what running one means.
-RunNode = Callable[[str], NodeOutcome]
+# A coroutine closure the engine hands the backend: run ONE node to a
+# NodeOutcome. It is fully backend-agnostic (it awaits interpret + emits node
+# events). The backend only decides WHEN/HOW MANY run concurrently, never what
+# running one means.
+RunNode = Callable[[str], Awaitable[NodeOutcome]]
 
 
 class FlowBackend(abc.ABC):
@@ -48,7 +49,7 @@ class FlowBackend(abc.ABC):
 
     # --- template method (shared; do not override) -------------------------
 
-    def run_group(self, group: list[Node], run_node: RunNode) -> dict[str, NodeOutcome]:
+    async def run_group(self, group: list[Node], run_node: RunNode) -> dict[str, NodeOutcome]:
         """Execute one planned group and return per-node outcomes.
 
         Solo group -> run the single node inline. Parallel group (2+ nodes
@@ -59,28 +60,28 @@ class FlowBackend(abc.ABC):
         """
         if len(group) == 1:
             n = group[0]
-            return {n.name: run_node(n.name)}
-        self.get_logger().info("PARALLEL group: %s", [n.name for n in group])
+            return {n.name: await run_node(n.name)}
+        self.get_logger().info(f"PARALLEL group: {[n.name for n in group]}")
         names = [n.name for n in group]
-        outcomes = self._execute_parallel(names, run_node)
+        outcomes = await self._execute_parallel(names, run_node)
         # Defensive: any name the backend didn't return -> degraded (never drop a node).
         return {name: outcomes.get(name, NodeOutcome(status="degraded")) for name in names}
 
     # --- abstract primitives (backend-specific) ----------------------------
 
     @abc.abstractmethod
-    def run_session(self, name: str, work: Callable[[], dict[str, NodeOutcome]]) -> dict[str, NodeOutcome]:
-        """Execute the whole pipeline `work` closure within this backend's context.
+    async def run_session(self, name: str, work: Callable[[], Awaitable[dict[str, NodeOutcome]]]) -> dict[str, NodeOutcome]:
+        """Execute the whole pipeline `work` coroutine within this backend's context.
 
         `work` performs the DAG walk (calling back into run_group). A backend that
         needs an ambient execution context establishes it here: PrefectBackend
         runs `work` inside a `@flow` (so `.submit()` / `get_run_logger()` work);
-        InProcessBackend just calls `work()` directly. `name` labels the session (the
-        Prefect flow name). Returns `work`'s result unchanged.
+        InProcessBackend just awaits `work()` directly. `name` labels the session
+        (the Prefect flow name). Returns `work`'s result unchanged.
         """
 
     @abc.abstractmethod
-    def _execute_parallel(self, node_names: list[str], run_node: RunNode) -> dict[str, NodeOutcome]:
+    async def _execute_parallel(self, node_names: list[str], run_node: RunNode) -> dict[str, NodeOutcome]:
         """Run the named nodes CONCURRENTLY and return {name: outcome}.
 
         A node whose execution raised (rather than returning a NodeOutcome) may
@@ -91,12 +92,18 @@ class FlowBackend(abc.ABC):
         """
 
     @abc.abstractmethod
-    def apply_concurrency_limit(self, tag: str, limit: int, info: Callable[[str], None], warn: Callable[[str], None]) -> None:
+    async def apply_concurrency_limit(self, tag: str, limit: int, info: Callable[[str], None], warn: Callable[[str], None]) -> None:
         """Best-effort: bound concurrent node execution to `limit` (on tag `tag`)."""
 
     @abc.abstractmethod
-    def get_logger(self) -> logging.Logger:
-        """A logger for engine + node lines (run-tagged if the backend supports it)."""
+    def get_logger(self) -> Any:
+        """A logger for engine + node lines (run-tagged if the backend supports it).
+
+        Returns any object exposing `.info/.warning/.error` that accepts a single
+        pre-formatted message string — loguru's `logger` (InProcessBackend, the
+        house standard) or Prefect's `get_run_logger()` (PrefectBackend, so node
+        lines land in the run UI). The engine passes only f-string messages, so
+        both sinks behave identically."""
 
     @abc.abstractmethod
     def bootstrap(self) -> None:

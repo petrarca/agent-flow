@@ -7,6 +7,8 @@ Composition contract (final prompt order):
 import tempfile
 from pathlib import Path
 
+import anyio
+
 from agent_flow.engine import interpret
 from agent_flow.gates import Continue
 from agent_flow.node_builder import agent_node
@@ -26,21 +28,23 @@ def _capture_prompt(monkeypatch, node, *, shared="", params=None, run_dir=None, 
     class _FakeExecutor:
         name = "fake"
 
-        def run(self, inv):
+        async def run(self, inv):
             captured["prompt"] = inv.prompt
             captured["shared"] = inv.shared_instructions
             captured["shared_context"] = inv.shared_context
             return AgentResult(agent=inv.agent, exit_code=0, duration_s=0.0, control={"status": "ok"}, completion="completed")
 
     monkeypatch.setattr("agent_flow.node_builder.get_executor", lambda _runtime: _FakeExecutor())
-    interpret(
-        node,
-        run_dir=Path(run_dir) if run_dir else Path(tempfile.gettempdir()),
-        params=params or {},
-        on_error=lambda n, e: "degraded",
-        shared_instructions=shared,
-        shared_context=tuple(shared_context),
-        node_instructions=node_instructions or {},
+    anyio.run(
+        lambda: interpret(
+            node,
+            run_dir=Path(run_dir) if run_dir else Path(tempfile.gettempdir()),
+            params=params or {},
+            on_error=lambda n, e: "degraded",
+            shared_instructions=shared,
+            shared_context=tuple(shared_context),
+            node_instructions=node_instructions or {},
+        )
     )
     return captured
 

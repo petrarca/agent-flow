@@ -33,20 +33,30 @@ lazy import". `agent_flow.backends.FlowBackend` is an `abc.ABC` with a concrete
 template-method `run_group` (the solo-vs-parallel branch + failure->degraded
 mapping, identical for every backend) and backend-specific primitives:
 `run_session` (establish an execution context — a Prefect `@flow`, or nothing),
-`_execute_parallel` (the fan-out primitive — Prefect `.submit()` or a
-`ThreadPoolExecutor`), `apply_concurrency_limit`, `get_logger`, and
-`bootstrap`/`teardown` lifecycle hooks. `get_backend(name)` resolves one.
+`_execute_parallel` (the fan-out primitive — Prefect `.submit()` or an `anyio`
+task group), `apply_concurrency_limit`, `get_logger`, and `bootstrap`/`teardown`
+lifecycle hooks. `get_backend(name)` resolves one.
+
+Since the [engine](engine.md) is async-first, the execution methods are
+**coroutines** — `run_group`, `run_session`, `_execute_parallel`, and
+`apply_concurrency_limit` are `async def` (the engine `await`s them); the
+non-blocking `get_logger` / `bootstrap` / `teardown` stay synchronous.
 
 Two backends ship:
 
-- **InProcessBackend (default)** — in-process: a `ThreadPoolExecutor` for parallel
-  groups, a `threading.Semaphore` for the LLM concurrency limit, stdlib logging.
-  No Prefect, no temporary server, fast startup, one fewer heavy dependency at
-  run time. This is what an everyday single run uses.
-- **PrefectBackend (opt-in)** — the Prefect-3 behavior below (`@task`/`@flow`,
-  `submit()`/`wait()`, `get_run_logger()`, a global server-side concurrency
-  limit, the run UI). Prefect is imported lazily inside the backend, so nothing
-  is loaded unless you select it.
+- **InProcessBackend (default)** — in-process: an `anyio` **task group** for
+  parallel groups, an `anyio.Semaphore` for the LLM concurrency limit, stdlib
+  logging. No Prefect, no temporary server, fast startup, one fewer heavy
+  dependency at run time. This is what an everyday single run uses. A blocking
+  node's `NodeBlocked` propagates out of the task group and aborts the run
+  (unwrapped from anyio's `ExceptionGroup`); any other per-node error degrades
+  that node; a dropped node is backfilled to `degraded` — never lost.
+- **PrefectBackend (opt-in)** — the Prefect-3 behavior below, now as **async**
+  `@task`/`@flow` (a natural fit — Prefect is async underneath): `submit()`/
+  `wait()`, `get_run_logger()`, a global server-side concurrency limit, the run
+  UI. The blocking future-gather is offloaded to a worker thread so it never
+  stalls the engine's loop. Prefect is imported lazily inside the backend, so
+  nothing is loaded unless you select it.
 
 Select with `build_flow(nodes, backend="inprocess"|"prefect")`, the CLI
 `--backend inprocess|prefect`, or `AGENT_FLOW_BACKEND`. The **engine owns all flow

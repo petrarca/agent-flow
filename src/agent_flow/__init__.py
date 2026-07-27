@@ -9,8 +9,8 @@ the agent runtime (opencode, Claude Code, …) are both pluggable.
 Public API (the authoritative list is `__all__` below):
 
     from agent_flow import (
-        # Tier 1: one supervised agent (the primitive)
-        run_agent, AgentResult,
+        # Tier 1: one supervised agent (the primitive; arun_agent = async native)
+        run_agent, arun_agent, AgentResult,
         AgentTimeoutError, AgentContentFailedError, AgentCrashError,
         # runners (subprocess wire adapters) + the execution seam
         AgentRunner, AgentInvocation, Event,
@@ -63,6 +63,7 @@ from agent_flow.core import (
     PydanticSchema,
     ResultSchema,
     ValidationOutcome,
+    arun_agent,
     build_control_preamble,
     coerce_schema,
     load_env,
@@ -80,7 +81,7 @@ from agent_flow.engine import (
     interpret,
     plan_groups,
 )
-from agent_flow.flowdef import FlowDef, NodeDef, compile_flow, run_flow
+from agent_flow.flowdef import FlowDef, NodeDef, arun_flow, compile_flow, run_flow
 from agent_flow.gates import (
     Continue,
     Directive,
@@ -93,6 +94,7 @@ from agent_flow.gates import (
     rerun_on_named,
     rerun_on_signal,
 )
+from agent_flow.logging_setup import setup_logging
 from agent_flow.node_builder import agent_node, control_path
 from agent_flow.preflight import Check, check, fatal_failures
 from agent_flow.registry import FlowRegistry
@@ -153,6 +155,7 @@ __all__ = [
     "__version__",
     # agent execution
     "run_agent",
+    "arun_agent",
     "AgentResult",
     "AgentTimeoutError",
     "AgentContentFailedError",
@@ -219,6 +222,7 @@ __all__ = [
     "NodeDef",
     "compile_flow",
     "run_flow",
+    "arun_flow",
     # node builder: one-call node for the common "run one agent" case
     "agent_node",
     "control_path",
@@ -245,4 +249,6 @@ __all__ = [
     "fatal_failures",
     # env
     "load_env",
+    # logging (loguru + stdlib intercept)
+    "setup_logging",
 ]
