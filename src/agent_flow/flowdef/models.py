@@ -63,10 +63,19 @@ class NodeDef(BaseModel):
     # defaults to `name` (the common case where name == agent == impl_ref).
     impl_ref: str | None = None
 
-    # Per-node runtime overrides.
-    model: str | None = None
-    idle_timeout_s: int | None = None
-    agent_dir: str | None = None
+    # How long this node is EXPECTED to take, as a portable name from the
+    # duration vocabulary ("short"/"normal"/"long", or any name the run config
+    # defines). The flow declares the INTENT; the run config maps the name to
+    # concrete seconds (`durations:`). A raw second-count does not belong here —
+    # it is an environment fact, not a property of the pipeline.
+    #
+    # `model` and `agent_dir` deliberately do NOT live here: a provider/model
+    # string and a filesystem path are environment facts, not properties of the
+    # portable pipeline. Set them per node via the run config's `nodes:` section
+    # (RunConfig.nodes.<name>.model / .agent_dir), or run-wide via the top-level
+    # model / agent_dir. A hand-written (programmatic) flow may still pass them to
+    # agent_node() directly — that path is code, not serialized data.
+    duration: str | None = None
 
     @model_validator(mode="after")
     def _one_run_source(self) -> NodeDef:
@@ -90,14 +99,24 @@ class FlowDef(BaseModel):
     name: str = "agent-flow"
     nodes: list[NodeDef] = Field(min_length=1)
 
-    # Flow-wide (mirror build_flow's run-wide knobs). Named for their SCOPE:
-    # `run_*` spans the whole run; a NodeDef's `instructions`/`context` are one
-    # node. Same word, different scope — see docs/design/orchestrator/input-plane.md.
+    # Flow-wide PORTABLE declarations. Named for their SCOPE: `run_*` spans the
+    # whole run; a NodeDef's `instructions`/`context` are one node. Same word,
+    # different scope — see docs/design/orchestrator/input-plane.md.
+    #
+    # agent_dir / backend / llm_concurrency are NOT here: a filesystem path, a
+    # deployment choice, and an environment capacity are run config, not portable
+    # pipeline data. Supply them via run_config= / --config / the CLI / env.
     run_instructions: str = ""
     run_context: list[str] = Field(default_factory=list)
-    agent_dir: str = ""
-    backend: str = "inprocess"
-    llm_concurrency: int | None = None
+
+    # The flow's SIGNATURE: a registered params model BY NAME (registry
+    # .params_model) declaring the run parameters this pipeline needs —
+    # product_key, … — the values its nodes template as `{name}`. The mirror of
+    # NodeDef.input_schema, one scope up: a node declares its input contract, a
+    # flow declares its own. Kept as a NAME so the FlowDef stays serializable
+    # (the model class lives in code, like gates/schemas). Unset -> params pass
+    # through untyped, exactly as before.
+    params_schema: str | None = None
 
     @model_validator(mode="after")
     def _validate_graph(self) -> FlowDef:

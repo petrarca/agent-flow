@@ -9,34 +9,79 @@ them at run time (gates/exports) or the run uses them (schema).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import anyio
 
 from agent_flow.engine import Node
 from agent_flow.flowdef.models import FlowDef, NodeDef
 
+if TYPE_CHECKING:
+    from agent_flow.run_config import RunConfig
 
-def _build_pipeline_and_call(flow_def: FlowDef, registry, run_dir: str, start_from: str, only: str, params: dict):
+
+def _build_pipeline_and_call(
+    flow_def: FlowDef,
+    registry,
+    run_dir: str,
+    start_from: str,
+    only: str,
+    params: dict,
+    run_config: dict[str, Any] | RunConfig | None = None,
+):
     """Shared plumbing for (a)run_flow: build the flow callable + assemble the
     call kwargs. Returns (pipeline, call_kwargs). Both entry points differ only in
-    how they invoke the (async) pipeline callable."""
+    how they invoke the (async) pipeline callable.
+
+    `run_config` (a dict or a RunConfig) carries the run-side settings that used
+    to live on the FlowDef (agent_dir/backend/llm_concurrency) plus durations /
+    nodes / options. It is resolved through the SAME RunConfig source stack as the
+    CLI, so env / .env still apply below it."""
     from agent_flow.engine import build_flow
+    from agent_flow.run_config import build_run_config, validate_params
 
     if registry is None:
         from agent_flow.registry import FlowRegistry
 
         registry = FlowRegistry()
+    cfg = build_run_config(base=run_config)
     nodes = compile_flow(flow_def, registry)
+    # The flow's declared SIGNATURE applies here too — not only under run_cli —
+    # so a missing/invalid param fails the same way on both entry points. A
+    # ValidationError propagates (a library raises; the CLI catches and exits 2).
+    #
+    # OVERLAY, never replace: this path's `params` carries the FRAMEWORK keys too
+    # (runtime / mock_agents / model / idle_timeout_s — the reserved names an
+    # agent-node reads back out of the bag). A domain model ignores unknown
+    # fields, so validating the whole bag and taking the result would silently
+    # DROP them. Validated domain values win; everything else passes through.
+    if flow_def.params_schema:
+        model = registry.get_params_model(flow_def.params_schema)
+        params = {**params, **validate_params(model, params)}
     pipeline = build_flow(
         nodes,
         name=flow_def.name,
-        llm_concurrency=flow_def.llm_concurrency,
+        llm_concurrency=cfg.llm_concurrency,
+        # STANDING brief (flow) + this run's ADDITION (run_config instructions) as
+        # SEPARATE channels — neither dropped (the 0.3.0 bug this stage fixes).
         run_instructions=flow_def.run_instructions,
+        run_additional_instructions=cfg.resolved_instructions(),
         run_context=flow_def.run_context,
-        agent_dir=flow_def.agent_dir,
-        backend=flow_def.backend,
+        agent_dir=cfg.agent_dir,
+        backend=cfg.backend,
+        durations=cfg.durations,
+        node_overrides=cfg.node_overrides(),
+        options=cfg.options,
         registry=registry,
     )
-    call = {"run_dir": run_dir, **params}
+    # Run-wide model / idle_timeout_s ride `params` (the node builder reads them
+    # from ctx.params, per node) — seeded by the SAME helper the CLI uses, so the
+    # two entry points cannot drift (they did once: run_config={"model": ...} was
+    # silently dropped on this path).
+    cfg.apply_run_wide_params(params)
+    # An explicit run_dir= arg wins over run_config's run_dir (a convenience for
+    # the common "same flow, different output dir" call); else fall to the config.
+    call = {"run_dir": run_dir or cfg.run_dir, **params}
     if start_from:
         call["start_from"] = start_from
     if only:
@@ -44,29 +89,60 @@ def _build_pipeline_and_call(flow_def: FlowDef, registry, run_dir: str, start_fr
     return pipeline, call
 
 
-async def arun_flow(flow_def: FlowDef, *, registry=None, run_dir: str = "", start_from: str = "", only: str = "", **params):
+async def arun_flow(
+    flow_def: FlowDef,
+    *,
+    registry=None,
+    run_dir: str = "",
+    start_from: str = "",
+    only: str = "",
+    run_config: dict[str, Any] | RunConfig | None = None,
+    **params,
+):
     """Compile and RUN a FlowDef in one call — the async programmatic one-liner.
 
     The native async entry: `await arun_flow(...)` composes on a consumer's event
     loop (a FastAPI handler, a notebook) with no bridging. Same behaviour as
     `run_flow`, minus the `anyio.run` wrapper. Returns the {node: NodeOutcome}.
+
+    `run_config` (a dict or a RunConfig) is the run-side configuration: agent_dir,
+    backend, llm_concurrency, durations, nodes (per-node overrides), options,
+    run_dir. It is the single home for everything that is NOT portable pipeline
+    data — an explicit keyword, NOT a param, so `**params` cannot silently swallow
+    it. `params` are the DOMAIN run params (product_key=…, runtime=…).
     """
-    pipeline, call = _build_pipeline_and_call(flow_def, registry, run_dir, start_from, only, params)
+    pipeline, call = _build_pipeline_and_call(flow_def, registry, run_dir, start_from, only, params, run_config)
     return await pipeline(**call)
 
 
-def run_flow(flow_def: FlowDef, *, registry=None, run_dir: str = "", start_from: str = "", only: str = "", **params):
+def run_flow(
+    flow_def: FlowDef,
+    *,
+    registry=None,
+    run_dir: str = "",
+    start_from: str = "",
+    only: str = "",
+    run_config: dict[str, Any] | RunConfig | None = None,
+    **params,
+):
     """Compile and RUN a FlowDef in one call — the sync programmatic one-liner.
 
     A thin `anyio.run` wrapper over `arun_flow`, keeping the long-standing
-    blocking signature for consumers that are not on an event loop (scripts, the
-    CLI). Hides the plumbing: builds a default FlowRegistry (built-in gates) when
-    none is given, compiles the FlowDef to nodes, builds the flow with the
-    FlowDef's flow-wide settings (agent_dir/backend/shared_*/llm_concurrency), and
-    runs it. Returns the {node: NodeOutcome} result. `params` are the run params
-    (e.g. product_key=…, runtime=…). For the CLI (run/flow nodes), use run_cli.
+    blocking signature for consumers not on an event loop (scripts, the CLI).
+    `run_config` carries the run-side settings (agent_dir/backend/durations/
+    nodes/options/…) — see arun_flow. `params` are the DOMAIN run params.
     """
-    return anyio.run(lambda: arun_flow(flow_def, registry=registry, run_dir=run_dir, start_from=start_from, only=only, **params))
+    return anyio.run(
+        lambda: arun_flow(
+            flow_def,
+            registry=registry,
+            run_dir=run_dir,
+            start_from=start_from,
+            only=only,
+            run_config=run_config,
+            **params,
+        )
+    )
 
 
 def compile_flow(flow_def: FlowDef, registry) -> list[Node]:
@@ -81,6 +157,10 @@ def compile_flow(flow_def: FlowDef, registry) -> list[Node]:
 
 
 def _validate_refs(flow_def: FlowDef, registry) -> None:
+    # Flow-level refs first: a typo'd params_schema must fail with the same
+    # fail-fast guarantee as a node's gate/schema ref, before anything runs.
+    if flow_def.params_schema and not registry.has_params_model(flow_def.params_schema):
+        raise ValueError(f"flow {flow_def.name!r}: unknown params_schema {flow_def.params_schema!r}")
     for n in flow_def.nodes:
         if n.gate and not registry.has_gate(n.gate):
             raise ValueError(f"node {n.name!r}: unknown gate {n.gate!r}")
@@ -133,9 +213,7 @@ def _compile_agent_node(nd: NodeDef, registry, schema) -> Node:
         input_schema=registry.get_schema(nd.input_schema) if nd.input_schema else None,
         exports=nd.exports,
         export_ref=nd.export_ref,
-        model=nd.model,
-        idle_timeout_s=nd.idle_timeout_s,
-        agent_dir=nd.agent_dir,
+        duration=nd.duration,
         impl=impl,
         registry=registry,
     )

@@ -136,7 +136,9 @@ pipeline comes down to five capabilities. agent-flow delivers each directly:
   Node-labeled progress lines, an end-of-run results table, and optional
   `--show-diffs` edit/write diffs (`--diff-style unified|split`).
 - **Settings** — `RunConfig` (pydantic-settings, `AGENT_FLOW_*`) with a strict
-  precedence chain; domain params typed via a `params_model` (missing required →
+  precedence chain (CLI > env > .env > `--config` > `run_config=` > default);
+  `--config` takes a file path or inline JSON and is repeatable + deep-merged.
+  Domain params are typed by the flow's own `params_schema` (missing required →
   fail fast, exit 2).
 - **Pluggable execution backend** — `FlowBackend` (ABC): a Prefect-free
   **InProcessBackend** (default; an `anyio` task group for parallel fan-out +
@@ -224,6 +226,12 @@ Hand `flow` to the reusable CLI instead of calling `run_flow` directly to get
 `run_cli(flow)`'s `run` / `flow nodes` / `version` subcommands for free. Pass
 `run_cli(flow, version="1.2.0")` to surface your app's version alongside
 agent-flow's.
+
+Params are untyped above. To make the flow declare (and validate) what it needs,
+register a params model and name it — `FlowDef(params_schema="MyParams")`; the
+contract then travels with the flow. Non-portable settings (agent_dir, backend,
+timeouts) go in `run_config=` / `--config`, never on the FlowDef. See
+[flowdef](docs/design/orchestrator/flowdef.md).
 
 The same pipeline can be written imperatively with `agent_node(...)`, the
 lower-level Tier-3 form.

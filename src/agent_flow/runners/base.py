@@ -44,11 +44,11 @@ from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
-# Liveness / timeout budget default (seconds). Owned here (the neutral runner
-# contract) because it is a field default on AgentInvocation. The subprocess
-# executor treats it as an idle deadline; an in-process executor may use it as a
-# wall-clock cap hint. agent_runtime re-exports it for backward compatibility.
-DEFAULT_IDLE_TIMEOUT_S = 120
+# Liveness / timeout budget default (seconds). Defined in the pure `const` leaf
+# (both this Tier-1 module and the Tier-3 engine need it, so it cannot live in
+# either) and re-exported from here — it is a field default on AgentInvocation
+# below, and agent_runtime + node_builder import it from this module.
+from agent_flow.const import DEFAULT_IDLE_TIMEOUT_S as DEFAULT_IDLE_TIMEOUT_S
 
 # Model contract. The library NEVER hardcodes a model. When no model is
 # configured (param/env/CLI/programmatic), the runner omits --model so the
@@ -164,7 +164,8 @@ class PromptParts:
     """
 
     run_context: str = ""  # [run] ingested FILE CONTENT for every agent
-    run_instructions: str = ""  # [run] inline text for every agent
+    run_instructions: str = ""  # [run] STANDING brief, declared on the flow
+    run_additional_instructions: str = ""  # [run] inline text supplied at RUN time (-i / config instructions)
     node_context: str = ""  # [node] ingested FILE CONTENT for this node
     node_instructions: str = ""  # [node] inline text, declared at build time
     node_runtime_instructions: str = ""  # [node] inline text supplied at RUN time (--instruct)
@@ -189,6 +190,8 @@ def render_prompt(parts: PromptParts) -> str:
         blocks.append(f"## Run-wide context\n\n{parts.run_context.strip()}")
     if parts.run_instructions.strip():
         blocks.append(f"## Run-wide instructions\n\n{parts.run_instructions.strip()}")
+    if parts.run_additional_instructions.strip():
+        blocks.append(f"## Additional run-wide instructions\n\n{parts.run_additional_instructions.strip()}")
     if parts.node_context.strip():
         blocks.append(f"## Context for this step\n\n{parts.node_context.strip()}")
     if parts.node_instructions.strip():

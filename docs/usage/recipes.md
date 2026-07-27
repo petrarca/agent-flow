@@ -23,12 +23,14 @@ or hand it to the reusable CLI.
 ```python
 from agent_flow import FlowDef, NodeDef, run_flow
 
-flow = FlowDef(name="my-pipeline", agent_dir="{repo}/pipelines/tech", nodes=[
+flow = FlowDef(name="my-pipeline", nodes=[
     NodeDef(name="tech-stack", agent="tech-stack-analyst",
             inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"}),
 ])
 
-run_flow(flow, product_key="acme", runtime="opencode")
+# agent_dir is run config (or omit it: the opencode runner probes for .opencode/)
+run_flow(flow, product_key="acme", runtime="opencode",
+         run_config={"agent_dir": "{repo}/pipelines/tech"})
 ```
 
 Via the CLI (adds `run` / `flow nodes` / `version`, `-p/--param`, `--config`, etc.):
@@ -36,7 +38,7 @@ Via the CLI (adds `run` / `flow nodes` / `version`, `-p/--param`, `--config`, et
 ```python
 def main():
     from agent_flow.cli import run_cli
-    run_cli(flow)                 # or run_cli(flow, registry=…, params_model=…, version="1.2.0")
+    run_cli(flow)                 # or run_cli(flow, registry=…, run_config={…}, version="1.2.0")
 ```
 
 ```bash

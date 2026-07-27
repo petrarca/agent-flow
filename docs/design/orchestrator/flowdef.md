@@ -61,9 +61,15 @@ NodeDef(
     exports={"stack": "detected_stack"},         # result->params map (or export_ref="name")
     impl_ref="classify",                          # OPTIONAL: run in-process (registry.agent_impl)
     instructions="…", context=["rules/*.md"],    # per-node prompt channels
-    model=None, idle_timeout_s=None, agent_dir=None,
+    duration="long",                              # PORTABLE intent; run config maps it to seconds
 )
 ```
+
+A node carries only PORTABLE data. `duration` is a name ("short"/"normal"/"long",
+or any name the run config defines), not a raw timeout — the run config's
+`durations: {long: 900}` maps it to seconds. A per-node `model` / `agent_dir` /
+concrete `idle_timeout_s` is an ENVIRONMENT fact, not pipeline data, so it lives
+in the run config's `nodes.<name>` section, not on the NodeDef.
 
 A node runs **either** an `agent` (the standard "run one agent" node) **or** a
 `run_ref` (a registered custom run — see below) — exactly one. `exports` and
@@ -73,18 +79,37 @@ so it requires `agent` to be set (see "In-process & mock execution" below).
 
 ## FlowDef
 
-The whole pipeline plus flow-wide settings.
+The whole pipeline — PORTABLE declarations only.
 
 ```python
 FlowDef(
     name="tech-assessment",
     nodes=[NodeDef(...), NodeDef(...), …],
     run_instructions="…", run_context=["{repos_root}/rules/*.md"],
-    agent_dir="…",           # where the agents' .md live (opencode --dir)
-    backend="inprocess",     # or "prefect"
-    llm_concurrency=None,
+    params_schema="AssessParams",            # the flow's SIGNATURE (registry name)
 )
 ```
+
+`params_schema` names a params model registered with `registry.params_model(...)`
+— the run parameters this pipeline NEEDS (`product_key`, …), the values its nodes
+template as `{name}`. It is the mirror of a node's `input_schema`, one scope up: a
+node declares its input contract, a flow declares its own. Because it is a NAME,
+the FlowDef stays serializable AND self-describing — the pairing "flow ↔ its
+params" travels with the flow instead of depending on the call site to pass the
+matching model. Unset → params pass through untyped.
+
+`agent_dir` (a filesystem path), `backend` (a deployment choice), and
+`llm_concurrency` (an environment capacity) are NOT flow fields — they are run
+config, supplied via `run_config=` / `--config` / the CLI / env. This keeps a
+serialized FlowDef meaningful on any machine.
+
+The three layers, kept apart on purpose:
+
+| layer | declares | where |
+|---|---|---|
+| flow | what it IS, SAYS, and NEEDS | `FlowDef` (portable) |
+| run config | HOW / WHERE it runs | `run_config=` / `--config` / CLI / env |
+| params | the VALUES for THIS run | `-p KEY=VALUE` / env / kwargs |
 
 Validation runs at construction: unique node names, every `depends_on` names a
 known node. `compile_flow` additionally checks that every referenced gate /
@@ -127,7 +152,21 @@ A node references a gate by name: `gate="rerun_to", gate_args={"target": "…"}`
   NOT running an agent (`NodeDef(run_ref="name")`); the node stays serializable,
   the code lives in the registry.
 - `@registry.schema("name")` — a result schema (pydantic model / JSON-schema
-  dict / `ResultSchema`) referenced by `NodeDef(result_schema="name")`.
+  dict / `ResultSchema`) referenced by `NodeDef(result_schema="name")`, and the
+  same registry serves `NodeDef(input_schema="name")`.
+- `@registry.params_model("name")` — the FLOW's params model, referenced by
+  `FlowDef(params_schema="name")`. Its OWN namespace, deliberately not
+  `schema()`: a flow's run-parameter contract and a node's result/input schema
+  are different concepts and must not collide on a name. Any pydantic model
+  works — a plain `BaseModel` (values from `-p` / kwargs) or a `BaseSettings`
+  (adds bare-env / `.env` fallback and `validation_alias` lookups).
+
+  ```python
+  @registry.params_model("AssessParams")
+  class AssessParams(BaseSettings):
+      product_key: str = Field(description="required")
+      repos_root: str = ""
+  ```
 
 ### In-process & mock execution
 
@@ -175,7 +214,7 @@ from agent_flow import arun_flow         # async-native twin — await on an eve
 # await arun_flow(flow, registry=registry, product_key="acme", runtime="opencode")
 
 from agent_flow.cli import run_cli        # the reusable CLI (run / flow nodes / version)
-run_cli(flow, registry=registry, params_model=MyParams)
+run_cli(flow, registry=registry)   # params come from the flow's params_schema
 ```
 
 `run_flow` is a thin `anyio.run` wrapper over `arun_flow`; use `arun_flow` (or the
@@ -184,7 +223,10 @@ async flow callable from `build_flow`) when you are already on an event loop.
 `run_cli(flow_def)` compiles + runs it and also gives `run`, `flow nodes`, and
 `version` subcommands (pass `version="…"` to surface your app version alongside
 agent-flow's). When no registry is passed, a default (built-in gates only) is used.
-The FlowDef's flow-wide `agent_dir` becomes the CLI's default agent dir.
+`agent_dir` is supplied via `run_config=` / `--config` / `--agent-dir` / env, or
+auto-discovered: the opencode runner probes for a `.opencode/` directory in the
+cwd and its ancestors, so a consumer running from their project usually needs to
+set nothing.
 
 `compile_flow(flow_def, registry) -> list[Node]` and `build_flow(nodes)` remain
 available for advanced use, but a normal consumer does not call them directly.

@@ -94,7 +94,13 @@ def build_nodes() -> list[Node]:
 def main() -> None:
     from agent_flow.cli import run_cli
 
-    run_cli(build_nodes, name="assessment (imperative)", default_agent_dir=_EXAMPLES_DIR, params_model=AssessParams, registry=REGISTRY)
+    run_cli(
+        build_nodes,
+        name="assessment (imperative)",
+        run_config={"agent_dir": _EXAMPLES_DIR},
+        params_model=AssessParams,
+        registry=REGISTRY,
+    )
 
 
 if __name__ == "__main__":

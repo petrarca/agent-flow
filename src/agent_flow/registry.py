@@ -62,6 +62,10 @@ class FlowRegistry:
         self._exports: dict[str, ExportImpl] = {}
         self._runs: dict[str, Callable[..., Any]] = {}  # custom run impls (NodeDef.run_ref)
         self._schemas: dict[str, Any] = {}  # result-schema impls (NodeDef.result_schema by name)
+        # A FLOW's params model (FlowDef.params_schema by name). Its OWN namespace,
+        # not _schemas: a flow's run-parameter contract and a node's result/input
+        # schema are different concepts and must not collide on a name.
+        self._params_models: dict[str, Any] = {}
         self._agent_impls: dict[str, Callable[..., Any]] = {}  # in-process agent impls (NodeDef.impl_ref)
         self._mock_agents: dict[str, Callable[..., Any]] = {}  # mock_agent behaviours (--mock-agents mode)
         # event -> list of (node_scope, hook). node_scope is None (all nodes) or a
@@ -150,6 +154,31 @@ class FlowRegistry:
 
         def deco(obj: Any) -> Any:
             self._schemas[name] = obj
+            return obj
+
+        return deco
+
+    def params_model(self, name: str) -> Callable[[Any], Any]:
+        """Register a named FLOW PARAMS model (decorator or direct call).
+
+        A FlowDef references it via `params_schema="name"` — the flow's own
+        SIGNATURE: the parameters it needs to run (product_key, …), validated at
+        the entry point from -p / env / kwargs. The mirror of a node declaring
+        `input_schema`, one scope up.
+
+        Any pydantic model works: a plain `BaseModel` (values come from -p /
+        kwargs) or a `BaseSettings` (adds bare-env / .env fallback and
+        validation_alias lookups). The library only constructs it with the
+        supplied values and dumps it — see cli/commands/run.py::_resolve_params.
+
+            @reg.params_model("CloudParams")
+            class CloudParams(BaseSettings): ...
+
+            reg.params_model("Cloud")(CloudParams)  # direct
+        """
+
+        def deco(obj: Any) -> Any:
+            self._params_models[name] = obj
             return obj
 
         return deco
@@ -325,6 +354,13 @@ class FlowRegistry:
         except KeyError:
             raise ValueError(f"unknown result_schema {name!r} (registered: {sorted(self._schemas)})") from None
 
+    def get_params_model(self, name: str) -> Any:
+        """Resolve a named flow params model."""
+        try:
+            return self._params_models[name]
+        except KeyError:
+            raise ValueError(f"unknown params_schema {name!r} (registered: {sorted(self._params_models)})") from None
+
     def get_agent_impl(self, name: str) -> Callable[..., Any]:
         """Resolve a named in-process agent impl."""
         try:
@@ -344,6 +380,9 @@ class FlowRegistry:
 
     def has_schema(self, name: str) -> bool:
         return name in self._schemas
+
+    def has_params_model(self, name: str) -> bool:
+        return name in self._params_models
 
     def has_agent_impl(self, name: str) -> bool:
         return name in self._agent_impls

@@ -82,7 +82,6 @@ def _log_cost(node, outcome) -> None:
 # gate on rerun_on_signal (jump back to their analyst when they flag a re-run).
 FLOW = FlowDef(
     name="assessment (declarative)",
-    agent_dir=str(Path(__file__).resolve().parent),  # shared examples/.opencode/agent/
     nodes=[
         NodeDef(
             name="tech-stack",
@@ -155,9 +154,14 @@ FLOW = FlowDef(
 def main() -> None:
     from agent_flow.cli import run_cli
 
-    # agent_dir comes from the FlowDef (FLOW.agent_dir); REGISTRY carries the
-    # custom gate + observing hook (plus the seeded built-in gates).
-    run_cli(FLOW, registry=REGISTRY, params_model=AssessParams)
+    # agent_dir is run config now (a filesystem path is not portable pipeline
+    # data), supplied via run_config=; REGISTRY carries the custom gate + hook.
+    run_cli(
+        FLOW,
+        registry=REGISTRY,
+        params_model=AssessParams,
+        run_config={"agent_dir": str(Path(__file__).resolve().parent)},  # shared examples/.opencode/agent/
+    )
 
 
 if __name__ == "__main__":

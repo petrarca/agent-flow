@@ -64,11 +64,13 @@ Node(
 control files + relative-path base; NOT a cwd and NOT where agents live),
 `cycles`, `params` (domain inputs, threaded from the flow call), and the
 engine-plumbing fields `agent_dir` (default dir where agent definitions live →
-opencode `--dir`; per-node override on `agent_node`), `on_event_factory`,
-`run_instructions`, `run_context`, `node_instructions` (run-time per-node
-instructions from `--instruct`/config), and `one_time_instruction` (the
-single-attempt instruction a gate's `Restart`/`GoTo` delivers to the target
-node's next run) — all typed, not `params` keys — see
+opencode `--dir`), `on_event_factory`, `run_instructions` (the flow's standing
+brief), `run_additional_instructions` (this run's `-i` addition), `run_context`,
+`node_overrides` (per-node run config `{node: {instructions, model, agent_dir,
+duration, idle_timeout_s, options}}`, e.g. from `--instruct`/config), `durations`
+(the duration-name → seconds vocabulary), `options` (run-wide runtime flags), and
+`one_time_instruction` (the single-attempt instruction a gate's `Restart`/`GoTo`
+delivers to the target node's next run) — all typed, not `params` keys — see
 [input-plane](input-plane.md) and [cli-events](cli-events.md)). `on_event_factory`
 is deliberately named differently from `run_agent`'s Tier-1 `on_event` callback
 — at Tier 3 the agent name is not known until inside a node's `run`, so this is
@@ -100,7 +102,7 @@ callback: `blocking` → `NodeBlocked`; `degrade` → status `degraded`.
 
 ## `build_flow` — compile to a runnable flow callable
 
-`build_flow(nodes, *, name, llm_tag, llm_concurrency, on_event_factory, on_node_event, run_instructions, run_context, agent_dir, node_instructions, backend="inprocess", registry=None)`
+`build_flow(nodes, *, name, llm_tag, llm_concurrency, on_event_factory, on_node_event, run_instructions, run_additional_instructions, run_context, agent_dir, node_overrides, durations, options, backend="inprocess", registry=None)`
 returns an **async** callable `async f(run_dir="", start_from="", only="", **params) -> dict[str, NodeOutcome]`
 (`build_flow`'s own body stays sync — only the returned callable is a coroutine;
 `await` it, or use the sync `run_flow` / `run_cli` wrappers that bridge it with

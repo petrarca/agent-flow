@@ -33,8 +33,9 @@ agent_node(
     gate_ref=None, gate_args=None,   # a registered gate BY NAME + its config (see gates.md)
     result_schema=None,      # optional typed output (see result-schema.md)
     max_cycles=1,
-    model=None, idle_timeout_s=None,
-    agent_dir=None,          # per-node override of where agent definitions live
+    duration=None,           # PORTABLE name ("long"); run config maps it to seconds
+    model=None,              # imperative escape hatch; usually set via run config
+    agent_dir=None,          # imperative override (usually run config / probed)
     exports=None, export_ref=None,   # result->params publish hook (inline map or by name)
     impl=None,               # run IN-PROCESS: a callable (inv) -> result; no subprocess
     registry=None,           # FlowRegistry, used to resolve a mock_agent by AGENT NAME
@@ -77,8 +78,9 @@ composition, small-file reads — is synchronous inline. Inside it, `agent_node`
 - resolves the `inputs` into a `KEY: value` work order via `resolve_work_order`,
   expanding `{name}` templates against the flow `params` (plus `{run_dir}`),
 - composes the per-node prompt in order — per-node `context`, per-node
-  `instructions`, run-time `--instruct`/`node_instructions`, the ephemeral
-  one-time instruction (from a gate's `Restart`/`GoTo`), then the work order (see
+  `instructions`, the run-time per-node instruction (`--instruct` /
+  `nodes.<n>.instructions`, via `ctx.node_overrides`), the ephemeral one-time
+  instruction (from a gate's `Restart`/`GoTo`), then the work order (see
   [input-plane.md](input-plane.md)),
 - builds a neutral `AgentInvocation` (prompt, run_dir, node, model, idle timeout,
   `result_schema`, run-wide `run_instructions`/`run_context`, and an

@@ -96,17 +96,24 @@ def test_env_beats_yaml(tmp_path, monkeypatch):
     assert build_run_config(config_file=str(p)).runtime == "fromenv"
 
 
-def test_yaml_node_instructions_section(tmp_path):
+def test_yaml_nodes_section(tmp_path):
     p = tmp_path / "run.yml"
-    p.write_text('runtime: mock\nnode_instructions:\n  analyst: "full breakdown"\n  summary: "lead with tenancy"\n')
+    p.write_text(
+        "runtime: mock\n"
+        "nodes:\n"
+        '  analyst: {instructions: "full breakdown", model: "prov/big"}\n'
+        '  summary: {instructions: "lead with tenancy", duration: long}\n'
+    )
     cfg = build_run_config(config_file=str(p))
-    assert cfg.node_instructions == {"analyst": "full breakdown", "summary": "lead with tenancy"}
+    assert cfg.nodes["analyst"].instructions == "full breakdown"
+    assert cfg.nodes["analyst"].model == "prov/big"
+    assert cfg.nodes["summary"].duration == "long"
 
 
 def test_yaml_rejects_unknown_key(tmp_path):
     p = tmp_path / "run.yml"
     p.write_text("runtimee: opencode\n")  # typo
-    with pytest.raises(ValueError, match="unknown config keys"):
+    with pytest.raises(ValueError, match="unknown run config keys"):
         build_run_config(config_file=str(p))
 
 

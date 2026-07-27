@@ -16,7 +16,7 @@ Public API (the authoritative list is `__all__` below):
         AgentRunner, AgentInvocation, Event,
         AgentExecutor, InProcessExecutor, AgentImpl, get_executor, compose_prompt,
         MockExecutor, MockAgentContext, MockAgent,  # --mock-agents mode
-        OpenCodeRunner, get_runner,
+        OpenCodeRunner, get_runner, probe_agent_dir,
         # Tier 3: declare Nodes -> build_flow (the DAG engine)
         Node, NodeOutcome, RunContext, build_flow, NodeBlocked,
         plan_groups, interpret,
@@ -38,8 +38,10 @@ Public API (the authoritative list is `__all__` below):
         run_cli, NodeProgressPrinter,
         event_printer, get_console, print_results_table, print_preflight_results,
         # run configuration / settings
-        RunConfig, build_run_config, get_settings, init_settings, clear_settings,
+        RunConfig, NodeRunConfig, build_run_config, get_settings, init_settings, clear_settings,
         parse_params, resolve_run_dir, default_temp_base,
+        # duration vocabulary (portable node intent -> seconds)
+        DEFAULT_DURATIONS, duration_table,
         # runtime pre-flight checks
         Check, check, fatal_failures,
         # environment
@@ -108,6 +110,7 @@ from agent_flow.node_builder import (
 from agent_flow.preflight import Check, check, fatal_failures
 from agent_flow.registry import FlowRegistry
 from agent_flow.run_config import (
+    NodeRunConfig,
     RunConfig,
     build_run_config,
     clear_settings,
@@ -139,10 +142,11 @@ from agent_flow.runners import (
     compose_prompt,
     get_executor,
     get_runner,
+    probe_agent_dir,
     render_prompt,
 )
 from agent_flow.runners.executor import AgentContentFailedError, AgentCrashError, AgentTimeoutError
-from agent_flow.utils import default_temp_base, resolve_run_dir
+from agent_flow.utils import DEFAULT_DURATIONS, default_temp_base, duration_table, resolve_run_dir
 
 
 def _resolve_version() -> str:
@@ -192,6 +196,7 @@ __all__ = [
     "OpenCodeRunner",
     "get_runner",
     "get_executor",
+    "probe_agent_dir",
     "compose_prompt",
     # run-context service (open domain params + exports)
     "RunContextService",
@@ -208,6 +213,7 @@ __all__ = [
     "NodeProgressPrinter",
     "run_cli",
     "RunConfig",
+    "NodeRunConfig",
     "build_run_config",
     "get_settings",
     "init_settings",
@@ -216,6 +222,8 @@ __all__ = [
     "runtime_param",
     "runtime_param_fields",
     "resolve_run_dir",
+    "DEFAULT_DURATIONS",
+    "duration_table",
     "default_temp_base",
     # result-schema seam (typed agent output)
     "ResultSchema",

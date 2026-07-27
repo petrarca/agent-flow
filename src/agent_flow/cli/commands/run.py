@@ -25,7 +25,12 @@ def register(app, ctx: RunCliContext) -> None:
 
     @app.command()
     def run(
-        config: str = typer.Option("", "--config", "-c", help="YAML run config (generic settings)"),
+        config: list[str] | None = typer.Option(  # noqa: B008 - Typer idiom
+            None,
+            "--config",
+            "-c",
+            help="run config: a YAML/JSON file path OR inline JSON ({...}). Repeatable; later --config deep-merges over earlier.",
+        ),
         param: list[str] | None = typer.Option(None, "--param", "-p", help="domain param KEY=VALUE (repeatable)"),  # noqa: B008 - Typer idiom
         runtime: str | None = typer.Option(None, help="real out-of-process runner, e.g. 'opencode'"),
         mock_agents: bool | None = typer.Option(
@@ -77,12 +82,13 @@ def register(app, ctx: RunCliContext) -> None:
         setup_logging(log_level)
         console = get_console()
         cfg = build_run_config(
-            config_file=config or None,
+            config_file=config or None,  # list[str] of --config sources (paths and/or inline JSON)
+            base=ctx.run_config,  # the pipeline's run_config= defaults (lowest explicit source)
             runtime=runtime,
             mock_agents=mock_agents,  # None (env/config wins) | True | False (explicit)
             backend=backend,
-            run_dir=run_dir or (ctx.default_run_dir or None),
-            agent_dir=agent_dir or (ctx.default_agent_dir or None),
+            run_dir=run_dir,
+            agent_dir=agent_dir,
             instructions=instructions,
             instructions_file=instructions_file,
             llm_concurrency=llm_concurrency,
@@ -92,17 +98,23 @@ def register(app, ctx: RunCliContext) -> None:
             model=model,
             idle_timeout_s=idle_timeout,
         )
-        # Per-node instructions: CLI --instruct NODE=text merges OVER the config
-        # node_instructions: (CLI wins per node).
-        cfg.node_instructions = {**cfg.node_instructions, **parse_params(instruct)}
+        # Per-node instructions: CLI --instruct NODE=text populates
+        # nodes.<node>.instructions, winning over a config `nodes:` entry per node.
+        for node_name, text in parse_params(instruct).items():
+            cfg.set_node_instruction(node_name, text)
+        # agent_dir runner probe (lowest slot): when nothing set it, ask the
+        # runner (opencode probes for .opencode/ in cwd + ancestors). Filling it
+        # here means the summary AND preflight see the resolved dir, and the node
+        # builder receives it as an explicit value.
+        if not cfg.agent_dir:
+            from agent_flow.runners import probe_agent_dir
+
+            cfg.agent_dir = probe_agent_dir(cfg.runtime) or ""
         params = _resolve_params(ctx.params_model, parse_params(param), console)
         runtime_fields = runtime_param_fields(ctx.params_model)
-        # model / idle_timeout_s are run-wide knobs an agent-node reads from
-        # params; inject the resolved values (an explicit -p / per-node value still
-        # wins). model only when set (empty -> the runtime resolves it).
-        if cfg.model:
-            params.setdefault("model", cfg.model)
-        params.setdefault("idle_timeout_s", str(cfg.idle_timeout_s))
+        # Run-wide knobs an agent-node reads back out of `params` — seeded by the
+        # shared helper (the programmatic path calls the same one).
+        cfg.apply_run_wide_params(params)
         _print_run_summary(ctx.name, cfg, params, console, hide=runtime_fields)
         # Preflight validates the real runtime + agent-dir. Under full mock mode a
         # flow may have no agent-dir; skip the runtime preflight then (partial
@@ -126,6 +138,7 @@ def register(app, ctx: RunCliContext) -> None:
             only=only or "",
             registry=ctx.registry,
             run_context=ctx.run_context,
+            run_instructions=ctx.run_instructions,
         )
 
 
@@ -154,6 +167,11 @@ def _print_run_summary(name: str, cfg, params: dict, console, *, hide: set[str] 
         "model": cfg.model or "(runtime default)",  # empty -> the runtime resolves it
         "idle_timeout_s": cfg.idle_timeout_s,
     }
+    per_node = getattr(cfg, "nodes", None)
+    if per_node:
+        # Name the nodes carrying a per-node override, so a `nodes:` entry is
+        # visible in the pre-run summary rather than only taking effect silently.
+        settings["per-node config"] = ", ".join(sorted(per_node))
     rows = {**settings, **params}
     width = max((len(k) for k in rows), default=0)
     for k, v in settings.items():
@@ -169,19 +187,20 @@ def _resolve_params(model: type | None, cli_params: dict[str, str], console) -> 
     with -p as init kwargs over bare env/.env/defaults; on ValidationError print +
     exit 2. The validated model is dumped in JSON mode for {name} templating.
     """
-    if model is None:
-        return dict(cli_params)
     from pydantic import ValidationError
 
+    from agent_flow.run_config import validate_params
+
     try:
-        settings = model(**cli_params)
+        # Shared with the programmatic path (run_flow); only the ERROR handling
+        # differs — a CLI prints and exits 2, a library call raises.
+        return validate_params(model, cli_params)
     except ValidationError as exc:
         console.print(f"[red]Invalid parameters for {getattr(model, '__name__', 'params')}:[/red]")
         for err in exc.errors():
             loc = ".".join(str(p) for p in err.get("loc", ()))
             console.print(f"  [red]-[/red] {loc}: {err.get('msg')}")
         sys.exit(2)
-    return {k: ("" if v is None else str(v)) for k, v in settings.model_dump(mode="json").items()}
 
 
 def _run_preflight(runtime: str, agent_dir: str, backend: str, console) -> None:
@@ -198,7 +217,18 @@ def _run_preflight(runtime: str, agent_dir: str, backend: str, console) -> None:
 
 
 def _run_with_view(
-    nodes, params, cfg, console, *, name: str, llm_tag: str, start_from: str = "", only: str = "", registry=None, run_context: tuple[str, ...] = ()
+    nodes,
+    params,
+    cfg,
+    console,
+    *,
+    name: str,
+    llm_tag: str,
+    start_from: str = "",
+    only: str = "",
+    registry=None,
+    run_context: tuple[str, ...] = (),
+    run_instructions: str = "",
 ) -> None:
     """Run the pipeline under the chosen view, then print the results table.
 
@@ -239,6 +269,7 @@ def _run_with_view(
             only=only,
             registry=registry,
             run_context=run_context,
+            run_instructions=run_instructions,
         )
     except KeyboardInterrupt:
         console.print("[yellow]Interrupted[/yellow] — stopped by user (Ctrl-C).")
@@ -266,6 +297,7 @@ def _build_and_run(
     only="",
     registry=None,
     run_context: tuple[str, ...] = (),
+    run_instructions: str = "",
 ):
     """Compile the flow with the given hooks and run it; optionally print results."""
     import anyio
@@ -279,10 +311,13 @@ def _build_and_run(
         llm_concurrency=cfg.llm_concurrency,
         on_event_factory=on_event_factory,
         on_node_event=on_node_event,
-        run_instructions=cfg.resolved_instructions(),
+        run_instructions=run_instructions,
+        run_additional_instructions=cfg.resolved_instructions(),
         run_context=run_context,
         agent_dir=cfg.agent_dir,
-        node_instructions=cfg.node_instructions,
+        node_overrides=cfg.node_overrides(),
+        durations=cfg.durations,
+        options=cfg.options,
         backend=cfg.backend,
         registry=registry,
     )

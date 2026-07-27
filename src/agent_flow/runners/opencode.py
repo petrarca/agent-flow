@@ -63,6 +63,21 @@ class OpenCodeRunner:
             needs_endpoint=False,
         )
 
+    def default_agent_dir(self) -> str | None:
+        """Probe for opencode's agent-definitions convention when none is configured.
+
+        opencode reads agents from a `.opencode/` directory; a consumer running
+        from their project usually has one at the repo root. Walk cwd + ancestors
+        (git-like) for it, so the common case needs no explicit agent_dir. Returns
+        the containing directory (opencode's `--dir`), or None to let the missing
+        requirement surface at preflight. OPTIONAL runner method — a remote runner
+        simply does not implement it.
+        """
+        from agent_flow.utils import find_marker_dir
+
+        found = find_marker_dir(".opencode")
+        return str(found) if found else None
+
     def build_verdict_preamble(self, agent: str, control_file: str, result_schema: dict | None = None) -> str:
         """The completion-protocol instruction block: write the control sidecar.
 
