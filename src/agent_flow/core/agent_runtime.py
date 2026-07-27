@@ -151,8 +151,18 @@ def _apply_event(line: str, st: dict, runner: AgentRunner, on_event: Callable[[E
     it was noise (not counted toward liveness). If on_event is set, it is called
     with each real event for optional live display — guarded so a display error
     never disrupts supervision.
+
+    Parsing itself is guarded for the same reason: `parse_event` is a PUBLIC seam
+    (any runner may implement it) and a runtime can always emit an unexpected
+    shape. A parser that raises must degrade that ONE line to noise, never abort
+    an otherwise healthy run — the line is still kept in the diagnostic tail by
+    `_consume_line`.
     """
-    ev = runner.parse_event(line)
+    try:
+        ev = runner.parse_event(line)
+    except Exception as exc:  # noqa: BLE001 - a parser bug/odd shape must not kill the run
+        logger.debug(f"parse_event failed on a line ({type(exc).__name__}: {exc}) — treating it as noise")
+        return False
     if not ev.is_event:
         return False
     st["events"] += 1

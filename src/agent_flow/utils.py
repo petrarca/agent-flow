@@ -38,15 +38,22 @@ def resolve_template(value: str, params: dict[str, Any], *, strict: bool = False
     The single substitution helper used across the library so `{product_key}` etc.
     resolve the same way everywhere.
 
-    strict=False (default): a missing placeholder is left literal (no KeyError),
-      so an unrelated `{...}` in free text (prompt prose, a regex, an optional
-      param) degrades gracefully rather than crashing the run. Used for inputs,
-      instructions, context/agent-dir, and gate paths.
+    strict=False (default): the value is returned UNCHANGED whenever it cannot be
+      fully expanded, so an unrelated `{...}` in free text degrades gracefully
+      rather than crashing the run. Used for inputs, instructions, context /
+      agent-dir, and gate paths — all of which routinely carry text the library
+      did not author: prose, JSON/code fragments, regex quantifiers (`\\d{2,3}`),
+      and an agent's own `reason` surfaced by a gate as a re-run instruction.
+      Every str.format failure mode is treated as "not a template":
+        - KeyError      — `{missing}`
+        - IndexError    — `{}` / `{0}` with no positional args
+        - ValueError    — an unbalanced or malformed brace (`a } b`, `{x:!!!}`)
+        - AttributeError— `{p.nope}`
+      (A single stray `}` in an agent's reason used to abort the whole run.)
 
-    strict=True: a missing placeholder raises KeyError. Use for values where a
-      half-substituted result is always a bug — notably run_dir and other PATHS,
-      which must fully resolve (a directory literally named "{product_key}" is
-      never intended).
+    strict=True: any of those raises. Use for values where a half-substituted
+      result is always a bug — notably run_dir and other PATHS, which must fully
+      resolve (a directory literally named "{product_key}" is never intended).
     """
     if not value:
         return value
@@ -54,7 +61,7 @@ def resolve_template(value: str, params: dict[str, Any], *, strict: bool = False
         return value.format(**params)
     try:
         return value.format(**params)
-    except KeyError, IndexError:
+    except KeyError, IndexError, ValueError, AttributeError:
         return value
 
 

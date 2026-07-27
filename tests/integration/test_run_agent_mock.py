@@ -179,6 +179,33 @@ async def test_start_failure_binary_missing_is_crash(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_raising_parse_event_degrades_to_noise_and_run_survives(tmp_path):
+    """A runner whose `parse_event` RAISES must not abort an otherwise fine run.
+
+    `AgentRunner` is a public seam and a runtime can always emit an unexpected
+    shape, so a parser failure degrades that one line to noise (the line is still
+    kept in the diagnostic tail); the sidecar verdict still decides the outcome.
+    """
+    from agent_flow.runners.base import AgentInvocation, LaunchSpec
+
+    control = tmp_path / "n.control.json"
+    prog = f"import json,sys; print('noise'); sys.stdout.flush(); open({str(control)!r},'w').write(json.dumps({{'status':'ok','agent':'a'}}))"
+
+    class _RaisingParserRunner:
+        name = "raising"
+
+        def build_command(self, inv):  # noqa: ARG002
+            return LaunchSpec(argv=["python3", "-c", prog], display="python3 -c <writes sidecar>")
+
+        def parse_event(self, line):  # noqa: ARG002
+            raise RuntimeError("parser blew up")
+
+    inv = AgentInvocation(agent="a", prompt="p", run_dir=tmp_path, node="n", idle_timeout_s=10)
+    result = await SubprocessExecutor(_RaisingParserRunner()).run(inv, control_file=control)
+    assert result.control["status"] == "ok"
+
+
+@pytest.mark.anyio
 async def test_stdin_is_closed_agent_reading_stdin_does_not_hang(tmp_path):
     """Regression: the spawned agent must get a CLOSED stdin (immediate EOF).
 

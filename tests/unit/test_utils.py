@@ -27,6 +27,33 @@ def test_resolve_template_empty_passthrough():
     assert resolve_template("", {"x": "1"}) == ""
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "a } b",  # stray closing brace (ValueError) — e.g. an agent's prose/JSON
+        "a { b",  # stray opening brace (ValueError)
+        "{p:!!!}",  # malformed format spec (ValueError)
+        "{p.nope}",  # attribute that does not exist (AttributeError)
+        "{}",  # empty field with no positional args (IndexError)
+        r"match \d{2,3}",  # a regex quantifier (KeyError)
+    ],
+)
+def test_resolve_template_lenient_never_raises_on_free_text(value):
+    """Lenient mode must return non-template text UNCHANGED, never raise.
+
+    Regression: only KeyError/IndexError were caught, so a single stray brace —
+    routine in prose, JSON/code fragments, and an agent's own `reason` surfaced
+    by a gate as a re-run instruction — raised ValueError and aborted the run.
+    """
+    assert resolve_template(value, {"p": "s"}) == value
+
+
+def test_resolve_template_strict_still_raises_on_malformed():
+    # strict (paths) must NOT swallow a malformed template — it is always a bug there.
+    with pytest.raises(ValueError):
+        resolve_template("a } b", {}, strict=True)
+
+
 def test_explicit_run_dir_is_used_verbatim(tmp_path):
     given = tmp_path / "out"
     assert resolve_run_dir(str(given)) == given.resolve()
