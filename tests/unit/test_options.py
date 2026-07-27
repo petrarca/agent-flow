@@ -177,7 +177,7 @@ def test_programmatic_run_flow_forwards_options(monkeypatch, tmp_path):
 
     monkeypatch.setattr("agent_flow.node_builder.get_executor", _fake)
     flow = FlowDef(name="t", nodes=[NodeDef(name="n", agent="a")])
-    run_flow(flow, registry=FlowRegistry(), run_dir=str(tmp_path), options={"serve_url": "http://p:1"})
+    run_flow(flow, registry=FlowRegistry(), run_dir=str(tmp_path), run_config={"options": {"serve_url": "http://p:1"}})
     assert seen["options"] == {"serve_url": "http://p:1"}
 
 

@@ -48,7 +48,7 @@ def check_agent_dir_exists(agent_dir: str | Path | None) -> Check:
     `preflight_checks` — this generic check only verifies it is set and is a dir.
     """
     if not agent_dir:
-        return Check("agent-dir", False, True, "no agent_dir configured (set --agent-dir / AGENT_FLOW_AGENT_DIR / default_agent_dir).")
+        return Check("agent-dir", False, True, "no agent_dir configured (set --agent-dir / AGENT_FLOW_AGENT_DIR / run_config={'agent_dir': ...}).")
     base = Path(agent_dir)
     if not base.is_dir():
         return Check("agent-dir", False, True, f"agent_dir does not exist: {base}")

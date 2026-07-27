@@ -99,14 +99,15 @@ class FlowDef(BaseModel):
     name: str = "agent-flow"
     nodes: list[NodeDef] = Field(min_length=1)
 
-    # Flow-wide (mirror build_flow's run-wide knobs). Named for their SCOPE:
-    # `run_*` spans the whole run; a NodeDef's `instructions`/`context` are one
-    # node. Same word, different scope — see docs/design/orchestrator/input-plane.md.
+    # Flow-wide PORTABLE declarations. Named for their SCOPE: `run_*` spans the
+    # whole run; a NodeDef's `instructions`/`context` are one node. Same word,
+    # different scope — see docs/design/orchestrator/input-plane.md.
+    #
+    # agent_dir / backend / llm_concurrency are NOT here: a filesystem path, a
+    # deployment choice, and an environment capacity are run config, not portable
+    # pipeline data. Supply them via run_config= / --config / the CLI / env.
     run_instructions: str = ""
     run_context: list[str] = Field(default_factory=list)
-    agent_dir: str = ""
-    backend: str = "inprocess"
-    llm_concurrency: int | None = None
 
     @model_validator(mode="after")
     def _validate_graph(self) -> FlowDef:

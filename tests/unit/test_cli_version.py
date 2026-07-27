@@ -31,7 +31,7 @@ def _app(ctx: RunCliContext) -> typer.Typer:
 
 
 def _ctx(**kw) -> RunCliContext:
-    base = dict(build_nodes=lambda: [], name="my-pipeline", llm_tag="llm", default_agent_dir="", default_run_dir="", params_model=None)
+    base = dict(build_nodes=lambda: [], name="my-pipeline", llm_tag="llm", params_model=None)
     base.update(kw)
     return RunCliContext(**base)
 

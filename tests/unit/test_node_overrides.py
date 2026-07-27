@@ -182,7 +182,7 @@ def test_programmatic_run_flow_delivers_node_overrides(flow_and_registry, tmp_pa
     from agent_flow import run_flow
 
     flow, registry, seen = flow_and_registry
-    run_flow(flow, registry=registry, run_dir=str(tmp_path), mock_agents=True, node_overrides={"n": {"model": "prov/big"}})
+    run_flow(flow, registry=registry, run_dir=str(tmp_path), mock_agents=True, run_config={"nodes": {"n": {"model": "prov/big"}}})
     assert seen["model"] == "prov/big"
 
 

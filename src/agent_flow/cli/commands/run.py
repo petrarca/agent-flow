@@ -83,11 +83,12 @@ def register(app, ctx: RunCliContext) -> None:
         console = get_console()
         cfg = build_run_config(
             config_file=config or None,  # list[str] of --config sources (paths and/or inline JSON)
+            base=ctx.run_config,  # the pipeline's run_config= defaults (lowest explicit source)
             runtime=runtime,
             mock_agents=mock_agents,  # None (env/config wins) | True | False (explicit)
             backend=backend,
-            run_dir=run_dir or (ctx.default_run_dir or None),
-            agent_dir=agent_dir or (ctx.default_agent_dir or None),
+            run_dir=run_dir,
+            agent_dir=agent_dir,
             instructions=instructions,
             instructions_file=instructions_file,
             llm_concurrency=llm_concurrency,

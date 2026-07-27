@@ -189,7 +189,7 @@ def test_programmatic_run_flow_delivers_durations(flow_with_duration, tmp_path):
     from agent_flow import run_flow
 
     flow, registry, seen = flow_with_duration
-    run_flow(flow, registry=registry, run_dir=str(tmp_path), mock_agents=True, durations={"long": 900})
+    run_flow(flow, registry=registry, run_dir=str(tmp_path), mock_agents=True, run_config={"durations": {"long": 900}})
     assert seen["idle"] == 900
 
 

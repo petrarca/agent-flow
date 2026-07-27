@@ -163,21 +163,29 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
     return merged
 
 
+def _validate_config_keys(data: dict[str, Any]) -> dict[str, Any]:
+    """Reject unknown top-level keys (a typo), against RunConfig fields + `params`.
+
+    Shared by the --config assembly and the programmatic run_config= base, so both
+    fail loudly on the same typo. Returns the dict unchanged for chaining.
+    """
+    allowed = set(RunConfig.model_fields) | {"params"}
+    unknown = set(data) - allowed
+    if unknown:
+        raise ValueError(f"unknown run config keys {sorted(unknown)} (allowed: {sorted(RunConfig.model_fields)} + params)")
+    return data
+
+
 def _assemble_config(sources: list[str]) -> dict[str, Any]:
     """Load each --config source in order and deep-merge them (later wins).
 
     Validates the top-level keys of the MERGED result once (so a typo in any
-    layer fails loudly), against the RunConfig fields plus the `params` domain
-    section. Returns the merged dict, ready to feed the settings model.
+    layer fails loudly). Returns the merged dict, ready to feed the settings model.
     """
     merged: dict[str, Any] = {}
     for value in sources:
         merged = _deep_merge(merged, _load_config_source(value))
-    allowed = set(RunConfig.model_fields) | {"params"}
-    unknown = set(merged) - allowed
-    if unknown:
-        raise ValueError(f"unknown run config keys {sorted(unknown)} (allowed: {sorted(RunConfig.model_fields)} + params)")
-    return merged
+    return _validate_config_keys(merged)
 
 
 class RunConfig(BaseSettings):
@@ -261,19 +269,25 @@ class RunConfig(BaseSettings):
     # which is fine: the CLI builds a RunConfig once per process. Holds the
     # already-assembled + validated config dict (merged across every --config).
     _af_config_data: dict[str, Any] | None = None
+    # The programmatic `run_config=` base layer — the pipeline author's own
+    # defaults, BELOW --config in precedence. Same class-stash mechanism as above.
+    _af_base_data: dict[str, Any] | None = None
 
-    def __init__(self, _config_sources: str | Path | list[str] | None = None, **kwargs: Any) -> None:
+    def __init__(self, _config_sources: str | Path | list[str] | None = None, _base: dict[str, Any] | None = None, **kwargs: Any) -> None:
         # Assemble the --config layer up front: load each source (path or inline
         # JSON), deep-merge in order, validate the merged top-level keys. One
-        # value or a list are both accepted; None means "no --config".
+        # value or a list are both accepted; None means "no --config". `_base` is
+        # the programmatic run_config= dict — validated the same way, applied below.
         sources: list[str] = []
         if _config_sources:
             sources = [str(_config_sources)] if isinstance(_config_sources, (str, Path)) else [str(s) for s in _config_sources]
         type(self)._af_config_data = _assemble_config(sources) if sources else None
+        type(self)._af_base_data = _validate_config_keys(dict(_base)) if _base else None
         try:
             super().__init__(**kwargs)
         finally:
             type(self)._af_config_data = None
+            type(self)._af_base_data = None
 
     @classmethod
     def settings_customise_sources(
@@ -285,13 +299,15 @@ class RunConfig(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         data = getattr(settings_cls, "_af_config_data", None)
-        # Precedence (first wins): CLI/init > env > .env > --config layer > defaults.
-        # The assembled --config dict is fed via an InitSettingsSource (a plain
-        # dict source) placed BELOW env/.env — same slot the single YAML file
-        # source held before, now carrying the deep-merged result of every source.
+        base = getattr(settings_cls, "_af_base_data", None)
+        # Precedence (first wins): CLI/init > env > .env > --config > run_config=
+        # base > defaults. Both config layers are fed via InitSettingsSource (plain
+        # dict sources); the --config layer sits ABOVE the programmatic base.
         sources: tuple[PydanticBaseSettingsSource, ...] = (init_settings, env_settings, dotenv_settings)
         if data:
             sources = (*sources, InitSettingsSource(settings_cls, init_kwargs=data))
+        if base:
+            sources = (*sources, InitSettingsSource(settings_cls, init_kwargs=base))
         return sources
 
     def resolved_instructions(self) -> str:
@@ -306,21 +322,41 @@ class RunConfig(BaseSettings):
         self.nodes[node] = entry.model_copy(update={"instructions": text})
 
 
-def build_run_config(config_file: str | Path | list[str] | None = None, **cli_overrides: Any) -> RunConfig:
+def normalize_run_config(run_config: "dict[str, Any] | RunConfig | None") -> dict[str, Any] | None:
+    """Coerce a programmatic run_config= (dict OR RunConfig) to a plain dict, or None.
+
+    A RunConfig instance is dumped with defaults EXCLUDED, so it contributes only
+    the settings the caller actually set — it behaves as a base layer, not a wall
+    of defaults that would shadow env/.env.
+    """
+    if run_config is None:
+        return None
+    if isinstance(run_config, RunConfig):
+        return run_config.model_dump(exclude_defaults=True)
+    return dict(run_config)
+
+
+def build_run_config(
+    config_file: str | Path | list[str] | None = None,
+    base: "dict[str, Any] | RunConfig | None" = None,
+    **cli_overrides: Any,
+) -> RunConfig:
     """Construct a RunConfig from the source stack, honoring the precedence chain.
 
     Args:
         config_file: optional `--config` source(s). Each is a file path OR inline
-            JSON (`{...}`); a list is deep-merged in order (later wins). The lowest
-            explicit source.
+            JSON (`{...}`); a list is deep-merged in order (later wins).
+        base: the programmatic `run_config=` — a dict or a RunConfig — the
+            pipeline author's own defaults, the LOWEST explicit source (below
+            --config).
         **cli_overrides: generic settings set on the CLI. A None value means "not
             set on the CLI" and is dropped so a lower-priority source (env / .env
-            / --config / default) wins — otherwise a None init kwarg would clobber it.
+            / --config / base / default) wins — else a None init kwarg would clobber it.
 
-    Precedence (first wins): CLI overrides > env (AGENT_FLOW_*) > .env > --config > default.
+    Precedence (first wins): CLI > env (AGENT_FLOW_*) > .env > --config > base > default.
     """
     init_kwargs = {k: v for k, v in cli_overrides.items() if v is not None}
-    return RunConfig(_config_sources=config_file, **init_kwargs)
+    return RunConfig(_config_sources=config_file, _base=normalize_run_config(base), **init_kwargs)
 
 
 # --- Global settings lifecycle (house pattern: lru_cache singleton) ---------

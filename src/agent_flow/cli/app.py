@@ -21,11 +21,12 @@ imported lazily so the core stays install-light.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from agent_flow.engine import Node
     from agent_flow.flowdef import FlowDef
+    from agent_flow.run_config import RunConfig
 
 
 def run_cli(
@@ -33,8 +34,7 @@ def run_cli(
     *,
     name: str = "agent-flow",
     llm_tag: str = "llm",
-    default_agent_dir: str = "",
-    default_run_dir: str = "",
+    run_config: dict[str, Any] | RunConfig | None = None,
     params_model: type | None = None,
     registry: object = None,
     version: str | None = None,
@@ -59,9 +59,10 @@ def run_cli(
     shown as a secondary layer (the two-layer client/server convention). Omit it
     and only the agent-flow version is shown.
 
-    `default_agent_dir` / `default_run_dir` supply the pipeline's own fallbacks
-    when neither CLI nor env set them; `default_run_dir` may use `{param}`
-    templating, resolved strictly at run time.
+    `run_config` supplies the pipeline's own run-config defaults (a dict or a
+    RunConfig) — e.g. `{"agent_dir": ..., "run_dir": "{param}/out"}`. It is the
+    LOWEST explicit source: CLI flags, env, .env, and --config all override it.
+    `run_dir` may use `{param}` templating, resolved strictly at run time.
 
     Domain params (`params_model`):
       - None (default): -p values pass through as an untyped string dict.
@@ -102,27 +103,24 @@ def run_cli(
         build_nodes = lambda: compile_flow(flow_def, reg)  # noqa: E731
         if name == "agent-flow":
             name = flow_def.name
-        # The FlowDef's flow-level agent_dir is the pipeline's own default (used
-        # unless the CLI/env/config sets --agent-dir). backend / run_instructions /
-        # llm_concurrency each have a CLI flag + env var, so the FlowDef values are
-        # documentation here. `run_context` has NO flag — it is a pipeline
-        # DECLARATION, not a per-run knob — so it must be threaded through, or a
-        # FlowDef's run-wide rules would be silently dropped under run_cli while
-        # working under run_flow.
-        if not default_agent_dir and flow_def.agent_dir:
-            default_agent_dir = flow_def.agent_dir
+        # `run_context` has NO CLI flag — it is a pipeline DECLARATION, not a
+        # per-run knob — so it must be threaded through, or a FlowDef's run-wide
+        # rules would be silently dropped under run_cli while working under
+        # run_flow. (agent_dir/backend/llm_concurrency are no longer on the FlowDef
+        # — they are run config; pass them via run_config= or the CLI/env.)
         run_context = tuple(flow_def.run_context)
     else:
         build_nodes = flow
         run_context = ()
+
+    from agent_flow.run_config import normalize_run_config
 
     ctx = RunCliContext(
         build_nodes=build_nodes,
         run_context=run_context,
         name=name,
         llm_tag=llm_tag,
-        default_agent_dir=default_agent_dir,
-        default_run_dir=default_run_dir,
+        run_config=normalize_run_config(run_config) or {},
         params_model=params_model,
         registry=registry,
         version=version,

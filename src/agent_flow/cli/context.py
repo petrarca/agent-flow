@@ -10,7 +10,8 @@ is the `ctx` — the consumer-supplied bits every command may need.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from agent_flow.engine import Node
 
@@ -22,9 +23,8 @@ class RunCliContext:
     build_nodes: Callable[[], list[Node]]  # returns the pipeline's Node list
     name: str  # flow name (shown in help/summary; used as the Prefect flow name)
     llm_tag: str  # concurrency tag for node execution
-    default_agent_dir: str  # fallback agent-definitions dir when unset by CLI/env
-    default_run_dir: str  # fallback run_dir ({param} templating allowed)
     params_model: type | None  # optional pydantic-settings model for -p validation
+    run_config: dict[str, Any] = field(default_factory=dict)  # the pipeline's own run-config defaults (run_config=); LOWEST explicit source
     run_context: tuple[str, ...] = ()  # run-wide context SOURCES declared on the FlowDef (paths/globs; content read per node)
     registry: object = None  # optional FlowRegistry (named gates/exports/hooks); None -> engine default
     version: str | None = None  # the CONSUMER's app version (shown by `version`); None -> show agent-flow only
