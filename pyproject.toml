@@ -62,10 +62,16 @@ all = ["prefect>=3.0.0", "typer>=0.12", "rich>=13.0"]
 # Development tooling. Includes the runtime extras (prefect + cli) so `task
 # install` yields a full dev env able to run the entire test suite (the
 # integration suite exercises the Prefect backend; CLI tests need rich/typer).
-dev = ["petrarca-agent-flow[all]", "ruff", "pytest", "pytest-cov", "pre-commit", "setuptools-scm"]
+dev = ["petrarca-agent-flow[all]", "ruff", "mypy", "pytest", "pytest-cov", "pre-commit", "setuptools-scm"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# PEP 561: ship the inline-type marker so consumers' type checkers actually READ
+# our annotations (without it they treat the package as untyped). Backed by mypy
+# in `task verify` — the marker is a promise, the type check keeps it honest.
+[tool.setuptools.package-data]
+agent_flow = ["py.typed"]
 
 [tool.setuptools_scm]
 tag_regex = "^v(?P<version>\\d+(?:\\.\\d+)*)"
@@ -93,3 +99,11 @@ markers = [
 ]
 testpaths = ["tests"]
 addopts = ["-m unit", "--strict-markers"]
+
+[tool.mypy]
+python_version = "3.14"
+files = ["src/agent_flow"]
+# The package ships inline types (PEP 561 py.typed), so annotations are part of
+# the public contract — this keeps them honest. Third-party stubs are not
+# required (several deps ship none), hence ignore_missing_imports.
+ignore_missing_imports = true

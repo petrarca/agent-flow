@@ -107,9 +107,13 @@ def _compile_agent_node(nd: NodeDef, registry, schema) -> Node:
 
     An `impl_ref` resolves to a registered in-process agent impl (the node then
     runs in-process, no subprocess); absent it, the node runs as a subprocess.
+
+    Precondition: `nd.agent` is set — `_compile_node` dispatches here only when it
+    is (a NodeDef without an agent compiles to a custom-run node instead).
     """
     from agent_flow.node_builder import agent_node
 
+    assert nd.agent, "internal: _compile_agent_node requires NodeDef.agent"
     impl = registry.get_agent_impl(nd.impl_ref) if nd.impl_ref else None
     return agent_node(
         name=nd.name,

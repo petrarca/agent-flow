@@ -30,6 +30,24 @@ from agent_flow.runners.base import MODE_PROCESS, TRANSPORT_SUBPROCESS, AgentInv
 _STDERR_FIELD = re.compile(r'\b(error|ref)=("(?:[^"\\]|\\.)*"|[^\s]+)')
 
 
+def _as_dict(value: object) -> dict:
+    """A nested opencode event field as a dict — `{}` when absent or the wrong shape.
+
+    opencode's NDJSON nests dicts (`part`, `state`, `metadata`, `error.data`, …)
+    but the wire is untrusted: a field may be missing, null, or a scalar. This
+    keeps every access total (never raises) AND gives the caller a real `dict`
+    type instead of `Any | dict | None`, which the previous
+    `x.get(k) if isinstance(x.get(k), dict) else {}` idiom could not express
+    (it also called `.get` twice).
+    """
+    return value if isinstance(value, dict) else {}
+
+
+def _as_str(value: object) -> str:
+    """A wire field as a str — `""` when absent or the wrong shape (see `_as_dict`)."""
+    return value if isinstance(value, str) else ""
+
+
 class OpenCodeRunner:
     """opencode: named agents via --agent; NDJSON event stream via --format json."""
 
@@ -107,7 +125,7 @@ class OpenCodeRunner:
             ev = json.loads(stripped)
         except json.JSONDecodeError:
             return Event.none()
-        part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
+        part = _as_dict(ev.get("part"))
         ptype = part.get("type") or ev.get("type") or "event"
 
         # A top-level runtime error (e.g. model unresolved, provider failure).
@@ -115,8 +133,8 @@ class OpenCodeRunner:
         # and exits non-zero without producing a control sidecar. Surface it so
         # the supervisor can report WHY the run has no sidecar.
         if ptype == "error":
-            err = ev.get("error") if isinstance(ev.get("error"), dict) else {}
-            data = err.get("data") if isinstance(err.get("data"), dict) else {}
+            err = _as_dict(ev.get("error"))
+            data = _as_dict(err.get("data"))
             name = err.get("name") or "error"
             msg = data.get("message") or ""
             ref = data.get("ref")
@@ -239,9 +257,9 @@ def _opencode_tool_view(part: dict) -> tuple[str, str, str, str, int, int]:
     diff/added/removed = the file change (from metadata.diff + filediff.*).
     """
     tool = part.get("tool", "tool")
-    state = part.get("state") if isinstance(part.get("state"), dict) else {}
-    inp = state.get("input") if isinstance(state.get("input"), dict) else {}
-    meta = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
+    state = _as_dict(part.get("state"))
+    inp = _as_dict(state.get("input"))
+    meta = _as_dict(state.get("metadata"))
 
     # Build the "target" part: opencode's own state.title if present (grep->the
     # pattern, edit->"Edit <file>", …), else the first present input field.
@@ -275,10 +293,10 @@ def _opencode_tool_diff(meta: dict) -> tuple[str, int, int]:
     Pure extraction: the patch text from metadata.diff, the counts from
     metadata.filediff.{additions,deletions}. No parsing/computing.
     """
-    diff = meta.get("diff") if isinstance(meta.get("diff"), str) else ""
-    filediff = meta.get("filediff") if isinstance(meta.get("filediff"), dict) else {}
-    if not diff and isinstance(filediff.get("patch"), str):
-        diff = filediff["patch"]
+    diff = _as_str(meta.get("diff"))
+    filediff = _as_dict(meta.get("filediff"))
+    if not diff:
+        diff = _as_str(filediff.get("patch"))
     added = filediff.get("additions")
     removed = filediff.get("deletions")
     return diff, int(added) if isinstance(added, (int, float)) else 0, int(removed) if isinstance(removed, (int, float)) else 0

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from types import FrameType
 
 from loguru import logger
 
@@ -41,7 +42,8 @@ class InterceptHandler(logging.Handler):
             level = record.levelno
 
         # Find the frame where the log call originated (skip stdlib logging frames).
-        frame, depth = logging.currentframe(), 2
+        frame: FrameType | None = logging.currentframe()
+        depth = 2
         while frame and frame.f_code.co_filename == logging.__file__:
             frame = frame.f_back
             depth += 1

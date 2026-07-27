@@ -21,7 +21,7 @@ Prefect-free, guarded by the import-isolation test.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 import anyio
 
@@ -42,7 +42,11 @@ class PrefectBackend(FlowBackend):
         """Run the walk inside an async Prefect @flow so submit()/get_run_logger() work."""
         from prefect import flow
 
-        return await flow(work, name=name)()
+        # Decorator-FACTORY form — `flow(name=...)(work)` rather than
+        # `flow(work, name=...)`: identical at runtime, but it is the shape
+        # Prefect's own type stubs model (they have no overload for a function
+        # plus keyword options in one call).
+        return await flow(name=name)(work)()
 
     async def _execute_parallel(self, node_names: list[str], run_node: RunNode) -> dict[str, NodeOutcome]:
         """Fan out nodes as async Prefect tasks and gather; a non-completed task degrades.
@@ -56,13 +60,22 @@ class PrefectBackend(FlowBackend):
         from prefect.futures import wait
 
         # Wrap the engine's backend-agnostic run_node as a tagged Prefect task so
-        # it participates in the run UI + the tag concurrency limit.
-        node_task = task(run_node, tags=[self._llm_tag], name="node")
+        # it participates in the run UI + the tag concurrency limit. Decorator-
+        # FACTORY form for the same reason as run_session above.
+        node_task = task(tags=[self._llm_tag], name="node")(run_node)
         futures = {name: node_task.submit(name) for name in node_names}
 
         def _gather() -> dict[str, NodeOutcome]:
             wait(list(futures.values()))
-            return {name: (fut.result() if fut.state.is_completed() else NodeOutcome(status="degraded")) for name, fut in futures.items()}
+            # `run_node` is a coroutine function, so Prefect's stubs type the
+            # future's payload as Awaitable[NodeOutcome]; at RUNTIME Prefect has
+            # already resolved an async task's result, so `.result()` hands back
+            # the NodeOutcome itself (covered by the prefect-parametrized
+            # integration tests). Hence the cast.
+            return {
+                name: (cast("NodeOutcome", fut.result()) if fut.state.is_completed() else NodeOutcome(status="degraded"))
+                for name, fut in futures.items()
+            }
 
         return await anyio.to_thread.run_sync(_gather)
 

@@ -90,7 +90,7 @@ class JsonSchema:
         return ValidationOutcome(valid=not errors, errors=errors)
 
 
-def coerce_schema(schema: ResultSchema | dict | type | None) -> ResultSchema | None:
+def coerce_schema(schema: object) -> ResultSchema | None:
     """Normalize the caller-supplied schema to a ResultSchema (or None).
 
     Accepts:
@@ -99,6 +99,12 @@ def coerce_schema(schema: ResultSchema | dict | type | None) -> ResultSchema | N
       - a pydantic BaseModel SUBCLASS -> wrapped in PydanticSchema (the common,
         obvious case — pydantic is a core dependency),
       - a ResultSchema implementation -> used as-is.
+
+    Typed `object` on purpose: this is the boundary that VALIDATES an untyped,
+    caller-supplied value (it reaches here as `Node.result_schema` /
+    `AgentInvocation.result_schema`, both `object`), and anything unsupported
+    raises TypeError below. A narrower annotation would just push a cast onto
+    every call site without making the input any more trustworthy.
     """
     if schema is None:
         return None

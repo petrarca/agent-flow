@@ -40,7 +40,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -330,11 +330,14 @@ class RunnerBase(Protocol):
         """Return this runner's static identity + requirements."""
         ...
 
-    def parse_event(self, raw: object) -> Event:
+    def parse_event(self, raw: Any) -> Event:
         """Parse one unit of the runtime's event stream into a neutral Event.
 
         `raw` is a stdout line (str) for a subprocess runner or an already-decoded
-        event dict for an http-sse runner — the runner knows its own shape.
+        event dict for an http-sse runner — the runner knows its own shape. Typed
+        `Any` (not `object`) precisely BECAUSE the shape is transport-specific:
+        each sub-protocol pins it (`AgentRunner` takes a `str` line), and a
+        narrower base would make every concrete runner an invalid override.
         """
         ...
 

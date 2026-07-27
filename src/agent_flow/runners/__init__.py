@@ -31,6 +31,8 @@ Mock and inproc are NOT runtimes: they are executor MODES selected in
 
 from __future__ import annotations
 
+from typing import cast
+
 from agent_flow.runners.base import (
     DEFAULT_IDLE_TIMEOUT_S,
     MODE_PROCESS,
@@ -117,7 +119,12 @@ def get_executor(name: str, *, serve_url: str = "") -> AgentExecutor:
         from agent_flow.runners.serve_executor import ServeExecutor
 
         return ServeExecutor(runner, url=serve_url)
-    return SubprocessExecutor(runner)
+    # The registry is heterogeneous (one entry per runtime, any transport); the
+    # `transport` tag on the runner's own spec is what discriminates them. Having
+    # ruled out the remote transports above, this runner IS a subprocess runner
+    # (i.e. also satisfies AgentRunner: build_command + name) — a fact carried by
+    # the spec, not by the static type, hence the cast.
+    return SubprocessExecutor(cast("AgentRunner", runner))
 
 
 # --- self-registration ------------------------------------------------------

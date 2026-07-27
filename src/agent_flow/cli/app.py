@@ -25,10 +25,11 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agent_flow.engine import Node
+    from agent_flow.flowdef import FlowDef
 
 
 def run_cli(
-    flow: Callable[[], list[Node]] | object,
+    flow: FlowDef | Callable[[], list[Node]],
     *,
     name: str = "agent-flow",
     llm_tag: str = "llm",

@@ -79,11 +79,17 @@ tasks:
     cmds:
       - .venv/bin/ruff check --fix src tests
 
+  typecheck:
+    desc: Static type check (mypy) — the annotations are public API (py.typed)
+    cmds:
+      - .venv/bin/mypy
+
   verify:
-    desc: CI gate — lint + format check, no fixes (fails on any deviation)
+    desc: CI gate — lint + format + type check, no fixes (fails on any deviation)
     cmds:
       - .venv/bin/ruff check src tests
       - .venv/bin/ruff format --check src tests
+      - .venv/bin/mypy
 
   test:
     desc: Run unit tests (default; fast, no subprocess)

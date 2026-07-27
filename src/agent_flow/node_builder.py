@@ -26,6 +26,7 @@ from agent_flow.core import DEFAULT_IDLE_TIMEOUT_S
 from agent_flow.engine import Criticality, Node, RunContext
 from agent_flow.gates import Gate
 from agent_flow.runners import AgentInvocation, MockExecutor, get_executor
+from agent_flow.runners.executor import AgentExecutor
 from agent_flow.runners.inprocess import InProcessExecutor
 from agent_flow.utils import resolve_template
 
@@ -261,7 +262,9 @@ def agent_node(
         if _mock_behaviour is not None:
             _behaviour_name = getattr(_mock_behaviour, "__name__", repr(_mock_behaviour))
             log(f"node {name}: --mock-agents ON -> MockExecutor (agent={agent} behaviour={_behaviour_name})")
-            executor = MockExecutor(_mock_behaviour, work_order=resolved_inputs, tmpl=tmpl)
+            # Annotated at the seam type: the three branches below pick different
+            # concrete executors, all of which satisfy the AgentExecutor contract.
+            executor: AgentExecutor = MockExecutor(_mock_behaviour, work_order=resolved_inputs, tmpl=tmpl)
         elif impl is not None:
             # In-process runs are labeled "inproc" (their canonical runtime), NOT
             # the `runtime` string — that names a SUBPROCESS runtime and does not

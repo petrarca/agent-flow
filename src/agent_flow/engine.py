@@ -506,8 +506,10 @@ async def _apply_exports(node: Node, result: Any, obj: Any, log: Callable[[str],
             derived = dict(await _maybe_await(registry.get_export(node.export_ref)(payload)) or {})
         elif callable(spec):
             derived = dict(await _maybe_await(spec(payload)) or {})
-        else:
+        elif isinstance(spec, dict):  # the declarative {param_name: result_field} map
             derived = {param: v for param, fld in spec.items() if (v := _read_field(payload, fld)) is not _MISSING}
+        else:  # unreachable: the guard above returns when neither spec nor export_ref is set
+            derived = {}
         if derived:
             get_run_context().update(derived)
             log(f"node {node.name}: exported {sorted(derived)} to run-context")
@@ -595,8 +597,11 @@ def build_flow(
     node_group = {n.name: (n.parallel_group or n.name) for n in nodes}
     _emit = _make_node_emitter(on_node_event)
 
-    def _make_run_node(wd: Path, params: dict, logger, pending: dict[str, str]) -> Callable[[str], NodeOutcome]:
+    def _make_run_node(wd: Path, params: dict, logger, pending: dict[str, str]) -> Callable[[str], Awaitable[NodeOutcome]]:
         """Build the backend-agnostic 'run ONE node' closure for this run.
+
+        The returned closure is a COROUTINE function (the backend awaits it) —
+        the same shape `backends.base.RunNode` names.
 
         Captures the resolved run_dir/params/logger. The backend calls it (inline
         or on N threads / Prefect tasks) but never decides what running a node

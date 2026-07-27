@@ -46,7 +46,7 @@ jobs:
       - name: Install dependencies (editable + dev extras)
         run: task install
 
-      - name: Lint + format check (read-only)
+      - name: Lint + format + type check (read-only)
         run: task verify
 
       - name: Unit + integration tests (mock; opencode e2e is skipped)
