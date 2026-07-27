@@ -9,19 +9,16 @@ them at run time (gates/exports) or the run uses them (schema).
 
 from __future__ import annotations
 
+import anyio
+
 from agent_flow.engine import Node
 from agent_flow.flowdef.models import FlowDef, NodeDef
 
 
-def run_flow(flow_def: FlowDef, *, registry=None, run_dir: str = "", start_from: str = "", only: str = "", **params):
-    """Compile and RUN a FlowDef in one call — the programmatic one-liner.
-
-    Hides the plumbing: builds a default FlowRegistry (built-in gates) when none
-    is given, compiles the FlowDef to nodes, builds the flow with the FlowDef's
-    flow-wide settings (agent_dir/backend/shared_*/llm_concurrency), and runs it.
-    Returns the {node: NodeOutcome} result. `params` are the run params (e.g.
-    product_key=…, runtime=…). For the CLI (run/flow nodes), use run_cli(flow_def).
-    """
+def _build_pipeline_and_call(flow_def: FlowDef, registry, run_dir: str, start_from: str, only: str, params: dict):
+    """Shared plumbing for (a)run_flow: build the flow callable + assemble the
+    call kwargs. Returns (pipeline, call_kwargs). Both entry points differ only in
+    how they invoke the (async) pipeline callable."""
     from agent_flow.engine import build_flow
 
     if registry is None:
@@ -44,7 +41,32 @@ def run_flow(flow_def: FlowDef, *, registry=None, run_dir: str = "", start_from:
         call["start_from"] = start_from
     if only:
         call["only"] = only
-    return pipeline(**call)
+    return pipeline, call
+
+
+async def arun_flow(flow_def: FlowDef, *, registry=None, run_dir: str = "", start_from: str = "", only: str = "", **params):
+    """Compile and RUN a FlowDef in one call — the async programmatic one-liner.
+
+    The native async entry: `await arun_flow(...)` composes on a consumer's event
+    loop (a FastAPI handler, a notebook) with no bridging. Same behaviour as
+    `run_flow`, minus the `anyio.run` wrapper. Returns the {node: NodeOutcome}.
+    """
+    pipeline, call = _build_pipeline_and_call(flow_def, registry, run_dir, start_from, only, params)
+    return await pipeline(**call)
+
+
+def run_flow(flow_def: FlowDef, *, registry=None, run_dir: str = "", start_from: str = "", only: str = "", **params):
+    """Compile and RUN a FlowDef in one call — the sync programmatic one-liner.
+
+    A thin `anyio.run` wrapper over `arun_flow`, keeping the long-standing
+    blocking signature for consumers that are not on an event loop (scripts, the
+    CLI). Hides the plumbing: builds a default FlowRegistry (built-in gates) when
+    none is given, compiles the FlowDef to nodes, builds the flow with the
+    FlowDef's flow-wide settings (agent_dir/backend/shared_*/llm_concurrency), and
+    runs it. Returns the {node: NodeOutcome} result. `params` are the run params
+    (e.g. product_key=…, runtime=…). For the CLI (run/flow nodes), use run_cli.
+    """
+    return anyio.run(lambda: arun_flow(flow_def, registry=registry, run_dir=run_dir, start_from=start_from, only=only, **params))
 
 
 def compile_flow(flow_def: FlowDef, registry) -> list[Node]:

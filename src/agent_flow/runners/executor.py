@@ -129,14 +129,21 @@ class AgentExecutor(abc.ABC):
     name: str
 
     @abc.abstractmethod
-    def run(self, inv: AgentInvocation) -> AgentResult:
-        """Execute the invocation and return an AgentResult.
+    async def run(self, inv: AgentInvocation) -> AgentResult:
+        """Execute the invocation and return an AgentResult (async — the engine
+        awaits it).
 
         Implementations receive the FULL neutral invocation and must return a
         populated AgentResult (control envelope with a `status`, telemetry, and
         the validated `result_obj` when the invocation carried a result_schema).
         Whether that comes from a supervised subprocess + sidecar or an
         in-process call is the implementation's concern.
+
+        The contract is a coroutine so async-native agent libraries (PydanticAI)
+        are first-class: a subprocess executor `await`s its supervision loop; an
+        in-process executor `await`s the consumer's impl if it is a coroutine (and
+        offloads a blocking sync impl to a worker thread). A CPU-only executor may
+        implement it as a plain `async def` that never awaits.
 
         Concrete subclasses MAY accept additional keyword-only arguments beyond
         `inv` for their own mechanism (e.g. `SubprocessExecutor` accepts an

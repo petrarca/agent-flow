@@ -59,21 +59,21 @@ class _FakeBackend(FlowBackend):
 
     name = "fake"
 
-    def run_session(self, name, work):
-        return work()
+    async def run_session(self, name, work):
+        return await work()
 
-    def _execute_parallel(self, node_names, run_node: RunNode):
+    async def _execute_parallel(self, node_names, run_node: RunNode):
         out = {}
         for name in node_names:
             try:
-                out[name] = run_node(name)
+                out[name] = await run_node(name)
             except NodeBlocked:
                 raise
             except Exception:  # noqa: BLE001
                 out[name] = NodeOutcome(status="degraded")
         return out
 
-    def apply_concurrency_limit(self, tag, limit, info, warn):  # pragma: no cover
+    async def apply_concurrency_limit(self, tag, limit, info, warn):  # pragma: no cover
         pass
 
     def get_logger(self):
@@ -94,7 +94,7 @@ class _Node:  # run_group only reads .name
 
 
 def _run_node_factory(record, fail=(), block=()):
-    def run_node(name):
+    async def run_node(name):
         record.append(name)
         if name in block:
             raise NodeBlocked(f"{name}: fatal")
@@ -105,57 +105,65 @@ def _run_node_factory(record, fail=(), block=()):
     return run_node
 
 
-def test_run_group_solo_inline():
+@pytest.mark.anyio
+async def test_run_group_solo_inline():
     ran = []
-    out = _FakeBackend().run_group([_Node("a")], _run_node_factory(ran))
+    out = await _FakeBackend().run_group([_Node("a")], _run_node_factory(ran))
     assert ran == ["a"] and out["a"].status == "ok"
 
 
-def test_run_group_parallel_runs_all():
+@pytest.mark.anyio
+async def test_run_group_parallel_runs_all():
     ran = []
-    out = _FakeBackend().run_group([_Node("p1"), _Node("p2"), _Node("p3")], _run_node_factory(ran))
+    out = await _FakeBackend().run_group([_Node("p1"), _Node("p2"), _Node("p3")], _run_node_factory(ran))
     assert set(out) == {"p1", "p2", "p3"} and all(o.status == "ok" for o in out.values())
 
 
-def test_run_group_backfills_missing_name_as_degraded():
+@pytest.mark.anyio
+async def test_run_group_backfills_missing_name_as_degraded():
     # A backend that drops a node -> run_group backfills it to degraded (never lost).
     class _Dropping(_FakeBackend):
-        def _execute_parallel(self, node_names, run_node):
+        async def _execute_parallel(self, node_names, run_node):
             return {node_names[0]: NodeOutcome(status="ok")}  # omit the rest
 
-    out = _Dropping().run_group([_Node("a"), _Node("b")], _run_node_factory([]))
+    out = await _Dropping().run_group([_Node("a"), _Node("b")], _run_node_factory([]))
     assert out["a"].status == "ok" and out["b"].status == "degraded"
 
 
-def test_run_group_propagates_node_blocked():
+@pytest.mark.anyio
+async def test_run_group_propagates_node_blocked():
     with pytest.raises(NodeBlocked):
-        _FakeBackend().run_group([_Node("ok"), _Node("block")], _run_node_factory([], block=("block",)))
+        await _FakeBackend().run_group([_Node("ok"), _Node("block")], _run_node_factory([], block=("block",)))
 
 
 # --- InProcessBackend-specific primitives ---------------------------------------
 
 
-def test_local_parallel_threadpool_runs_all():
+@pytest.mark.anyio
+async def test_local_parallel_threadpool_runs_all():
     ran = []
-    out = InProcessBackend()._execute_parallel(["p1", "p2", "p3"], _run_node_factory(ran))
+    out = await InProcessBackend()._execute_parallel(["p1", "p2", "p3"], _run_node_factory(ran))
     assert set(out) == {"p1", "p2", "p3"} and all(o.status == "ok" for o in out.values())
 
 
-def test_local_parallel_degrades_on_exception():
-    out = InProcessBackend()._execute_parallel(["ok", "bad"], _run_node_factory([], fail=("bad",)))
+@pytest.mark.anyio
+async def test_local_parallel_degrades_on_exception():
+    out = await InProcessBackend()._execute_parallel(["ok", "bad"], _run_node_factory([], fail=("bad",)))
     assert out["ok"].status == "ok" and out["bad"].status == "degraded"
 
 
-def test_local_parallel_propagates_node_blocked():
+@pytest.mark.anyio
+async def test_local_parallel_propagates_node_blocked():
     with pytest.raises(NodeBlocked):
-        InProcessBackend()._execute_parallel(["ok", "block"], _run_node_factory([], block=("block",)))
+        await InProcessBackend()._execute_parallel(["ok", "block"], _run_node_factory([], block=("block",)))
 
 
-def test_local_concurrency_limit_sets_semaphore():
+@pytest.mark.anyio
+async def test_local_concurrency_limit_sets_semaphore():
     b = InProcessBackend()
     assert b._sema is None
     msgs = []
-    b.apply_concurrency_limit("llm", 2, msgs.append, msgs.append)
+    await b.apply_concurrency_limit("llm", 2, msgs.append, msgs.append)
     assert b._sema is not None and any("2" in m for m in msgs)
 
 

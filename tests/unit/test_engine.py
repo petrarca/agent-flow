@@ -8,6 +8,7 @@ example running green in integration.
 
 from pathlib import Path
 
+import anyio
 import pytest
 
 from agent_flow.engine import Node, NodeBlocked, interpret, plan_groups
@@ -58,9 +59,16 @@ def test_plan_groups_cycle():
         plan_groups(nodes)
 
 
+def _interpret(node, **kw):
+    # interpret is async since the v2 migration; these pure orchestration tests
+    # drive it synchronously via a single anyio.run bridge (no event loop needed).
+    kw.setdefault("on_error", _criticality)
+    return anyio.run(lambda: interpret(node, **kw))
+
+
 def _run(tmp_path, node):
     # interpret returns a NodeOutcome; most tests only care about the status.
-    return interpret(node, run_dir=Path(tmp_path), params={}, on_error=_criticality).status
+    return _interpret(node, run_dir=Path(tmp_path), params={}).status
 
 
 def _criticality(node, exc):
@@ -120,7 +128,7 @@ def test_interpret_delivers_on_event_factory_to_runcontext(tmp_path):
         seen["params_has_no_on_event"] = "on_event_factory" not in ctx.params
         return {}
 
-    interpret(Node("a", run=run), run_dir=Path(tmp_path), params={}, on_error=_criticality, on_event_factory=marker)
+    _interpret(Node("a", run=run), run_dir=Path(tmp_path), params={}, on_event_factory=marker)
     assert seen["factory_is_marker"] is True
     assert seen["params_has_no_on_event"] is True
 
@@ -169,7 +177,7 @@ def test_one_time_instruction_reaches_next_attempt_only(tmp_path):
         return Continue()
 
     node = Node("a", run=run, gate=gate, max_cycles=2)
-    interpret(node, run_dir=Path(tmp_path), params={}, on_error=_criticality)
+    _interpret(node, run_dir=Path(tmp_path), params={})
     # attempt 0: none (fresh run); attempt 1: the instruction; attempt 2: cleared.
     assert seen == ["", "fix the Deployment section", ""]
 
@@ -183,7 +191,7 @@ def test_one_time_instruction_seeded_for_first_attempt(tmp_path):
         seen["instr"] = ctx.one_time_instruction
         return {}
 
-    interpret(Node("a", run=run), run_dir=Path(tmp_path), params={}, on_error=_criticality, one_time_instruction="redo finding X")
+    _interpret(Node("a", run=run), run_dir=Path(tmp_path), params={}, one_time_instruction="redo finding X")
     assert seen["instr"] == "redo finding X"
 
 
@@ -191,6 +199,6 @@ def test_cross_node_goto_carries_instruction_on_outcome(tmp_path):
     # A cross-node GoTo surfaces its instruction on NodeOutcome.instruction so the
     # walker can hand it to the target node's next run.
     node = Node("a", run=_noop, gate=lambda _ctx: GoTo("b", instruction="start over at b"))
-    outcome = interpret(node, run_dir=Path(tmp_path), params={}, on_error=_criticality)
+    outcome = _interpret(node, run_dir=Path(tmp_path), params={})
     assert outcome.goto == "b"
     assert outcome.instruction == "start over at b"

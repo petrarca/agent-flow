@@ -56,45 +56,49 @@ def test_resolve_only_accepts_group_name_and_member_node():
 
 
 def _run_recording(ran):
-    def run_group(group):
+    async def run_group(group):
         ran.append(group[0])
         return {group[0]: NodeOutcome(status="ok")}
 
     return run_group
 
 
-def test_walk_single_group_runs_only_that_group():
+@pytest.mark.anyio
+async def test_walk_single_group_runs_only_that_group():
     planned, gi, ng, bn = _linear(["a", "b", "c"])
     ran: list = []
-    _walk(planned, run_group=_run_recording(ran), group_index=gi, node_group=ng, by_name=bn, logger=_Logger(), start_index=1, single_group=True)
+    await _walk(planned, run_group=_run_recording(ran), group_index=gi, node_group=ng, by_name=bn, logger=_Logger(), start_index=1, single_group=True)
     assert ran == ["b"]  # not "c" — no forward advance
 
 
-def test_walk_single_group_at_start_does_not_run_forward():
+@pytest.mark.anyio
+async def test_walk_single_group_at_start_does_not_run_forward():
     planned, gi, ng, bn = _linear(["a", "b", "c"])
     ran: list = []
-    _walk(planned, run_group=_run_recording(ran), group_index=gi, node_group=ng, by_name=bn, logger=_Logger(), start_index=0, single_group=True)
+    await _walk(planned, run_group=_run_recording(ran), group_index=gi, node_group=ng, by_name=bn, logger=_Logger(), start_index=0, single_group=True)
     assert ran == ["a"]
 
 
-def test_walk_single_group_ignores_jump_back():
+@pytest.mark.anyio
+async def test_walk_single_group_ignores_jump_back():
     # Even if the only group's gate asks to jump back, `only` mode stops after it.
     planned, gi, ng, bn = _linear(["a", "b", "c"])
 
-    def run_group(group):
+    async def run_group(group):
         return {group[0]: NodeOutcome(status="ok", goto="a")}  # would rewind normally
 
     ran_calls = {"n": 0}
 
-    def counting(group):
+    async def counting(group):
         ran_calls["n"] += 1
-        return run_group(group)
+        return await run_group(group)
 
-    _walk(planned, run_group=counting, group_index=gi, node_group=ng, by_name=bn, logger=_Logger(), start_index=1, single_group=True)
+    await _walk(planned, run_group=counting, group_index=gi, node_group=ng, by_name=bn, logger=_Logger(), start_index=1, single_group=True)
     assert ran_calls["n"] == 1  # ran the one group once; goto ignored
 
 
-def test_walk_parallel_group_runs_all_members_once():
+@pytest.mark.anyio
+async def test_walk_parallel_group_runs_all_members_once():
     # workers = {b1, b2}; single_group runs both, then stops.
     planned = [("a", ["a"]), ("workers", ["b1", "b2"]), ("c", ["c"])]
     group_index = {"a": 0, "workers": 1, "c": 2}
@@ -102,11 +106,11 @@ def test_walk_parallel_group_runs_all_members_once():
     by_name = {"a": 1, "b1": 1, "b2": 1, "c": 1}
     ran: list = []
 
-    def run_group(group):
+    async def run_group(group):
         ran.extend(n for n in group)
         return {n: NodeOutcome(status="ok") for n in group}
 
-    _walk(
+    await _walk(
         planned,
         run_group=run_group,
         group_index=group_index,

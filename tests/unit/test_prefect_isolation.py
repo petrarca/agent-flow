@@ -51,7 +51,8 @@ def test_core_and_backend_import_without_prefect(prefect_blocked, monkeypatch):
         importlib.import_module(m)  # must not raise
 
 
-def test_local_backend_runs_a_flow_without_prefect(prefect_blocked, monkeypatch, tmp_path):
+@pytest.mark.anyio
+async def test_local_backend_runs_a_flow_without_prefect(prefect_blocked, monkeypatch, tmp_path):
     for m in _CORE_MODULES:
         monkeypatch.delitem(sys.modules, m, raising=False)
     from agent_flow.engine import Node, build_flow
@@ -68,7 +69,7 @@ def test_local_backend_runs_a_flow_without_prefect(prefect_blocked, monkeypatch,
         Node(name="p1", run=mk("p1"), parallel_group="workers", depends_on=["a"]),
         Node(name="p2", run=mk("p2"), parallel_group="workers", depends_on=["a"]),
     ]
-    result = build_flow(nodes, name="iso", backend="inprocess")(run_dir=str(tmp_path))
+    result = await build_flow(nodes, name="iso", backend="inprocess")(run_dir=str(tmp_path))
     assert {n: oc.status for n, oc in result.items()} == {"a": "ok", "p1": "ok", "p2": "ok"}
 
 

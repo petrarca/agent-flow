@@ -1,5 +1,8 @@
 """Unit tests for the agent-node layer: agent_node, ready gates, cross-node jump-back."""
 
+import anyio
+import pytest
+
 from agent_flow.engine import Node, NodeOutcome, _walk, plan_groups
 from agent_flow.gates import Continue, GateContext, GoTo, Restart, require_file, rerun_on_signal
 from agent_flow.node_builder import agent_node, build_work_order, control_path
@@ -54,7 +57,7 @@ def test_gate_receives_validated_result_obj(tmp_path, monkeypatch):
         summary: str
         languages: list[str]
 
-    def _run(inv):
+    async def _run(inv):
         return AgentResult(
             agent=inv.agent,
             exit_code=0,
@@ -77,7 +80,7 @@ def test_gate_receives_validated_result_obj(tmp_path, monkeypatch):
         return Continue()
 
     node = agent_node("n", "agent-x", inputs={"K": "v"}, result_schema=PydanticSchema(R), gate=gate)
-    interpret(node, run_dir=Path(tmp_path), params={}, on_error=lambda n, e: "degraded")
+    anyio.run(lambda: interpret(node, run_dir=Path(tmp_path), params={}, on_error=lambda n, e: "degraded"))
 
     assert isinstance(seen["obj"], R)
     assert seen["obj"].languages == ["Python", "Go"]  # gate can read typed fields
@@ -152,14 +155,15 @@ def _plan(nodes):
     return planned, {k: i for i, (k, _) in enumerate(planned)}, {n.name: (n.parallel_group or n.name) for n in nodes}
 
 
-def test_walk_cross_node_jump_back_bounded():
+@pytest.mark.anyio
+async def test_walk_cross_node_jump_back_bounded():
     a = Node("A", run=lambda c: None, max_cycles=1)
     b = Node("B", run=lambda c: None, depends_on=("A",), max_cycles=1)
     planned, gi, ng = _plan([a, b])
     calls: list[str] = []
     state = {"jumped": False}
 
-    def run_group(group):
+    async def run_group(group):
         out = {}
         for n in group:
             calls.append(n.name)
@@ -170,46 +174,49 @@ def test_walk_cross_node_jump_back_bounded():
                 out[n.name] = NodeOutcome(status="ok")
         return out
 
-    _walk(planned, run_group=run_group, group_index=gi, node_group=ng, by_name={"A": a, "B": b}, logger=_L())
+    await _walk(planned, run_group=run_group, group_index=gi, node_group=ng, by_name={"A": a, "B": b}, logger=_L())
     assert calls == ["A", "B", "A", "B"]  # one jump-back, then done
 
 
-def test_walk_jump_back_respects_max_cycles():
+@pytest.mark.anyio
+async def test_walk_jump_back_respects_max_cycles():
     a = Node("A", run=lambda c: None, max_cycles=1)
     b = Node("B", run=lambda c: None, depends_on=("A",))
     planned, gi, ng = _plan([a, b])
     calls: list[str] = []
 
-    def run_group(group):  # B ALWAYS asks to jump back to A
+    async def run_group(group):  # B ALWAYS asks to jump back to A
         out = {}
         for n in group:
             calls.append(n.name)
             out[n.name] = NodeOutcome("ok", goto="A") if n.name == "B" else NodeOutcome("ok")
         return out
 
-    _walk(planned, run_group=run_group, group_index=gi, node_group=ng, by_name={"A": a, "B": b}, logger=_L())
+    await _walk(planned, run_group=run_group, group_index=gi, node_group=ng, by_name={"A": a, "B": b}, logger=_L())
     # A runs twice at most (max_cycles=1), so it terminates rather than looping.
     assert calls.count("A") == 2
 
 
-def test_walk_ignores_forward_goto():
+@pytest.mark.anyio
+async def test_walk_ignores_forward_goto():
     a = Node("A", run=lambda c: None)
     b = Node("B", run=lambda c: None, depends_on=("A",), max_cycles=1)
     planned, gi, ng = _plan([a, b])
     calls: list[str] = []
 
-    def run_group(group):
+    async def run_group(group):
         out = {}
         for n in group:
             calls.append(n.name)
             out[n.name] = NodeOutcome("ok", goto="B") if n.name == "A" else NodeOutcome("ok")  # forward goto — ignored
         return out
 
-    _walk(planned, run_group=run_group, group_index=gi, node_group=ng, by_name={"A": a, "B": b}, logger=_L())
+    await _walk(planned, run_group=run_group, group_index=gi, node_group=ng, by_name={"A": a, "B": b}, logger=_L())
     assert calls == ["A", "B"]  # forward goto ignored, no rewind
 
 
-def test_walk_delivers_goto_instruction_to_target():
+@pytest.mark.anyio
+async def test_walk_delivers_goto_instruction_to_target():
     # A cross-node GoTo carrying an instruction lands in pending_instructions
     # keyed by the TARGET node, for run_node to hand to the target's next run.
     a = Node("A", run=lambda c: None, max_cycles=1)
@@ -218,7 +225,7 @@ def test_walk_delivers_goto_instruction_to_target():
     pending: dict[str, str] = {}
     state = {"jumped": False}
 
-    def run_group(group):
+    async def run_group(group):
         out = {}
         for n in group:
             if n.name == "B" and not state["jumped"]:
@@ -228,7 +235,7 @@ def test_walk_delivers_goto_instruction_to_target():
                 out[n.name] = NodeOutcome(status="ok")
         return out
 
-    _walk(
+    await _walk(
         planned,
         run_group=run_group,
         group_index=gi,

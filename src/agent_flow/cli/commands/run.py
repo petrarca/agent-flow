@@ -242,6 +242,8 @@ def _build_and_run(
     nodes, params, cfg, console, *, name, llm_tag, on_event_factory, on_node_event, render_results, start_from="", only="", registry=None
 ):
     """Compile the flow with the given hooks and run it; optionally print results."""
+    import anyio
+
     from agent_flow.engine import build_flow
 
     pipeline = build_flow(
@@ -264,7 +266,8 @@ def _build_and_run(
         call_kwargs["start_from"] = start_from
     if only:
         call_kwargs["only"] = only
-    result = pipeline(**call_kwargs)
+    # The CLI stays sync; the engine pipeline is async. Single anyio.run bridge.
+    result = anyio.run(lambda: pipeline(**call_kwargs))
     if render_results:
         agents = {n.name: n.agent for n in nodes}
         print_results_table(result, title=name, agents=agents, console=console)

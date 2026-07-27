@@ -1,7 +1,7 @@
 """InProcessBackend — the lightweight, Prefect-free default.
 
-Runs the DAG IN THIS PROCESS: parallel groups via a ThreadPoolExecutor, the LLM
-concurrency limit via a threading.Semaphore, logging via the stdlib logger. No
+Runs the DAG IN THIS PROCESS: parallel groups via an anyio task group, the LLM
+concurrency limit via an anyio.Semaphore, logging via the stdlib logger. No
 separate engine, no server, no external dependency, fast startup. This is the
 default backend; PrefectBackend is opt-in for the run UI / scheduling / scale.
 
@@ -15,9 +15,9 @@ a single run, which is this backend's whole point.
 from __future__ import annotations
 
 import logging
-import threading
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Awaitable, Callable
+
+import anyio
 
 from agent_flow.backends.base import FlowBackend, RunNode
 from agent_flow.engine import NodeBlocked, NodeOutcome
@@ -25,49 +25,77 @@ from agent_flow.engine import NodeBlocked, NodeOutcome
 _LOGGER = logging.getLogger("agent_flow")
 
 
+def _first_of_type(eg: BaseExceptionGroup, exc_type: type[BaseException]) -> BaseException | None:
+    """Return the first leaf exception of `exc_type` in a (possibly nested)
+    BaseExceptionGroup, or None. Used to surface a NodeBlocked that anyio wrapped
+    in a task-group ExceptionGroup so the engine's `except NodeBlocked` still fires.
+    """
+    match, _rest = eg.split(exc_type)
+    if match is None:
+        return None
+    leaf: BaseException = match
+    while isinstance(leaf, BaseExceptionGroup):
+        leaf = leaf.exceptions[0]
+    return leaf
+
+
 class InProcessBackend(FlowBackend):
-    """In-process backend: threadpool fan-out + semaphore limit + stdlib logging."""
+    """In-process backend: task-group fan-out + semaphore limit + stdlib logging."""
 
     name = "inprocess"
 
     def __init__(self) -> None:
         # None => no limit; set by apply_concurrency_limit. Guards node execution
         # so a parallel fan-out cannot exceed the model provider's rate limit.
-        self._sema: threading.Semaphore | None = None
+        self._sema: anyio.Semaphore | None = None
 
-    def _guarded(self, run_node: RunNode, node_name: str) -> NodeOutcome:
-        """Run one node, holding the concurrency semaphore if a limit is set."""
-        if self._sema is None:
-            return run_node(node_name)
-        with self._sema:
-            return run_node(node_name)
+    async def _guarded(self, run_node: RunNode, node_name: str, out: dict[str, NodeOutcome]) -> None:
+        """Run one node into `out`, holding the concurrency semaphore if set.
 
-    def run_session(self, name: str, work: Callable[[], dict[str, NodeOutcome]]) -> dict[str, NodeOutcome]:
+        A NodeBlocked (a blocking node's failure) is left to PROPAGATE: it escapes
+        the child task, cancels the sibling tasks, and aborts the run — the exact
+        semantics the threadpool version enforced by re-raising. Any OTHER
+        exception is a non-blocking node error, so it maps to a degraded outcome
+        for that node and never crashes the group (run_group backfills missing).
+        """
+        try:
+            if self._sema is None:
+                out[node_name] = await run_node(node_name)
+            else:
+                async with self._sema:
+                    out[node_name] = await run_node(node_name)
+        except NodeBlocked:
+            raise  # blocking failure -> propagate (cancels siblings, aborts run)
+        except Exception:  # noqa: BLE001 - a non-blocking node error degrades, never crashes the group
+            out[node_name] = NodeOutcome(status="degraded")
+
+    async def run_session(self, name: str, work: Callable[[], Awaitable[dict[str, NodeOutcome]]]) -> dict[str, NodeOutcome]:
         # No ambient context needed — run the walk directly in this process.
-        return work()
+        return await work()
 
-    def _execute_parallel(self, node_names: list[str], run_node: RunNode) -> dict[str, NodeOutcome]:
-        """Run nodes concurrently on a threadpool.
+    async def _execute_parallel(self, node_names: list[str], run_node: RunNode) -> dict[str, NodeOutcome]:
+        """Run nodes concurrently in an anyio task group.
 
-        A NodeBlocked (a blocking node's failure) must abort the whole run, so it
-        is re-raised out of here. Any other unexpected exception maps to a
-        degraded outcome for that node (run_group also backfills missing names).
+        A NodeBlocked escaping a child cancels the group and propagates to abort
+        the run; anyio wraps it in a BaseExceptionGroup, so we unwrap and re-raise
+        the NodeBlocked to preserve the caller's `except NodeBlocked` contract.
+        Any other per-node error is already handled in `_guarded` (-> degraded).
         """
         out: dict[str, NodeOutcome] = {}
-        with ThreadPoolExecutor(max_workers=len(node_names)) as pool:
-            futures = {pool.submit(self._guarded, run_node, name): name for name in node_names}
-            for fut, name in futures.items():
-                try:
-                    out[name] = fut.result()
-                except NodeBlocked:
-                    raise  # blocking failure -> propagate, aborts the run
-                except Exception:  # noqa: BLE001 - a non-blocking node error degrades, never crashes the group
-                    out[name] = NodeOutcome(status="degraded")
+        try:
+            async with anyio.create_task_group() as tg:
+                for node_name in node_names:
+                    tg.start_soon(self._guarded, run_node, node_name, out)
+        except BaseExceptionGroup as eg:
+            blocked = _first_of_type(eg, NodeBlocked)
+            if blocked is not None:
+                raise blocked from eg
+            raise
         return out
 
-    def apply_concurrency_limit(self, tag: str, limit: int, info: Callable[[str], None], warn: Callable[[str], None]) -> None:
+    async def apply_concurrency_limit(self, tag: str, limit: int, info: Callable[[str], None], warn: Callable[[str], None]) -> None:
         """Bound concurrent node execution to `limit` via a process-local semaphore."""
-        self._sema = threading.Semaphore(limit)
+        self._sema = anyio.Semaphore(limit)
         info(f"LLM concurrency limit set to {limit} (in-process semaphore)")
 
     def get_logger(self) -> logging.Logger:

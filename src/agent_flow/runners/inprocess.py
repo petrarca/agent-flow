@@ -28,10 +28,12 @@ status, which the agent-node surfaces to the gate the same way as a sidecar.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import replace as dc_replace
+from inspect import iscoroutinefunction
 from typing import Any
+
+import anyio
 
 from agent_flow.runners.base import AgentInvocation
 from agent_flow.runners.executor import AgentExecutor, AgentResult
@@ -50,12 +52,21 @@ class InProcessExecutor(AgentExecutor):
         self.impl = impl
         self.name = name
 
-    def run(self, inv: AgentInvocation) -> AgentResult:
+    async def run(self, inv: AgentInvocation) -> AgentResult:
         # The impl gets the same composed prompt a subprocess agent would (minus
         # the subprocess-only control preamble). It is free to use or ignore it.
-        start = time.monotonic()
-        raw = self.impl(inv)
-        duration = time.monotonic() - start
+        #
+        # Additive sync/async support (the point of the async-first migration):
+        #   - an ASYNC impl (`async def`, e.g. `await pydantic_ai_agent.run(...)`)
+        #     is awaited inline on the loop (no bridge);
+        #   - a SYNC impl (plain `def`) may block (network, disk) -> run it in a
+        #     worker thread via anyio.to_thread so it never stalls the event loop.
+        start = anyio.current_time()
+        if iscoroutinefunction(self.impl):
+            raw = await self.impl(inv)
+        else:
+            raw = await anyio.to_thread.run_sync(self.impl, inv)
+        duration = anyio.current_time() - start
         result = adapt_result(raw, inv)
         # Stamp duration if the impl did not set one (an AgentResult it returned
         # may already carry its own). AgentResult is frozen; use replace().

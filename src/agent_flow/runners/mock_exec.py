@@ -25,10 +25,12 @@ result-assembly tail (hoisted onto the ABC). See docs design/mock-agent.md.
 from __future__ import annotations
 
 import json
-import time
 from collections.abc import Callable
+from inspect import isawaitable
 from pathlib import Path
 from typing import Any
+
+import anyio
 
 from agent_flow.runners.base import AgentInvocation
 from agent_flow.runners.executor import AgentExecutor, AgentResult
@@ -99,13 +101,18 @@ class MockExecutor(AgentExecutor):
         self._work_order = work_order or {}
         self._tmpl = tmpl or {}
 
-    def run(self, inv: AgentInvocation, *, control_file: Path | None = None) -> AgentResult:
+    async def run(self, inv: AgentInvocation, *, control_file: Path | None = None) -> AgentResult:
         ctx = MockAgentContext(inv, self._work_order, self._tmpl)
         behaviour = self._behaviour
 
-        start = time.monotonic()
+        # Mock behaviours are deterministic and fast, so call inline; an async
+        # behaviour (rare, but allowed for symmetry with in-process impls) is
+        # awaited. No thread offload — a mock must not block on real I/O.
+        start = anyio.current_time()
         raw = behaviour(inv, ctx)
-        duration = time.monotonic() - start
+        if isawaitable(raw):
+            raw = await raw
+        duration = anyio.current_time() - start
 
         control = self._coerce_envelope(raw, inv.agent)
 

@@ -19,7 +19,8 @@ def _stub(inv, ctx):  # a trivial mock_agent behaviour
     return {"status": "ok", "result": {"ran": inv.node}}
 
 
-def test_on_node_event_and_durations(tmp_path):
+@pytest.mark.anyio
+async def test_on_node_event_and_durations(tmp_path):
     from agent_flow.registry import FlowRegistry
 
     registry = FlowRegistry()
@@ -35,7 +36,7 @@ def test_on_node_event_and_durations(tmp_path):
         name="progress-probe",
         on_node_event=lambda n, p, s, a: events.append((n, p, s, a)),
     )
-    result = flow(run_dir=str(tmp_path), mock_agents=True)
+    result = await flow(run_dir=str(tmp_path), mock_agents=True)
 
     # Lifecycle: each node fires start (status None) then finish (a status).
     assert ("analyze", "start", None, "selftest-analyst") in events

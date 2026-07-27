@@ -161,7 +161,7 @@ def agent_node(
     """
     inputs = inputs or {}
 
-    def run(ctx: RunContext) -> dict:
+    async def run(ctx: RunContext) -> dict:
         import logging
 
         from agent_flow.core import read_context_blocks
@@ -273,7 +273,7 @@ def agent_node(
             executor = InProcessExecutor(impl)
         else:
             executor = get_executor(runtime)
-        result = executor.run(inv)
+        result = await executor.run(inv)
         log(
             "node %s: agent=%s -> %s in %.1fs (tokens=%d cost=$%.4f completion=%s)",
             name,

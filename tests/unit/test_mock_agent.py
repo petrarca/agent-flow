@@ -45,13 +45,14 @@ def test_context_write_and_read_file_templated(tmp_path):
 # --- MockExecutor: envelope handling + sidecar + assembly -------------------
 
 
-def test_executor_writes_sidecar_and_assembles(tmp_path):
+@pytest.mark.anyio
+async def test_executor_writes_sidecar_and_assembles(tmp_path):
     def behaviour(inv, ctx):
         ctx.write_file("{run_dir}/r.md", "body")
         return {"status": "ok", "result": {"languages": ["Python"]}}
 
     ex = MockExecutor(behaviour, tmpl={"run_dir": str(tmp_path)})
-    res = ex.run(_inv(tmp_path))
+    res = await ex.run(_inv(tmp_path))
     assert res.control["status"] == "ok"
     assert res.control["result"] == {"languages": ["Python"]}
     assert res.runtime == "mock"  # the executor stamps its runtime label
@@ -61,29 +62,33 @@ def test_executor_writes_sidecar_and_assembles(tmp_path):
     assert (tmp_path / "r.md").read_text() == "body"
 
 
-def test_executor_none_return_is_bare_ok(tmp_path):
+@pytest.mark.anyio
+async def test_executor_none_return_is_bare_ok(tmp_path):
     ex = MockExecutor(lambda inv, ctx: None)
-    res = ex.run(_inv(tmp_path))
+    res = await ex.run(_inv(tmp_path))
     assert res.control["status"] == "ok"
     assert res.control["agent"] == "analyst"
 
 
-def test_executor_defaults_status_ok(tmp_path):
+@pytest.mark.anyio
+async def test_executor_defaults_status_ok(tmp_path):
     ex = MockExecutor(lambda inv, ctx: {"result": {"x": 1}})
-    res = ex.run(_inv(tmp_path))
+    res = await ex.run(_inv(tmp_path))
     assert res.control["status"] == "ok"
 
 
-def test_executor_preserves_rerun_required(tmp_path):
+@pytest.mark.anyio
+async def test_executor_preserves_rerun_required(tmp_path):
     ex = MockExecutor(lambda inv, ctx: {"status": "verified", "rerun_required": ["a"]})
-    res = ex.run(_inv(tmp_path))
+    res = await ex.run(_inv(tmp_path))
     assert res.control["rerun_required"] == ["a"]
 
 
-def test_executor_rejects_non_dict_return(tmp_path):
+@pytest.mark.anyio
+async def test_executor_rejects_non_dict_return(tmp_path):
     ex = MockExecutor(lambda inv, ctx: ["not", "a", "dict"])
     with pytest.raises(TypeError):
-        ex.run(_inv(tmp_path))
+        await ex.run(_inv(tmp_path))
 
 
 def test_executor_rejects_non_callable():
@@ -91,14 +96,15 @@ def test_executor_rejects_non_callable():
         MockExecutor("nope")
 
 
-def test_executor_validates_result_schema(tmp_path):
+@pytest.mark.anyio
+async def test_executor_validates_result_schema(tmp_path):
     schema = {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}
     ok = MockExecutor(lambda inv, ctx: {"status": "ok", "result": {"n": 1}})
-    res = ok.run(_inv(tmp_path, result_schema=schema))
+    res = await ok.run(_inv(tmp_path, result_schema=schema))
     assert res.result_valid is True and res.result_errors == ()
 
     bad = MockExecutor(lambda inv, ctx: {"status": "ok", "result": {"n": "x"}})
-    res = bad.run(_inv(tmp_path, result_schema=schema))
+    res = await bad.run(_inv(tmp_path, result_schema=schema))
     assert res.result_valid is False and res.result_errors
 
 
@@ -125,14 +131,15 @@ def test_registry_get_unknown_mock_agent_raises():
 # --- mode routing: node_builder picks MockExecutor only when mode is on -----
 
 
-def _run_node(node, tmp_path, **params):
+async def _run_node(node, tmp_path, **params):
     from agent_flow.engine import RunContext
 
     ctx = RunContext(node=node, run_dir=tmp_path, cycles=0, params=params)
-    return node.run(ctx)
+    return await node.run(ctx)
 
 
-def test_mode_on_with_mock_agent_routes_to_mock(tmp_path):
+@pytest.mark.anyio
+async def test_mode_on_with_mock_agent_routes_to_mock(tmp_path):
     from agent_flow.node_builder import agent_node
 
     def stub(inv, ctx):
@@ -142,12 +149,13 @@ def test_mode_on_with_mock_agent_routes_to_mock(tmp_path):
     r = FlowRegistry()
     r.mock_agent("analyst")(stub)
     node = agent_node("n", "analyst", inputs={"REPORT": "{run_dir}/r.md"}, registry=r)
-    out = _run_node(node, tmp_path, mock_agents=True)
+    out = await _run_node(node, tmp_path, mock_agents=True)
     assert out["result"] == {"hit": "mock"}
     assert (tmp_path / "r.md").exists()
 
 
-def test_mode_off_ignores_mock_agent(tmp_path):
+@pytest.mark.anyio
+async def test_mode_off_ignores_mock_agent(tmp_path):
     # mode OFF + no impl -> normal subprocess path (get_executor("opencode")).
     # Mock behaviour not called; normal path attempted with a bogus runtime -> ValueError.
     from agent_flow.node_builder import agent_node
@@ -162,17 +170,18 @@ def test_mode_off_ignores_mock_agent(tmp_path):
     r.mock_agent("analyst")(stub)
     node = agent_node("n", "analyst", inputs={"R": "{run_dir}/r.md"}, registry=r)
     with pytest.raises(ValueError):  # unknown runtime -> get_executor raises
-        _run_node(node, tmp_path, mock_agents=False, runtime="does-not-exist")
+        await _run_node(node, tmp_path, mock_agents=False, runtime="does-not-exist")
     assert called["mock"] is False
 
 
-def test_partial_mock_fallback_for_unmocked_node(tmp_path):
+@pytest.mark.anyio
+async def test_partial_mock_fallback_for_unmocked_node(tmp_path):
     # mode ON but this node has NO mock_agent -> falls through to normal executor.
     from agent_flow.node_builder import agent_node
 
     node = agent_node("n", "analyst", inputs={"R": "{run_dir}/r.md"})  # no mock_agent
     with pytest.raises(ValueError):  # unknown runtime -> normal path attempted
-        _run_node(node, tmp_path, mock_agents=True, runtime="does-not-exist")
+        await _run_node(node, tmp_path, mock_agents=True, runtime="does-not-exist")
 
 
 def test_declarative_compile_resolves_mock_agent(tmp_path):

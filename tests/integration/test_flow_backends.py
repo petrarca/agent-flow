@@ -55,25 +55,28 @@ def _nodes():
     ]
 
 
+@pytest.mark.anyio
 @pytest.mark.parametrize("backend", _ALL_BACKENDS, indirect=True)
-def test_flow_runs_on_backend(backend, tmp_path):
-    result = build_flow(_nodes(), name="be", backend=backend)(run_dir=str(tmp_path))
+async def test_flow_runs_on_backend(backend, tmp_path):
+    result = await build_flow(_nodes(), name="be", backend=backend)(run_dir=str(tmp_path))
     assert {n: oc.status for n, oc in result.items()} == {"a": "ok", "p1": "ok", "p2": "ok"}
 
 
+@pytest.mark.anyio
 @pytest.mark.parametrize("backend", _ALL_BACKENDS, indirect=True)
-def test_degraded_node_does_not_abort(backend, tmp_path):
+async def test_degraded_node_does_not_abort(backend, tmp_path):
     def bad(_ctx):
         raise RuntimeError("boom")
 
     nodes = [Node(name="ok", run=_mk("ok")), Node(name="bad", run=bad, criticality="degrade", depends_on=["ok"])]
-    result = build_flow(nodes, name="be-degrade", backend=backend)(run_dir=str(tmp_path))
+    result = await build_flow(nodes, name="be-degrade", backend=backend)(run_dir=str(tmp_path))
     assert result["ok"].status == "ok"
     assert result["bad"].status == "degraded"
 
 
+@pytest.mark.anyio
 @pytest.mark.parametrize("backend", _ALL_BACKENDS, indirect=True)
-def test_only_runs_single_group_on_backend(backend, tmp_path):
+async def test_only_runs_single_group_on_backend(backend, tmp_path):
     # `only` is engine logic, backend-agnostic: exactly one node runs.
-    result = build_flow(_nodes(), name="be-only", backend=backend)(run_dir=str(tmp_path), only="a")
+    result = await build_flow(_nodes(), name="be-only", backend=backend)(run_dir=str(tmp_path), only="a")
     assert set(result) == {"a"} and result["a"].status == "ok"
