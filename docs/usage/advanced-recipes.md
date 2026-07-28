@@ -130,11 +130,34 @@ first node, while `run_cli` **omits runtime fields from the "Resolved parameters
 summary** so they don't read as inputs you could pass. A node then overwrites the
 placeholder for downstream nodes (see [`exports`](#exports)).
 
-Prefer your own CLI? `run_cli` is optional — build any CLI you like and call
-`build_flow(...)` then run the pipeline yourself. The pipeline is an async
-coroutine, so a sync CLI bridges it once: `anyio.run(lambda: pipeline(**params))`
-(or `await pipeline(**params)` if your CLI is already async). See the toy example,
-which reuses `build_run_config` and `preflight` in its own Tier-2 CLI.
+### Your own CLI, or other tooling
+
+`run_cli` is optional. To drive a flow from your own CLI, a web service or any
+other tooling, resolve the settings yourself with `build_run_config(...)` and
+hand the result over:
+
+```python
+from agent_flow import build_run_config, run_flow
+
+cfg = build_run_config(
+    config_file=args.config,        # --config: path or inline JSON, repeatable
+    model=args.model,               # your CLI's flags — highest precedence
+    show_diffs=args.show_diffs,
+)
+
+run_flow(flow, run_config=cfg, product_key=args.product_key)
+print(cfg.show_diffs)               # the same object drives your own display
+```
+
+`build_run_config` applies the full source stack once — your flags beat
+`AGENT_FLOW_*` env, which beats `.env`, which beats `--config`. Passing the
+resulting **`RunConfig`** to `run_config=` is then honoured verbatim: it is
+already resolved, so it is not re-layered underneath env. (A plain **dict** means
+"my defaults" and stays the lowest layer, which is what a pipeline author wants
+in `run_cli(run_config={...})`.)
+
+There is no settings singleton to install — each run holds its own config, so two
+flows in one process never share or clobber each other's settings.
 
 ## Check that a step actually produced its file
 

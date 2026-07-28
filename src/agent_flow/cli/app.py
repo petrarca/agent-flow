@@ -60,9 +60,11 @@ def run_cli(
     and only the agent-flow version is shown.
 
     `run_config` supplies the pipeline's own run-config defaults (a dict or a
-    RunConfig) — e.g. `{"agent_dir": ..., "run_dir": "{param}/out"}`. It is the
-    LOWEST explicit source: CLI flags, env, .env, and --config all override it.
-    `run_dir` may use `{param}` templating, resolved strictly at run time.
+    RunConfig) — e.g. `{"agent_dir": ..., "run_dir": "{param}/out"}`. Here it is
+    always the LOWEST explicit source: CLI flags, env, .env and --config override
+    it, because this CLI is the resolver. (Programmatically, `run_flow`/`arun_flow`
+    honour a RunConfig verbatim instead — see their docstrings.) `run_dir` may use
+    `{param}` templating, resolved strictly at run time.
 
     Domain params — the flow's SIGNATURE (what it needs to RUN, vs `run_config`
     which is how/where it runs). Two ways to declare it:

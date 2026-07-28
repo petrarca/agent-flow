@@ -2,9 +2,9 @@
 
 Two different globals, deliberately separate (do not conflate them):
 
-  - `RunConfig` (run_config.py, via `get_settings()`) — the LIBRARY's own
-    settings: runtime, model, run_dir, agent_dir, idle_timeout. TYPED
-    pydantic-settings with fixed fields, set once at startup.
+  - `RunConfig` (run_config.py) — the LIBRARY's own settings: runtime, model,
+    run_dir, agent_dir, idle_timeout. TYPED pydantic-settings with fixed fields,
+    built once per run and threaded explicitly.
 
   - THIS service (via `get_run_context()`) — the DOMAIN params: an OPEN mapping
     the library attaches no meaning to (product_key, product_repos_root,

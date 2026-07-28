@@ -2,14 +2,7 @@
 
 import pytest
 
-from agent_flow.run_config import (
-    RunConfig,
-    build_run_config,
-    clear_settings,
-    get_settings,
-    init_settings,
-    parse_params,
-)
+from agent_flow.run_config import RunConfig, build_run_config, parse_params
 
 _ENV_KEYS = (
     "AGENT_FLOW_RUNTIME",
@@ -22,12 +15,9 @@ _ENV_KEYS = (
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    """Isolate each test from ambient AGENT_FLOW_* env and the settings singleton."""
+    """Isolate each test from ambient AGENT_FLOW_* env."""
     for k in _ENV_KEYS:
         monkeypatch.delenv(k, raising=False)
-    clear_settings()
-    yield
-    clear_settings()
 
 
 # --- parse_params -----------------------------------------------------------
@@ -132,22 +122,37 @@ def test_resolved_instructions_prefers_file(tmp_path):
     assert RunConfig(instructions="inline").resolved_instructions() == "inline"
 
 
-# --- settings lifecycle (lru_cache singleton) ------------------------------
+# --- run_config= shapes: defaults vs already-resolved -----------------------
+#
+# There is deliberately NO settings singleton: each run holds its own RunConfig,
+# threaded explicitly. A consumer building their own CLI resolves one with
+# build_run_config(...) and hands it over; it must then be honoured verbatim.
 
 
-def test_get_settings_singleton_stable():
-    assert get_settings() is get_settings()
+def test_a_dict_run_config_is_a_base_layer_that_env_overrides(monkeypatch):
+    monkeypatch.setenv("AGENT_FLOW_RUNTIME", "from-env")
+    cfg = build_run_config(base={"runtime": "my-default"})
+    assert cfg.runtime == "from-env", "a dict means 'my defaults' — env wins"
 
 
-def test_init_settings_installs_override():
-    init_settings(runtime="mock")
-    assert get_settings().runtime == "mock"
-    assert get_settings() is get_settings()
+def test_a_runconfig_instance_is_already_resolved(monkeypatch):
+    """A RunConfig is a BaseSettings: env was applied at construction and the
+    caller's explicit value already beat it. Re-resolving would apply env twice
+    and demote the caller — so run_flow honours the instance verbatim."""
+    monkeypatch.setenv("AGENT_FLOW_MODEL", "from-env")
+    cfg = build_run_config(model="from-my-cli")
+    assert cfg.model == "from-my-cli"
+
+    from agent_flow import FlowDef, FlowRegistry, NodeDef
+    from agent_flow.flowdef.compile import _build_pipeline_and_call
+
+    flow = FlowDef(name="t", nodes=[NodeDef(name="n", agent="a")])
+    _, call = _build_pipeline_and_call(flow, FlowRegistry(), "", "", "", {}, cfg)
+    assert call["model"] == "from-my-cli", "a passed RunConfig must not be re-resolved"
 
 
-def test_clear_settings_resets():
-    init_settings(runtime="mock")
-    assert get_settings().runtime == "mock"
-    clear_settings()
-    # After clear, a fresh RunConfig from defaults/env (runtime default here).
-    assert get_settings().runtime == "opencode"
+def test_no_settings_singleton_is_exported():
+    import agent_flow
+
+    for gone in ("get_settings", "init_settings", "clear_settings"):
+        assert not hasattr(agent_flow, gone), f"{gone} should be removed"
