@@ -26,9 +26,10 @@ This precedence is expressed via `settings_customise_sources`. The generic
 settings use the `AGENT_FLOW_` env prefix so they never collide with a flow's
 bare-named domain params (product_key, product_repos_root, …).
 
-Access follows the house pattern (as in coco-rag / sonnet-server): an lru_cache
-singleton via `get_settings()`, installed by `init_settings(...)`, reset in tests
-by `clear_settings()`. `build_run_config(...)` is the pure constructor.
+`build_run_config(...)` is the constructor: it collapses every source into ONE
+RunConfig instance, which the caller then threads explicitly. There is no
+process-wide settings singleton — each run holds its own config, so two flows in
+one process cannot read or clobber each other's settings.
 
 There is deliberately no "product" (or any domain) concept here.
 """
@@ -36,7 +37,6 @@ There is deliberately no "product" (or any domain) concept here.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -407,36 +407,6 @@ def build_run_config(
     """
     init_kwargs = {k: v for k, v in cli_overrides.items() if v is not None}
     return RunConfig(_config_sources=config_file, _base=normalize_run_config(base), **init_kwargs)
-
-
-# --- Global settings lifecycle (house pattern: lru_cache singleton) ---------
-
-_settings_override: RunConfig | None = None
-
-
-def init_settings(config_file: str | Path | None = None, **cli_overrides: Any) -> RunConfig:
-    """Build the RunConfig and install it as the process-wide singleton."""
-    global _settings_override
-    _settings_override = build_run_config(config_file, **cli_overrides)
-    _get_settings_cached.cache_clear()
-    return get_settings()
-
-
-def get_settings() -> RunConfig:
-    """Return the process-wide RunConfig (cached; built from env/.env if not init'd)."""
-    return _get_settings_cached()
-
-
-@lru_cache(maxsize=1)
-def _get_settings_cached() -> RunConfig:
-    return _settings_override if _settings_override is not None else RunConfig()
-
-
-def clear_settings() -> None:
-    """Reset the settings singleton — for testing only."""
-    global _settings_override
-    _settings_override = None
-    _get_settings_cached.cache_clear()
 
 
 def parse_params(items: list[str] | None) -> dict[str, str]:

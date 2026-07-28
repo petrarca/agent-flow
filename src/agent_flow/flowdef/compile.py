@@ -38,13 +38,19 @@ def _build_pipeline_and_call(
     nodes / options. It is resolved through the SAME RunConfig source stack as the
     CLI, so env / .env still apply below it."""
     from agent_flow.engine import build_flow
-    from agent_flow.run_config import build_run_config, validate_params
+    from agent_flow.run_config import RunConfig, build_run_config, validate_params
 
     if registry is None:
         from agent_flow.registry import FlowRegistry
 
         registry = FlowRegistry()
-    cfg = build_run_config(base=run_config)
+    # A RunConfig instance is ALREADY resolved: it is a BaseSettings, so env /
+    # .env were applied when it was constructed and the caller's explicit values
+    # already won. Honour it verbatim — re-resolving it as a base layer would
+    # apply env a second time AND demote the caller's values below it, which is
+    # wrong for a consumer who did their own resolution (their own CLI, or other
+    # tooling). A plain dict means "my defaults", so it stays the lowest layer.
+    cfg = run_config if isinstance(run_config, RunConfig) else build_run_config(base=run_config)
     nodes = compile_flow(flow_def, registry)
     # The flow's declared SIGNATURE applies here too — not only under run_cli —
     # so a missing/invalid param fails the same way on both entry points. A
@@ -105,11 +111,24 @@ async def arun_flow(
     loop (a FastAPI handler, a notebook) with no bridging. Same behaviour as
     `run_flow`, minus the `anyio.run` wrapper. Returns the {node: NodeOutcome}.
 
-    `run_config` (a dict or a RunConfig) is the run-side configuration: agent_dir,
-    backend, llm_concurrency, durations, nodes (per-node overrides), options,
-    run_dir. It is the single home for everything that is NOT portable pipeline
-    data — an explicit keyword, NOT a param, so `**params` cannot silently swallow
-    it. `params` are the DOMAIN run params (product_key=…, runtime=…).
+    `run_config` is the run-side configuration: agent_dir, backend,
+    llm_concurrency, durations, nodes (per-node overrides), options, run_dir. It
+    is the single home for everything that is NOT portable pipeline data — an
+    explicit keyword, NOT a param, so `**params` cannot silently swallow it.
+
+    Two accepted shapes, and the difference matters:
+      - a **dict** — "my defaults". Resolved as the LOWEST layer, so env / .env
+        still override it.
+      - a **RunConfig** — "already resolved". Honoured verbatim. A RunConfig is a
+        BaseSettings, so env was applied when it was built and the caller's
+        explicit values already won; re-resolving would apply env twice and demote
+        them. This is the path for a consumer who did their own resolution — their
+        own CLI, or integration into other tooling:
+
+            cfg = build_run_config(config_file=args.config, model=args.model)
+            run_flow(flow, run_config=cfg, **params)
+
+    `params` are the DOMAIN run params (product_key=…, runtime=…).
     """
     pipeline, call = _build_pipeline_and_call(flow_def, registry, run_dir, start_from, only, params, run_config)
     return await pipeline(**call)
@@ -129,8 +148,9 @@ def run_flow(
 
     A thin `anyio.run` wrapper over `arun_flow`, keeping the long-standing
     blocking signature for consumers not on an event loop (scripts, the CLI).
-    `run_config` carries the run-side settings (agent_dir/backend/durations/
-    nodes/options/…) — see arun_flow. `params` are the DOMAIN run params.
+    `run_config` carries the run-side settings — a dict is treated as defaults, a
+    RunConfig is honoured verbatim; see arun_flow. `params` are the DOMAIN run
+    params.
     """
     return anyio.run(
         lambda: arun_flow(
