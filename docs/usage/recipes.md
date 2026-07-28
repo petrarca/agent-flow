@@ -8,12 +8,10 @@ timestamp: 2026-07-25T08:54:40Z
 
 # Recipes
 
-Short, task-oriented how-tos on the **FlowDef** surface (the recommended way to
-author a pipeline). Each assumes you've read [getting-started.md](getting-started.md).
-
-> For the imperative form (`agent_node` / `build_flow` / gate callables), gates
-> in depth, parallel steps, typed output, exports, start-from/only, backends, and
-> live progress: see [advanced-recipes.md](advanced-recipes.md).
+How-tos for the `FlowDef` surface. Assumes you have read
+[getting-started.md](getting-started.md). For the imperative form, parallel
+steps, typed output, exports, partial runs and backends, see
+[advanced-recipes.md](advanced-recipes.md).
 
 ## Define and run a pipeline
 
@@ -38,13 +36,17 @@ Via the CLI (adds `run` / `flow nodes` / `version`, `-p/--param`, `--config`, et
 ```python
 def main():
     from agent_flow.cli import run_cli
-    run_cli(flow)                 # or run_cli(flow, registry=…, run_config={…}, version="1.2.0")
+    # or: run_cli(flow, registry=…, run_config={…}, version="1.2.0")
+    run_cli(flow)
 ```
 
 ```bash
 python -m my_pkg.pipeline run -p product_key=acme --runtime opencode
-python -m my_pkg.pipeline flow nodes      # inspect the pipeline (node -> agent, deps, gate)
-python -m my_pkg.pipeline version         # e.g. "my-pipeline 1.2.0 (agent-flow 0.1.2)"
+# inspect the pipeline: node -> agent, deps, gate
+python -m my_pkg.pipeline flow nodes
+
+# e.g. "my-pipeline 1.2.0 (agent-flow 0.1.2)"
+python -m my_pkg.pipeline version
 ```
 
 Pass `run_cli(flow, version="1.2.0")` with your own app/package version: `version`
@@ -54,10 +56,9 @@ shown.
 
 ## Built-in gates
 
-A **gate** runs after a node's agent and returns a directive that steers the flow
-(`Continue` / `Restart` / `GoTo` / `Stop`). Three gates cover what almost every
-pipeline needs; they are **pre-seeded into every `FlowRegistry`**, so you
-reference them **by name** with `gate_args` — no registration, no import:
+A gate runs after a node's agent and returns a directive that steers the flow
+(`Continue` / `Restart` / `GoTo` / `Stop`). Three are pre-seeded into every
+`FlowRegistry`, so you reference them by name with `gate_args`:
 
 | Gate | `gate_args` | What it does |
 |------|-------------|--------------|
@@ -71,7 +72,7 @@ Signatures: `require_file(ctx, *, path, on_missing=None)`,
 directive's one-time `instruction`. A node with **no** gate behaves as
 `Continue()`. To write your own gate, see [Hook your own logic](#hook-your-own-logic-flowregistry)
 below; for the full directive/`GateContext` reference see the
-[gates design doc](../design/orchestrator/gates.md).
+[gates design doc](../design/gates.md).
 
 > The `rerun_*` gates only fire if the agent actually sets `rerun_required` in
 > its control sidecar — the agent's own `.md` must be told when to set it (the
@@ -79,21 +80,23 @@ below; for the full directive/`GateContext` reference see the
 
 ## Hook your own logic (FlowRegistry)
 
-The built-in gates cover the common cases. To plug in your own logic, write a
-function, register it on a `FlowRegistry`, and reference it from a node by name —
-the node stays data, your code lives in the registry.
+Write a function, register it on a `FlowRegistry`, reference it from a node by
+name.
 
 ```python
 from agent_flow import FlowRegistry
 from agent_flow.gates import Continue, Stop
 
-registry = FlowRegistry()                      # built-in gates already seeded
+# built-in gates are already seeded
+registry = FlowRegistry()
 
-@registry.gate("stack_usable")                 # a gate is (ctx, **config) -> Directive
+# a gate is (ctx, **config) -> Directive
+@registry.gate("stack_usable")
 def stack_usable(ctx):
     return Stop("no stack") if ctx.result.get("status") == "error" else Continue()
 
-@registry.on("after_node")                      # an observing hook (telemetry; never steers flow)
+# an observing hook: telemetry only, never steers the flow
+@registry.on("after_node")
 def _log(node, outcome):
     print(f"{node.name}: {outcome.status} ({outcome.duration_s:.1f}s)")
 
@@ -109,22 +112,21 @@ A gate configured per node just takes extra keyword params; the node's
 
 ### Everything you can register
 
-The registry is the ONE place your code lives, so a `FlowDef` stays pure data:
-the declaration carries a NAME, the registry holds the implementation. That is
-also why new capabilities land here rather than as extra `build_flow` /
-`agent_node` parameters.
+The declaration carries a name; the registry holds the implementation. That is
+what keeps a `FlowDef` serializable.
 
 | register | signature | referenced from a node by |
 |---|---|---|
 | `@registry.gate("name")` | `(ctx, **gate_args) -> Directive` | `gate="name"` (+ `gate_args={…}`) |
-| `@registry.schema("name")` | a pydantic model, a JSON-schema dict, or a `ResultSchema` | `result_schema="name"` **and** `input_schema="name"` |
+| `@registry.schema("name")` | a pydantic model, a JSON-schema dict, or a `ResultSchema` | `result_schema="name"` and `input_schema="name"` |
+| `@registry.params_model("name")` | a pydantic model — the run params the flow needs | `FlowDef(params_schema="name")` |
 | `@registry.export("name")` | `(payload) -> Mapping` published to downstream params | `export_ref="name"` |
 | `@registry.run("name")` | `(ctx) -> dict` — a node that runs your code, not an agent | `run_ref="name"` |
 | `@registry.agent_impl("name")` | `(inv) -> AgentResult / model / dict` — an in-process agent | `impl_ref="name"` |
 | `@registry.mock_agent("agent")` | `(inv, ctx) -> envelope` — a token-free stand-in | *(matched by AGENT name under `--mock-agents`)* |
 | `@registry.on("event", node=…)` | an observing hook; never steers flow | *(fires automatically; `node=` scopes it)* |
-| `registry.work_order(fn)` | `(resolved: dict[str, str]) -> str` — restyle the work order ([advanced](advanced-recipes.md#change-how-the-work-order-is-rendered)) | *(flow-wide; no reference)* |
-| `registry.prompt(fn)` | `(parts: PromptParts) -> str` — assemble the whole prompt body ([advanced](advanced-recipes.md#change-how-the-work-order-is-rendered)) | *(flow-wide; no reference)* |
+| `registry.work_order(fn)` | `(resolved: dict[str, str]) -> str` — restyle the work order ([advanced](advanced-recipes.md#change-how-the-prompt-is-rendered)) | *(flow-wide; no reference)* |
+| `registry.prompt(fn)` | `(parts: PromptParts) -> str` — assemble the whole prompt body ([advanced](advanced-recipes.md#change-how-the-prompt-is-rendered)) | *(flow-wide; no reference)* |
 
 Each takes a decorator or a direct call — `@registry.schema("TriageIn")` above a
 class, or `registry.schema("TriageIn")(TriageIn)` for a model defined elsewhere.
@@ -195,12 +197,10 @@ order it always did. Imperatively, pass the class straight to
 
 ## An async in-process agent (PydanticAI)
 
-An in-process node runs a Python callable directly — no subprocess, no control
-sidecar — and maps its typed return onto the same result contract a subprocess
-agent produces. Because agent-flow's engine is async-first, an async-native agent
-library (PydanticAI) is a first-class node: write the `impl` as `async def` and
-`await` the agent inside it. Register it by name and reference it with
-`NodeDef(impl_ref=…)` (or attach it imperatively with `agent_node(impl=…)`):
+An in-process node runs a Python callable instead of a subprocess, mapping its
+typed return onto the same result contract. The impl may be `async def`, so an
+async agent library is a first-class node. Register it by name and reference it
+with `NodeDef(impl_ref=…)`:
 
 ```python
 from agent_flow import FlowDef, NodeDef, FlowRegistry, arun_flow
@@ -213,8 +213,9 @@ class Triage(BaseModel):
 registry = FlowRegistry()
 registry.schema("Triage")(Triage)
 
-@registry.agent_impl("triage")               # the impl may be async
-async def triage(inv):                        # inv = the neutral AgentInvocation
+# the impl may be async; inv is the neutral AgentInvocation
+@registry.agent_impl("triage")
+async def triage(inv):
     # Typed at BOTH ends: inv.input_obj is validated from the node's inputs (see
     # input_schema above); inv.result_schema is the node's declared output type.
     #   agent = Agent(inv.model, output_type=inv.result_schema, deps_type=TriageIn)
@@ -232,23 +233,21 @@ flow = FlowDef(name="triage", nodes=[
 #   run_flow(flow, registry=registry, ticket="app crashes on login")
 ```
 
-A gate reads the validated typed object as `ctx.obj` regardless of whether the
-node ran in-process or as a subprocess — the two execution models are
-interchangeable behind the node. A runnable end-to-end version (sync + async
-impls mixed in one flow, both `run_flow` and `arun_flow` entry points) is
-`examples/inprocess.py`.
+A gate reads the typed object as `ctx.obj` whether the node ran in-process or as
+a subprocess. Runnable version: `examples/inprocess.py`.
 
 ## Fill params just-in-time (`before_node`)
 
-Values usually arrive at flow start (`run_flow(flow, mode="deep")`) or from an
-upstream node (`exports`). When you need to compute one **in code, right before a
-node runs**, use a `before_node` hook: it fires *before* the engine snapshots the
-run-context for that node, so what you write lands in that node's `inputs`.
+Values usually arrive at flow start or from an upstream node's `exports`. To
+compute one right before a node runs, use a `before_node` hook — it fires before
+the engine snapshots the run context for that node, so what you write lands in
+that node's `inputs`.
 
 ```python
 from agent_flow.run_context import get_run_context
 
-@registry.on("before_node", node="analysis")     # this node only
+# this node only
+@registry.on("before_node", node="analysis")
 def fill(node):
     get_run_context().update({"mode": lookup_mode(), "cutoff": today()})
 ```
@@ -256,32 +255,29 @@ def fill(node):
 `node=` takes a name or a list; omit it to fire for every node. Group events
 (`before_group`/`after_group`) are not node-scoped and reject it.
 
-Two properties to keep in mind:
+Two constraints:
 
-- **Forward-only.** Like `exports`, a value reaches the node being started and
-  everything after it — never a node that already ran, and never a sibling in the
-  same parallel group.
-- **Observers can't fail a run.** A hook that raises is logged and ignored. So if
-  a value is mandatory, don't assert in the hook — let it fail loudly at the
-  node's [`input_schema`](#type-a-nodes-inputs-input_schema) instead.
-
-Nothing is validated at compile time: `compile_flow` only checks that referenced
-names exist. Templating and `input_schema` both run per node, at execution, so a
-param filled this late is still checked.
+- Forward-only. The value reaches the node being started and everything after it,
+  never a node that already ran or a sibling in the same parallel group.
+- A hook that raises is logged and ignored. If a value is mandatory, do not
+  assert in the hook — let it fail at the node's
+  [`input_schema`](#type-a-nodes-inputs-input_schema).
 
 ## See what the engine is doing (logging)
 
-agent-flow is **silent until you ask**. Importing it configures no logging and
-writes nothing to stderr — a library must not hijack your output. Two ways to
-turn it on:
+Importing agent-flow configures no logging and writes nothing. Two ways to turn
+it on:
 
 ```bash
-python my_flow.py run --log-level DEBUG      # via run_cli (it configures logging for you)
+# via run_cli, which configures logging for you
+python my_flow.py run --log-level DEBUG
 ```
 
 ```python
+# programmatic (run_flow / arun_flow)
 from agent_flow import setup_logging
-setup_logging("DEBUG")                        # programmatic (run_flow / arun_flow)
+
+setup_logging("DEBUG")
 ```
 
 `INFO` gives the run's shape (run_dir, node start/finish + duration, jump-backs,
@@ -290,10 +286,9 @@ the spawned process (pid, argv, cwd), stdout EOF, stale/kill transitions, the
 group walk, and which executor each node selected. Chatty third-party loggers
 (asyncio, httpx, …) are pinned to WARNING so `DEBUG` stays about your flow.
 
-Output goes to **stderr** via [loguru](https://loguru.readthedocs.io/), leaving
-stdout free for the CLI's tables and event stream. Standard-library log records
-(including Prefect's) are routed into the same sink, so one flag controls
-everything.
+Output goes to stderr, leaving stdout free for the CLI's tables and event stream.
+Standard-library records (including Prefect's) route into the same sink, so one
+flag controls everything.
 
 ## Run-wide brief and context
 
@@ -306,5 +301,9 @@ FlowDef(name="p",
         nodes=[...])
 ```
 
-Per-node equivalents are `NodeDef(instructions=…, context=[…])`. See
-[the input plane](../design/orchestrator/input-plane.md).
+Per-node equivalents are `NodeDef(instructions=…, context=[…])`.
+
+`run_instructions` is the flow's standing brief. The CLI's `-i/--instructions`
+(or run config `instructions`) is *appended* to it for one run, rather than
+replacing it; `--instruct NODE=text` does the same for a single node. See
+[the input plane](../design/input-plane.md).

@@ -12,7 +12,7 @@ Tier 3's `Node` takes a `run` callable — maximally flexible, but it means a
 consumer would hand-write prompt-building, control-path derivation, and the
 executor call for every node. The overwhelmingly common shape is simply *"run one
 agent, hand it a work order, point it at a control file, get the result."*
-`agent_node(...)` builds exactly that node in **one call**.
+`agent_node(...)` builds exactly that node in one call.
 
 It is a convenience, not a new layer: it returns a plain `Node`, so it mixes
 freely with hand-written `run` callables in the same graph. It is the one module
@@ -51,8 +51,8 @@ resolved by agent name from the `registry` under the `--mock-agents` mode.
 
 ## No analyst/verifier concept
 
-There is deliberately **no** notion of "analyst"/"verifier" in the library. A
-verifier is just **another `agent_node`** that `depends_on` its subject and
+There is deliberately no notion of "analyst"/"verifier" in the library. A
+verifier is just another `agent_node` that `depends_on` its subject and
 carries a `gate_ref="rerun_on_signal"` [gate](gates.md) (with
 `gate_args={"target": ...}`); the engine's bounded cross-node
 [jump-back](engine.md) drives the re-run. Any node can route flow to any upstream
@@ -100,7 +100,7 @@ The generated `run` picks the executor — and the engine is blind to all of it:
 
 1. **`--mock-agents` mode on AND** `registry` has a `mock_agent` for this node's
    `agent` → `MockExecutor` (deterministic, no tokens). This WINS over `impl`.
-2. else **`impl` set** → `InProcessExecutor` (direct Python call, no subprocess).
+2. else `impl` set → `InProcessExecutor` (direct Python call, no subprocess).
 3. else → `get_executor(runtime)` — a `SubprocessExecutor` for the selected
    runner (opencode, …).
 
@@ -108,7 +108,7 @@ Mock is a MODE, not a runtime; resolution is by AGENT name, so one
 `registry.mock_agent(name)` registration covers every node running that agent.
 See [mock-agent.md](mock-agent.md).
 
-The Tier-3 payoff: a whole pipeline is **declaration only**. The tech example's
+The Tier-3 payoff: a whole pipeline is declaration only. The tech example's
 prior ~120 lines of hand-written glue (`_build_prompt` / `_control_path` /
 `_invoke` / `_make_run` / `_make_gate`) collapse into `agent_node(...)` calls plus
 ready gates.

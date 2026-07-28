@@ -12,7 +12,7 @@ Findings from probing a running `opencode serve` (v1.18.4) directly — health,
 session create, the blocking sync prompt, both SSE streams, `wait`, abort,
 delete, directory routing, verdict-retrieval options, and agent-discovery
 caching. This is the evidence behind the decisions in
-[`../design/orchestrator/serve-executor.md`](../design/orchestrator/serve-executor.md);
+[`../design/serve-executor.md`](../design/serve-executor.md);
 that document is the design, this one is the reference.
 
 Probed against a server started with `opencode serve` (unauthenticated, warning
@@ -53,7 +53,7 @@ one JSON payload:
 }
 ```
 
-This single blocking response gives **completion + result + telemetry + error**
+This single blocking response gives completion + result + telemetry + error
 at once. No SSE threading is needed to detect `session.idle` for the basic
 run-to-completion flow:
 
@@ -67,7 +67,7 @@ cleanup  = DELETE /session/:id
 Timeout: enforce a client-side HTTP timeout on the blocking call; on fire,
 `POST /session/:id/abort`.
 
-On a model error (e.g. bad model name) the response is **HTTP 400** with
+On a model error (e.g. bad model name) the response is HTTP 400 with
 `{"_tag":"BadRequest"}` — NOT 200 with an error field. (A transient config
 issue in the probe host — `max_tokens is 0` — surfaced as HTTP 500
 `UnknownError` with a `ref`; unrelated to the protocol.)
@@ -83,17 +83,17 @@ issue in the probe host — `max_tokens is 0` — surfaced as HTTP 500
   `{id,type,properties}`. This is the stream to use for live `on_event` display.
 
 - **v2 per-session `GET /api/session/:id/event?after=<seq>`** — carries only
-  **durable** events, and only when the prompt was sent via the **v2** endpoint
+  **durable** events, and only when the prompt was sent via the v2 endpoint
   (`POST /api/session/:id/prompt`). Emits `session.next.*`
   (`prompt.admitted`, `prompted`, `step.started`, `step.ended`/`step.failed`)
-  but **NOT `session.idle`**. A legacy-prompt session produces NOTHING on it
+  but NOT `session.idle`. A legacy-prompt session produces NOTHING on it
   (returned 0 bytes in tests). Not usable alongside the legacy sync prompt.
 
 - **`POST /api/session/:id/wait`** ("block until idle") returns **503
   `ServiceUnavailableError` "Session wait is not available yet"** in 1.18.4 —
   declared in the OpenAPI spec but unimplemented. Do not rely on it.
 
-**Decision:** use the **legacy** API throughout — `POST /session/:id/message`
+**Decision:** use the legacy API throughout — `POST /session/:id/message`
 (blocking) for run + result + telemetry, and (only if live display is added) the
 legacy global `/event` stream for `on_event`. The v2 surface is inconsistent in
 this build.
@@ -104,8 +104,8 @@ this build.
 
 The `?directory=<path>` query param (or `x-opencode-directory` header) routes
 every request to that working directory. The daemon resolves agent definitions
-from `<directory>/.opencode/agent/*.md` **per request, on its own filesystem**,
-with **no restart**:
+from `<directory>/.opencode/agent/*.md` per request, on its own filesystem,
+with no restart:
 
 - A `hello` agent created in `/tmp/test-agents/.opencode/agent/hello.md` appeared
   in `GET /agent?directory=/tmp/test-agents` but NOT in the bare `GET /agent`
@@ -120,9 +120,9 @@ subprocess `--dir` flag.
 
 ### Agent discovery is CACHED per directory
 
-Adding a new `.md` to a directory the daemon has **already scanned** does NOT
+Adding a new `.md` to a directory the daemon has already scanned does NOT
 refresh its agent list — the new agent is "not found", and prompting a
-not-found agent returns **HTTP 500**. A **fresh** directory picks up all its
+not-found agent returns HTTP 500. A fresh directory picks up all its
 agents on first scan. Implication: whatever materialises agents into a directory
 must do so BEFORE that directory is first accessed (or use a fresh directory).
 
@@ -142,7 +142,7 @@ is the existing sidecar preamble; behaviour identical to the subprocess path.
 ### B — read the sidecar back over the file API (opencode-specific)
 
 `GET /file/content?directory=<dir>&path=<node>.control.json` →
-`{"type":"text","content":"<sidecar JSON as a string>"}`. **Verified**: the
+`{"type":"text","content":"<sidecar JSON as a string>"}`. Verified: the
 daemon reads its OWN filesystem and returns the bytes over HTTP, so no shared
 mount is needed for the control plane. Endpoint is opencode-specific.
 
@@ -151,7 +151,7 @@ mount is needed for the control plane. Endpoint is opencode-specific.
 `POST /session/:id/message` with
 `format: {type:"json_schema", schema:{…}}` makes opencode inject a
 `StructuredOutput` tool, force the model to call it, and validate the result
-server-side. The validated envelope lands in **`info.structured`** on the
+server-side. The validated envelope lands in `info.structured` on the
 blocking response — a dedicated field, no text scraping, no file at all. Two
 variants tested:
 
@@ -187,7 +187,7 @@ sessions.
 | `GET /global/health` | reachability + version |
 | `GET /agent?directory=<dir>` | list resolvable agents for a directory |
 | `POST /session?directory=<dir>` | create session → `{id}` |
-| `POST /session/:id/message?directory=<dir>` | **blocking** prompt → `{info,parts}` |
+| `POST /session/:id/message?directory=<dir>` | blocking prompt → `{info,parts}` |
 | `POST /session/:id/prompt_async?directory=<dir>` | fire-and-forget → 204 |
 | `POST /session/:id/abort?directory=<dir>` | cancel (returns immediately) |
 | `DELETE /session/:id?directory=<dir>` | delete session (cleanup) |

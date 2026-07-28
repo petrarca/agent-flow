@@ -9,17 +9,17 @@ timestamp: 2026-07-23T07:51:35Z
 # Result schema (typed output)
 
 An agent's [control file](control-file.md) carries a free-form `result` object.
-Typed output is an **opt-in consumer convenience** — the library imposes no
+Typed output is an opt-in consumer convenience — the library imposes no
 schema. When (and only when) a consumer attaches one to a run, the engine:
 
 1. **injects** the schema into the prompt (so the agent knows the shape to emit),
    alongside the completion protocol, and
-2. after the run, **validates** `control["result"]` and **attaches** the outcome
+2. after the run, validates `control["result"]` and attaches the outcome
    (`result_valid`, `result_obj`, `result_errors`) to the `AgentResult`.
 
-The engine **never fails** a run on a validation error. That is a flow-control
+The engine never fails a run on a validation error. That is a flow-control
 decision, so it is surfaced to the [gate](gates.md), which decides
-Restart/Continue/Stop. The gate reads the **typed object as `ctx.obj`** — a
+Restart/Continue/Stop. The gate reads the typed object as `ctx.obj` — a
 Pydantic instance for `PydanticSchema`, else `None` (a dict schema / no schema add
 no new object; the validated data is the dict at `ctx.result["result"]`). The
 schema-check flags are on the envelope: `ctx.result["_result_valid"]` /
@@ -43,7 +43,7 @@ Two ways to supply a schema:
 - **A plain JSON-schema `dict`** — no schema class needed. Wrapped in
   `JsonSchema`; validated with the `jsonschema` package.
 - **A `ResultSchema` implementation.** `PydanticSchema` wraps a `BaseModel` and
-  yields validated model **instances** in `result_obj`.
+  yields validated model instances in `result_obj`.
 
 ```python
 # Pydantic model:
@@ -60,8 +60,8 @@ agent_node("tech-stack", "tech-stack-analyst",
 ## Why this is unlike Pydantic AI
 
 Frameworks like Pydantic AI weld an output type to *their* in-process LLM call
-(`agent.run_sync(output_type=…)`). Here the schema only touches the **prompt**
-(injection) and the **control file** (validation), so it rides over ANY execution
+(`agent.run_sync(output_type=…)`). Here the schema only touches the prompt
+(injection) and the control file (validation), so it rides over ANY execution
 model — an opencode/Claude Code subprocess, an in-process agent, or a
 `--mock-agents` stand-in — because validation is the shared executor tail, not
 tied to a runner. The core depends only on the `ResultSchema` protocol, not on
@@ -110,7 +110,7 @@ runtime, which can only be handed text.
 `src/agent_flow/core/schema.py` (`ResultSchema`, `JsonSchema`, `ValidationOutcome`,
 `coerce_schema`) and `src/agent_flow/core/schema_pydantic.py` (`PydanticSchema`).
 **Injection** into the prompt is subprocess-specific (`SubprocessExecutor` embeds
-the schema in the control preamble, `core/agent_runtime.py`). **Validation** is
+the schema in the control preamble, `core/agent_runtime.py`). Validation is
 the shared `AgentExecutor.assemble_result` in `src/agent_flow/runners/executor.py`
 — used by `SubprocessExecutor`, `MockExecutor`, and (via `adapt_result`)
 `InProcessExecutor` — so typed output behaves identically across execution

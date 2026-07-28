@@ -151,7 +151,7 @@ class PromptParts:
 
     Every channel the library composes, in scope order, each still separate so a
     renderer decides the wording, headings and order. Fields are "" (or {}) when
-    the channel is unused. See docs/design/orchestrator/input-plane.md.
+    the channel is unused. See docs/design/input-plane.md.
 
     NOT here: the COMPLETION PROTOCOL. That block is half of the verdict contract
     — the executor injects a sidecar path and then reads back that exact path —

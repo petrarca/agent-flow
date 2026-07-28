@@ -13,7 +13,7 @@ retries, concurrency limits, crash resume, and an observability UI.
 
 Requirements for *this* workload: Python-native, DAG + parallel fan-out, custom
 retry conditions, concurrency limits, bounded conditional loops, crash resume, an
-observability UI, **finite batch runs**, **no human-in-the-loop mid-run**, small
+observability UI, finite batch runs, no human-in-the-loop mid-run, small
 team.
 
 ## Candidates (researched Jul 2026)
@@ -44,14 +44,14 @@ non-blocking `get_logger` / `bootstrap` / `teardown` stay synchronous.
 
 Two backends ship:
 
-- **InProcessBackend (default)** — in-process: an `anyio` **task group** for
+- **InProcessBackend (default)** — in-process: an `anyio` task group for
   parallel groups, an `anyio.Semaphore` for the LLM concurrency limit, stdlib
   logging. No Prefect, no temporary server, fast startup, one fewer heavy
   dependency at run time. This is what an everyday single run uses. A blocking
   node's `NodeBlocked` propagates out of the task group and aborts the run
   (unwrapped from anyio's `ExceptionGroup`); any other per-node error degrades
   that node; a dropped node is backfilled to `degraded` — never lost.
-- **PrefectBackend (opt-in)** — the Prefect-3 behavior below, now as **async**
+- **PrefectBackend (opt-in)** — the Prefect-3 behavior below, now as async
   `@task`/`@flow` (a natural fit — Prefect is async underneath): `submit()`/
   `wait()`, `get_run_logger()`, a global server-side concurrency limit, the run
   UI. The blocking future-gather is offloaded to a worker thread so it never
@@ -72,7 +72,7 @@ blocked.
 gates — and the most mature Python-native option (largest community, lowest risk
 for a small team). It covers every requirement: `.submit()`/`wait()` fan-out,
 `retry_condition_fn`, tag-based concurrency limits, Python conditional loops, a
-persistent-server UI, and a zero-infra **embedded** mode for dev. Its only real
+persistent-server UI, and a zero-infra embedded mode for dev. Its only real
 weakness — durability is "robust scheduler," not event-sourced replay — **does
 not bite finite <1h runs**: you re-run a failed stage, you never replay a
 multi-day workflow.
@@ -95,15 +95,15 @@ shipped implementations (InProcessBackend being the other, default). Adding Hatc
 later = write one `HatchetBackend(FlowBackend)` and register it; the graphs, the
 engine, and all primitives do not move.
 
-**Exit criteria:** to **Hatchet** if Postgres-only ops / built-in rate limiting /
-its UI become compelling or throughput exceeds Prefect's comfort zone; to **DBOS**
+**Exit criteria:** to Hatchet if Postgres-only ops / built-in rate limiting /
+its UI become compelling or throughput exceeds Prefect's comfort zone; to DBOS
 if a lighter durable model (library, no server) is wanted and its weak UI is
-acceptable (its fork-from-step suits re-run loops); to **Temporal** only if the
+acceptable (its fork-from-step suits re-run loops); to Temporal only if the
 workload becomes long-lived / human-gated (not this pipeline).
 
 ## Deployment modes
 
-These modes apply to the **PrefectBackend** only; the InProcessBackend runs in-process
+These modes apply to the PrefectBackend only; the InProcessBackend runs in-process
 with no server and no SQLite.
 
 - **Embedded (dev):** the PrefectBackend runs an in-process temporary server + an
@@ -112,7 +112,7 @@ with no server and no SQLite.
   invoked only when `--backend prefect` is selected.
 - **File-backed (dev+):** `PREFECT_PERSIST=1` — a file-backed SQLite so runs
   survive process restart without a standing server.
-- **Persistent (production):** a standing Prefect **server + Postgres**; the flow
+- **Persistent (production):** a standing Prefect server + Postgres; the flow
   runs as a plain script pointed at it via `PREFECT_API_URL`, recording runs so
   the dashboard + history exist. A validated `deploy/docker-compose.yml`
   (Prefect server + Postgres 18) exists in the repo for this mode.

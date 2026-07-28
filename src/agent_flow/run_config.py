@@ -317,7 +317,7 @@ class RunConfig(BaseSettings):
 
         This is the run-config layer ONLY — prompt channel [4]. It is rendered
         AFTER the flow's standing `run_instructions` (channel [3]) as its own
-        block; it does not replace it. See design/orchestrator/input-plane.md."""
+        block; it does not replace it. See design/input-plane.md."""
         if self.instructions_file:
             return Path(self.instructions_file).read_text()
         return self.instructions

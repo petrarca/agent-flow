@@ -26,7 +26,7 @@ pipeline B  ──┼──► one shared opencode serve ──► MCP servers (
 pipeline C  ──┘
 ```
 
-The gain is purely **resource efficiency**. Orchestration stays entirely in
+The gain is purely resource efficiency. Orchestration stays entirely in
 agent-flow (DAG, gates, retries, typed output). Only execution moves to the
 daemon.
 
@@ -34,7 +34,7 @@ daemon.
 
 ## Position in the executor hierarchy
 
-`ServeExecutor` is a **peer executor** — same level as `SubprocessExecutor`,
+`ServeExecutor` is a peer executor — same level as `SubprocessExecutor`,
 `InProcessExecutor`, and `MockExecutor`:
 
 ```
@@ -49,11 +49,11 @@ AgentExecutor (ABC)
 `AgentRunner` for `SubprocessExecutor`. It owns the HTTP/SSE wire details
 (create session, prompt, abort, event stream). It is not a public seam.
 
-`ServeClient` does **not** manage the daemon. The daemon is started and kept
+`ServeClient` does not manage the daemon. The daemon is started and kept
 alive by infrastructure outside agent-flow; `ServeClient` only consumes a URL
 (see "Scope boundary" below).
 
-The **sidecar family** (`Subprocess` + `Serve`) vs the **return-value family**
+The sidecar family (`Subprocess` + `Serve`) vs the return-value family
 (`InProcess` + `Mock`) is the real structural split. Both sidecar executors
 poll for a control file and harvest telemetry from an event stream. A shared
 base class is a natural future extraction; start flat.
@@ -73,8 +73,8 @@ stream-events triad:
 | Goose | `goosed` / `goose web` | `POST /sessions` | `POST /sessions/:id/messages` | SSE |
 | Crush | `internal/server` (unix socket) | `POST /v1/sessions` | agent send | SSE `/v1/.../events` |
 
-A second family exposes the same warm-process benefit over **JSON-RPC** rather
-than HTTP+SSE: **Codex CLI** (`codex app-server`, a real daemon) and **Cursor**
+A second family exposes the same warm-process benefit over JSON-RPC rather
+than HTTP+SSE: Codex CLI (`codex app-server`, a real daemon) and Cursor
 (`cursor-agent acp`, ACP over stdio). These would need a different executor
 (JSON-RPC/ACP transport), out of scope here.
 
@@ -164,8 +164,8 @@ which runner + `serve_url` is configured.
 
 ### Open protocol question
 
-Should the facade protocol be **synchronous** (POST prompt → blocks → returns the
-verdict, like opencode's sync message — proven simplest) or **async + events**
+Should the facade protocol be synchronous (POST prompt → blocks → returns the
+verdict, like opencode's sync message — proven simplest) or async + events
 (POST prompt → 202 → subscribe/poll for completion — needed only for live
 streaming through the facade)? Sync is the likely MVP; async is an
 add-on if live `on_event` display through the facade is wanted.
@@ -190,7 +190,7 @@ as `SubprocessExecutor`'s `--dir` flag.
 
 ### Sync prompt semantics
 
-`POST /session/:id/message` is **truly blocking**: it holds the HTTP connection
+`POST /session/:id/message` is truly blocking: it holds the HTTP connection
 open until the full agent loop (all tool-call turns) finishes, then returns the
 final assistant message as a single JSON payload:
 
@@ -212,10 +212,10 @@ final assistant message as a single JSON payload:
 }
 ```
 
-On model error (bad model name, provider failure) the response is **HTTP 400**
+On model error (bad model name, provider failure) the response is HTTP 400
 with `{ "_tag": "BadRequest" }` — NOT 200 with an error field.
 
-There is **no explicit timeout** on the server side. The executor must enforce
+There is no explicit timeout on the server side. The executor must enforce
 its own deadline (`inv.idle_timeout_s`) and call abort if it fires.
 
 ### SSE event stream
@@ -235,12 +235,12 @@ Key event types for `ServeExecutor`:
 
 | Event | Meaning |
 |-------|---------|
-| `session.idle` | **The completion signal** — agent loop finished (normal, error, or abort) |
+| `session.idle` | The completion signal — agent loop finished (normal, error, or abort) |
 | `session.error` | Runtime error (model not found, provider failure, content filter) |
 | `session.next.step.ended` | One LLM step done; carries `cost` + `tokens` for telemetry harvest |
 | `message.part.updated` | Tool state transition — maps to `on_event` callback |
 
-> **Superseded by live testing — see "Verified against opencode serve 1.18.4".**
+> Superseded by live testing — see "Verified against opencode serve 1.18.4".
 > The MVP does not consume the SSE stream at all: the blocking sync prompt
 > (`POST /session/:id/message`) returns completion + result + telemetry + error
 > in one response. The global `/event` stream (with `session.idle`) is only
@@ -272,7 +272,7 @@ disk". That bakes the sidecar mechanism into the whole library. But:
   opencode-specific too.
 
 So there is NO single verdict mechanism that fits every runtime and transport.
-The resolution: **the runner owns both ends of its verdict protocol.**
+The resolution: the runner owns both ends of its verdict protocol.
 
 ```
 RunnerBase
@@ -350,7 +350,7 @@ already a runner concern.
 (create session, prompt, abort). No new field needed — it is already on
 `AgentInvocation`.
 
-`agent_dir` is **effectively required** for `ServeExecutor`. Without it, all
+`agent_dir` is effectively required for `ServeExecutor`. Without it, all
 sessions share the daemon's own cwd, resolving the same config and potentially
 colliding on file writes. The `ServeExecutor` preflight check must flag a
 missing `agent_dir` as fatal.
@@ -359,7 +359,7 @@ missing `agent_dir` as fatal.
 
 ## Daemon connection (attach-only)
 
-`ServeClient` **attaches** to an already-running daemon — it never starts one.
+`ServeClient` attaches to an already-running daemon — it never starts one.
 
 ```
 RunConfig.serve_url = "http://127.0.0.1:4096"
@@ -373,7 +373,7 @@ service-discovery system. See "Scope boundary".
 `ServeClient` is injected into `ServeExecutor` at construction; the executor
 itself is stateless.
 
-> **Out of scope (not MVP, possibly never in the library):** auto-starting a
+> Out of scope (not MVP, possibly never in the library): auto-starting a
 > local daemon for convenience. It is tempting for single-pipeline development
 > (spawn `opencode serve --port <auto>`, wait for health, `atexit` teardown),
 > but it drags daemon lifecycle into the library. Keep it out until there is a
@@ -394,7 +394,7 @@ fields).
 
 ## Timeout and abort
 
-`ServeExecutor` enforces `inv.idle_timeout_s` as a **client-side HTTP timeout**
+`ServeExecutor` enforces `inv.idle_timeout_s` as a client-side HTTP timeout
 on the blocking `POST /session/:id/message` call. If it fires:
 
 1. Call `POST /session/:id/abort`
@@ -410,7 +410,7 @@ deadline.)
 
 ## Infrastructure gaps
 
-These are changes needed **beyond the executor itself**:
+These are changes needed beyond the executor itself:
 
 ### `get_executor` hardwired to `SubprocessExecutor`
 
@@ -498,12 +498,12 @@ Agent-flow nodes within one pipeline run already write to separate subdirs under
 the agent's perspective (`.opencode/agent/*.md`). File artifacts go to `run_dir`
 which is separate.
 
-For **parallel nodes within one run** sharing the same `agent_dir`:
+For parallel nodes within one run sharing the same `agent_dir`:
 - Agent definition reads: safe (read-only).
 - Sidecar writes: safe (keyed by node name under `run_dir`).
 - Artifact writes: consumer's responsibility (same as today with subprocess).
 
-For **multiple pipeline runs sharing one daemon**:
+For multiple pipeline runs sharing one daemon:
 - Each pipeline has its own `run_dir` (unique per run by design).
 - `agent_dir` may be shared across pipelines of the same type — read-only, safe.
 - Agent-flow pipelines read existing code and write reports/sidecars to
@@ -514,8 +514,8 @@ For **multiple pipeline runs sharing one daemon**:
 
 ## Scope boundary — agent-flow is a client
 
-Starting, preparing, and managing a daemon is **never** part of the library.
-agent-flow integrates as a **consumer** of a companion infrastructure service
+Starting, preparing, and managing a daemon is never part of the library.
+agent-flow integrates as a consumer of a companion infrastructure service
 that owns all of that.
 
 ### The companion infrastructure (out of scope, not built here)
@@ -535,8 +535,8 @@ the environment it runs in:
   a shared filesystem, a network volume, or an object store with a local cache.
 
 The natural shape is: agent-flow asks the service "give me an execution target
-for this run" and receives back the three things it needs — a **URL**, a
-prepared **`agent_dir`**, and a writable **`run_dir`**. How the service produces
+for this run" and receives back the three things it needs — a URL, a
+prepared `agent_dir`, and a writable `run_dir`. How the service produces
 them is entirely its concern.
 
 ### What agent-flow owns
@@ -552,7 +552,7 @@ service's responsibility.
 
 ### MVP: a plain HTTP endpoint
 
-For the MVP there is **no companion service**. The three inputs arrive as plain
+For the MVP there is no companion service. The three inputs arrive as plain
 config on `RunConfig`:
 
 - `serve_url` — a static HTTP URL of an already-running `opencode serve`
@@ -593,7 +593,7 @@ run — not inside `ServeExecutor`.
   is negligible vs LLM latency.
 - **Not a shift toward a hardcoded workflow engine.** `ServeExecutor` changes
   *how* an agent runs (shared daemon vs subprocess), never *what* the flow is.
-  agent-flow stays a **programming model**: the consumer declares an arbitrary
+  agent-flow stays a programming model: the consumer declares an arbitrary
   graph (`Node`s, `depends_on`, parallel groups), writes gates as functions
   (`Continue`/`Restart`/`GoTo`/`Stop`), and passes typed info explicitly
   (`result_schema`, `ctx.result`, `{PARAM}` templates). The engine knows no
@@ -687,14 +687,14 @@ findings — health, the blocking sync prompt (completion + result + telemetry i
 one response), directory routing, both SSE streams, the unimplemented `wait`,
 the three verdict-retrieval options (sidecar / file API / structured output),
 and agent-discovery caching — are in
-[`../../research/opencode-serve-api.md`](../../research/opencode-serve-api.md).
+[`../research/opencode-serve-api.md`](../research/opencode-serve-api.md).
 
 Decisions that flow from those findings:
 
 - **Completion**: the blocking `POST /session/:id/message` returns completion +
   result + telemetry + error in one payload — no SSE threading needed for the
   basic run-to-completion flow.
-- **API surface**: use the **legacy** API (`/session/:id/message` blocking; the
+- **API surface**: use the legacy API (`/session/:id/message` blocking; the
   global `/event` stream only if live `on_event` display is later added). The v2
   per-session stream is empty for legacy prompts and `wait` is unimplemented in
   1.18.4.

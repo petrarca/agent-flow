@@ -57,7 +57,7 @@ Example: `feat/claude-code-runner`
   run with `prefect` blocked.
 - Respect the layering: the engine (Tier 3) must not import the runtime core
   (Tier 1); they meet only through a node's `run` callable (`batteries` is the
-  one bridge). See `docs/design/orchestrator/index.md`.
+  one bridge). See `docs/design/index.md`.
 
 ### Testing
 
@@ -83,7 +83,7 @@ Design docs and consumer docs are [OKF](https://github.com/GoogleCloudPlatform/k
 bundles under `docs/`:
 
 - `docs/usage/` — task-oriented consumer guides (start at `index.md`)
-- `docs/design/orchestrator/` — architecture + one concept per file
+- `docs/design/` — architecture + one concept per file
 
 When you change behavior, update the relevant doc and keep every OKF file's
 `type` frontmatter intact. Verify code snippets actually run.

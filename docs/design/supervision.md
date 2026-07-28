@@ -9,20 +9,20 @@ timestamp: 2026-07-23T07:51:35Z
 # Agent supervision (Tier 1)
 
 `run_agent` is the engine core: it spawns ONE agent as an OS subprocess via an
-`AgentRunner`, supervises it by **liveness** (not a wall-clock timeout), kills it
+`AgentRunner`, supervises it by liveness (not a wall-clock timeout), kills it
 on stale, and reads its outcome from the [control sidecar](control-file.md). It
 is Prefect-agnostic and reused verbatim across all tiers.
 
 The supervisor is built on [`anyio`](https://anyio.readthedocs.io/): the process
 is spawned with `anyio.open_process`, reader tasks stream its stdout/stderr into
 memory object streams, and the liveness loop uses `anyio.move_on_after` for the
-idle deadline. The native entry is the coroutine **`arun_agent`**; the historical
+idle deadline. The native entry is the coroutine `arun_agent`; the historical
 `run_agent` name is kept as a thin `anyio.run` wrapper so existing sync callers
 and examples are unchanged. The supervision *semantics* below are identical to
 the previous thread+queue implementation.
 
-Two directories, kept separate: **`run_dir`** is where the control sidecar is
-written and the base for relative artifact paths; **`agent_dir`** (optional) is
+Two directories, kept separate: `run_dir` is where the control sidecar is
+written and the base for relative artifact paths; `agent_dir` (optional) is
 where the runtime finds agent DEFINITIONS — for opencode it becomes `--dir`, and
 `run_agent` sets the subprocess cwd to it. When `agent_dir` is unset the
 subprocess inherits the current cwd. Nothing ever chdir's into `run_dir`; it is
@@ -31,16 +31,16 @@ not a working directory in the OS sense.
 ## Liveness, not wall-clock
 
 - The runtime (opencode) is invoked with `--format json`, emitting an NDJSON
-  **event stream**. Each line is a **heartbeat**.
-- An **idle timer** (`idle_timeout_s`) is reset on every event. The agent is
-  killed **only** when it has emitted no event *and* written no sidecar for the
-  whole idle window. There is **no absolute wall-clock cap** — an agent that
+  **event stream**. Each line is a heartbeat.
+- An idle timer (`idle_timeout_s`) is reset on every event. The agent is
+  killed only when it has emitted no event *and* written no sidecar for the
+  whole idle window. There is no absolute wall-clock cap — an agent that
   keeps making progress runs as long as it needs.
 - **Completion** is detected the moment the sidecar appears on disk (or a
-  terminal `step-finish` with `reason == "stop"`), so a **done-but-lingering**
+  terminal `step-finish` with `reason == "stop"`), so a done-but-lingering
   process is finished immediately rather than waited on (opencode does not
   always exit promptly after the work is done).
-- On any stop the child **process group** is killed (SIGTERM → SIGKILL →
+- On any stop the child process group is killed (SIGTERM → SIGKILL →
   `proc.kill()`), so helper children never linger. The kill runs inside a
   **shielded** anyio cancel scope, so cancellation (Ctrl-C, or a cancelled parent
   task group) still reaps the whole group before propagating — no orphaned
@@ -52,7 +52,7 @@ it is the heart of Tier 1.
 ## The verdict is the sidecar — nothing else
 
 `run_agent` keys success solely on the control sidecar's `status`. If the sidecar
-is absent, the run is an **error**. The engine never inspects an agent's
+is absent, the run is an error. The engine never inspects an agent's
 artifacts to guess success — that is a flow decision for a [gate](gates.md), one
 layer up. Telemetry (tokens/cost) is harvested from the event stream into the
 returned `AgentResult`.
@@ -95,8 +95,8 @@ human-safe one-liner for error messages — only the runner knows which part of 
 argv is the huge prompt payload).
 
 Everything else — supervision, kill, sidecar reading, telemetry, the DAG — is
-runtime-agnostic and written once. `AgentInvocation` carries the agent **name**
-and its resolved **instructions** separately, so a runner materialises identity
+runtime-agnostic and written once. `AgentInvocation` carries the agent name
+and its resolved instructions separately, so a runner materialises identity
 its own way: opencode via `--agent`; a runner without named agents (Claude Code)
 via `--append-system-prompt`. A runtime with no structured stream returns
 `Event.none()` and relies purely on sidecar + idle-timer + exit code — the
@@ -117,12 +117,12 @@ real output, not assumed:
 
 | | `--format json` | `default` (piped) | `default --print-logs` |
 |---|---|---|---|
-| Live heartbeat during the run | yes, per event | **none** — silent until the end | yes (logfmt on stderr) |
-| stdout content | every step/tool/text event | only the **final message** | only the final message |
-| Machine-parseable | yes (typed `part` union) | n/a | logfmt **+ ANSI** |
+| Live heartbeat during the run | yes, per event | none — silent until the end | yes (logfmt on stderr) |
+| stdout content | every step/tool/text event | only the final message | only the final message |
+| Machine-parseable | yes (typed `part` union) | n/a | logfmt + ANSI |
 | Tokens / cost | yes | no | no |
 
-Decisive fact: **piped `default` output is not a progress stream.** On a non-TTY
+Decisive fact: piped `default` output is not a progress stream. On a non-TTY
 (which the orchestrator always is), opencode emits only the assistant's final
 message, once, at the end. Under `default` the process is silent for the whole
 run — which the liveness supervisor would read as "no heartbeat" and kill.
@@ -133,7 +133,7 @@ stderr, no tokens/cost, needing stderr/stdout split. It stays a debug aid, not
 the supervision source.
 
 Because JSON is verbose, we do NOT dump it raw. `parse_event` extracts the
-supervision fields plus a runner-agnostic **neutral display view** (kind/title/
+supervision fields plus a runner-agnostic neutral display view (kind/title/
 detail/status) and keeps the raw line; the [CLI](cli-events.md) renders that
 neutral view to one readable line when `--show-events` is on.
 

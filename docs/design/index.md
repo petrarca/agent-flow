@@ -8,10 +8,10 @@ timestamp: 2026-07-23T07:51:35Z
 
 # agent-flow — design overview
 
-`agent-flow` replaces the fragile "LLM orchestrator agent" pattern with a
-**deterministic engine** that supervises coding-agent subprocesses (opencode
-today) and runs them as a graph — with parallelism, bounded re-runs, cross-node
-jump-back, telemetry, and optional typed output. The execution backend
+agent-flow replaces the fragile "LLM orchestrator agent" pattern with a
+deterministic engine that supervises coding-agent subprocesses (opencode today)
+and runs them as a graph, with parallelism, bounded re-runs, cross-node
+jump-back, telemetry and optional typed output. The execution backend
 (in-process local by default, Prefect opt-in) and the agent runtime (opencode /
 Claude Code / …) are both pluggable.
 
@@ -21,49 +21,48 @@ bundle: this `index.md` is the entry point; each concept lives in its own file
 
 ## Problem
 
-Multi-stage analysis pipelines are often driven by an **LLM orchestrator agent**
+Multi-stage analysis pipelines are often driven by an LLM orchestrator agent
 emitting `Task` calls to sequence specialists. Two structural problems:
 
-1. **The orchestrator is an LLM** — it can hang, lose the thread past ~20 steps,
-   forget rules in a long instruction file, and cannot resume after a crash (its
-   state lives in a context window).
-2. **The pipelines are ~90% identical machinery** — a readiness gate,
-   analyst→verifier pairs with a re-run loop, some parallel groups, a reduce
-   tail — expressed repeatedly in prose, with no shared code.
+1. The orchestrator is an LLM: it hangs, loses the thread past ~20 steps, forgets
+   rules in a long instruction file, and cannot resume after a crash — its state
+   lives in a context window.
+2. The pipelines are ~90% identical machinery — a readiness gate,
+   analyst→verifier pairs with a re-run loop, parallel groups, a reduce tail —
+   expressed repeatedly in prose, with no shared code.
 
-The fix: replace the LLM orchestrator with **deterministic code**, and factor the
-shared machinery into **one library** a pipeline configures by declaring a graph.
+The fix: replace the LLM orchestrator with deterministic code, and factor the
+shared machinery into one library a pipeline configures by declaring a graph.
 
 ## Scope — what the library is (and is not) for
 
 The library does exactly two things:
 
-1. **Instrument and control the execution** of an agent runtime: spawn it, pass
-   it what it needs, supervise by liveness, kill on stale, capture the outcome,
-   and run a graph of such agents.
-2. **Expose optional hooks** (gates) so a *consumer* can inspect what an agent
-   did and steer the flow.
+1. Instrument and control the execution of an agent runtime: spawn it, pass it
+   what it needs, supervise by liveness, kill on stale, capture the outcome, and
+   run a graph of such agents.
+2. Expose optional hooks (gates) so a consumer can inspect what an agent did and
+   steer the flow.
 
 Three concerns, kept strictly separate:
 
 | Concern | Owner |
 |---|---|
-| Instrument + control execution | **the library** |
-| What an agent *does* (read/write files, domain work, report content) | **the agent** (its `.md`) |
-| Whether the side effects are acceptable + what to do next | **the consumer** (optional gates) |
+| Instrument + control execution | the library |
+| What an agent does (files, domain work, report content) | the agent, in its `.md` |
+| Whether the side effects are acceptable, and what to do next | the consumer, via gates |
 
-The library reads exactly one thing back from an agent — the **control sidecar**
-— and interprets only its `status` (verdict) and `rerun_required` (a flow
-signal). Everything else the agent emits is opaque. See
-[control-file](control-file.md).
+The library reads exactly one thing back from an agent, the control sidecar, and
+interprets only its `status` and `rerun_required`. Everything else the agent
+emits is opaque. See [control-file](control-file.md).
 
 ## Design principles
 
-1. **The orchestrator is deterministic code, not an LLM.** Sequencing,
-   parallelism, retries, criticality, re-run caps are Python the engine executes
-   — never rules an LLM must remember. ("Graph, not a loop.")
+1. **Deterministic code, not an LLM.** Sequencing, parallelism, retries,
+   criticality and re-run caps are Python the engine executes, never rules an LLM
+   must remember.
 2. **Agents are unchanged.** Existing opencode `.md` agents keep their identity
-   and are invoked as-is (`opencode run --agent <name>`).
+   and are invoked as-is.
 3. **Lean core, optional extras.** The default install carries only what a
    programmatic `build_flow` run on the default in-process backend needs (pydantic,
    pydantic-settings, pyyaml, jsonschema, python-dotenv). The heavy pieces are
@@ -71,11 +70,10 @@ signal). Everything else the agent emits is opaque. See
    layer) and `[prefect]` (the opt-in Prefect backend). Both are lazy-imported
    at their entry points, and using a feature without its extra raises a clear
    "install petrarca-agent-flow[...]" message.
-4. **Swappable seams, shared everything else.** Three things may change behind
-   thin adapters — the **execution backend** (in-process vs Prefect), the **agent
-   runtime** (opencode vs Claude Code, via `AgentRunner`), and the **pipeline**
-   itself (the declared graph). What is deliberately NOT abstracted is agent
-   *content* (names, `.md` bodies, persona) — that is runtime-specific.
+4. **Swappable seams.** Three things change behind thin adapters: the execution
+   backend, the agent runtime (via `AgentRunner`), and the pipeline itself. What
+   is deliberately not abstracted is agent content — names, `.md` bodies, persona
+   — which is runtime-specific.
 5. **Optional-everything ergonomics.** No gate = proceed; no schema = free-form
    result; no `--show-events` = quiet. You pay only for what you use.
 
@@ -96,40 +94,38 @@ TIER 1  ENGINE CORE          run_agent(): spawn + liveness-supervise + kill + si
         AGENT RUNTIME        opencode agents (.md) — external, unchanged
 ```
 
-**Dependency direction is strictly downward** (verified): Tier 3's engine does
-not import Tier 1 — they meet only through the caller-supplied `Node.run`
-callable (`agent_node` is the one module that bridges both, on purpose).
+Dependency direction is strictly downward: Tier 3's engine does not import
+Tier 1. They meet only through the caller-supplied `Node.run` callable, and
+`agent_node` is the one module deliberately bridging both.
 
 A consumer picks a tier by need: Tier 1 to supervise one agent; Tier 2 to keep
 full control of the flow; Tier 3 to declare the graph and let the library build
 it. Pipelines differ only in their Tier-3 declaration.
 
-## The 30-second example (Tier 3)
+## The 30-second example
 
 ```python
-import anyio
-from agent_flow import agent_node, build_flow
+from agent_flow import FlowDef, NodeDef, run_flow
 
-nodes = [
-    agent_node("tech-stack", "tech-stack-analyst",
-               inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
-               gate_ref="require_file", gate_args={"path": "{run_dir}/tech-stack.md"}),
-    # a "verifier" is just ANOTHER node that can jump the flow back:
-    agent_node("tech-stack-verify", "tech-stack-verifier",
-               depends_on=("tech-stack",), criticality="degrade",
-               gate_ref="rerun_on_signal", gate_args={"target": "tech-stack"}),
-]
-flow = build_flow(nodes, name="tech")                    # -> an async flow callable
-anyio.run(lambda: flow(product_key="acme", runtime="opencode"))  # no run_dir -> temp dir under <temp>/agent-flow/
-# on an event loop:  await flow(product_key="acme", runtime="opencode")
-# or the FlowDef one-liner:  run_flow(flow_def, …) / await arun_flow(flow_def, …)
+flow = FlowDef(name="tech", nodes=[
+    NodeDef(name="tech-stack", agent="tech-stack-analyst",
+            inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
+            gate="require_file", gate_args={"path": "{run_dir}/tech-stack.md"}),
+    # a verifier is just another node that can jump the flow back
+    NodeDef(name="tech-stack-verify", agent="tech-stack-verifier",
+            depends_on=["tech-stack"], criticality="degrade",
+            gate="rerun_on_signal", gate_args={"target": "tech-stack"}),
+])
+
+# without a run_dir, output goes to a temp dir logged at start
+run_flow(flow, product_key="acme", runtime="opencode")
 ```
 
-The engine core is **async** (on [`anyio`](https://anyio.readthedocs.io/)) — an
-async-native agent (PydanticAI) is a first-class in-process node, and the flow can
-`await` inside a consumer's event loop. It stays additive: the sync `run_flow` /
-`run_cli` / `run_agent` wrap the async natives, and consumer callables (impls,
-gates, exports, hooks) may be sync or async. See [engine.md](engine.md).
+The engine core is async, on [`anyio`](https://anyio.readthedocs.io/): an
+async-native agent is a first-class in-process node, and a flow can be awaited
+inside a consumer's event loop. It stays additive — the sync `run_flow` /
+`run_cli` / `run_agent` wrap the async natives, and consumer callables may be
+sync or async. See [engine.md](engine.md).
 
 ## Concept map
 
@@ -147,12 +143,13 @@ gates, exports, hooks) may be sync or async. See [engine.md](engine.md).
 | Mock agent | [mock-agent.md](mock-agent.md) | `mock_agent` — a deterministic stand-in for a real agent via the `--mock-agents` substitution MODE (not a runtime); `MockExecutor` (sibling `AgentExecutor`) + `MockAgentContext` tools; structured-interface simulation, no LLM |
 | CLI & events | [cli-events.md](cli-events.md) | `Event`/`on_event`, `--show-events` projection, the Typer/rich CLI |
 
-## Status
+Design proposals (not current truth): [async-first.md](async-first.md) (why the
+core is async, implemented) and [serve-executor.md](serve-executor.md) (a shared
+daemon executor, ideation).
 
-Implemented and tested: Tiers 1–3, gates + ready gates, node_builder,
-control-file contract + protocol injection, result-schema seam, the
-`AgentExecutor` seam (Subprocess / InProcess / Mock), the `--mock-agents`
-substitution mode, live events + CLI, bounded re-runs and cross-node jump-back.
-Runnable examples: `examples/custom_flow.py` (Tier 2), `examples/imperative.py`
-and `examples/declarative.py` (Tier 3), and `examples/inprocess.py` (in-process
-agents) — all green under `--mock-agents` and on real opencode.
+## Examples
+
+`examples/declarative.py` and `examples/imperative.py` (declared graph),
+`examples/custom_flow.py` (your own flow around `run_agent`), and
+`examples/inprocess.py` (in-process agents). All run token-free under
+`--mock-agents` and against real opencode.

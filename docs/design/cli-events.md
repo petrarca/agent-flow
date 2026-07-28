@@ -25,27 +25,27 @@ Three complementary observability channels, layered:
 
 `build_flow(on_node_event=<cb>)` takes an optional
 `(node_name, phase, status, agent) -> None` callback the engine calls at each
-node's **start** (`phase="start"`, `status=None`) and **finish**
+node's start (`phase="start"`, `status=None`) and finish
 (`phase="finish"`, `status` = `"ok"`/`"degraded"`, or `"failed"` on a blocking
 error) — including on re-runs (a jumped-back node fires `start` again). It is
 **pure data**: the engine never renders. `agent` is `Node.agent`, an informal
 label (set by `agent_node`; `""` for hand-written nodes) so a view can show which
 agent a node runs.
 
-Per-node **duration** is timed where the node runs (`NodeOutcome.duration_s`) and
+Per-node duration is timed where the node runs (`NodeOutcome.duration_s`) and
 carried through the flow result (`dict[str, NodeOutcome]`), so the results table
 shows Node | Agent | Outcome | Duration without the CLI reconstructing timing.
-The **Agent** cell is runtime-qualified `<runtime>:<agent>` (e.g.
+The Agent cell is runtime-qualified `<runtime>:<agent>` (e.g.
 `opencode:tech-stack-analyst`, `inproc:classify`, `mock:verifier`): each executor
 stamps its runtime onto `AgentResult.runtime`, which flows to `NodeOutcome.runtime`
 and is joined with the agent name via the canonical `qualified_agent()` helper.
 This makes partial mocking and in-process nodes visible at a glance.
 
-The default CLI view (`NodeProgressPrinter`) is deliberately **line-based**, not a
+The default CLI view (`NodeProgressPrinter`) is deliberately line-based, not a
 repainting `rich.Live`/TUI: a Live table fights the backends' threaded task
 execution and interleaved logging (duplicated frames, corrupted output). A plain
 `console.print` per transition interleaves cleanly with logs and is robust in
-non-TTY/CI. A consumer who wants a richer TUI can build one on the **same** hooks
+non-TTY/CI. A consumer who wants a richer TUI can build one on the same hooks
 (`on_node_event` + `on_event_factory`) — the library ships only the simple
 default.
 
@@ -61,20 +61,20 @@ raw traceback.
 
 Each runner stdout line the [supervisor](supervision.md) sees becomes an `Event`
 carrying the supervision fields (`tokens`, `cost`, `is_terminal`, `is_event`) and
-the **raw** original line. `run_agent` accepts an `on_event: (Event) -> None`
+the raw original line. `run_agent` accepts an `on_event: (Event) -> None`
 callback, invoked per event; supervision ignores it, and display errors are
 swallowed so they can never disrupt a run.
 
-The **engine** does not interpret event content or render anything — it stays
+The engine does not interpret event content or render anything — it stays
 render-agnostic, using only the supervision fields (`tokens`/`cost`/`is_terminal`).
-The *display* fields are filled by the **runner** (the only thing that understands
+The *display* fields are filled by the runner (the only thing that understands
 its wire format), so the coupling to a runtime's (versioned) event schema lives in
 exactly one place.
 
 ## The neutral display view (runner fills, CLI renders)
 
 The one place a runtime's wire shape is interpreted is the runner's `parse_event`.
-Besides supervision fields, it normalizes each event into a runner-**agnostic**
+Besides supervision fields, it normalizes each event into a runner-agnostic
 display view on `Event`:
 
 ```
@@ -95,7 +95,7 @@ Both are built rich-only by parsing the diff (`_diff_rows`) — rich has no nati
 diff widget — so all layout lives in the CLI and the runner only supplies the
 neutral diff string.
 
-The **CLI** renders only these neutral fields — it never re-parses `raw`. `kind`
+The CLI renders only these neutral fields — it never re-parses `raw`. `kind`
 drives the base style; for tools, `status` refines the color (running=cyan,
 completed=green, error=red). The CLI colors only the leading keyword and leaves
 the content bare, so rich's highlighter decorates paths/numbers/strings on top:
@@ -111,16 +111,16 @@ analyst step done (12,793 tokens)
 Why this split: "how to read the stream" belongs to the runner; "how to lay it
 out and color it" belongs to the CLI; they meet on the neutral fields. A new
 runtime (Claude Code, …) fills the same fields from its own stream and the
-existing CLI renders it with **zero changes**. `raw` remains a diagnostic
+existing CLI renders it with zero changes. `raw` remains a diagnostic
 passthrough (for `--show-events`), not something the neutral renderer touches.
 
 ## Plumbing the event hook through the tiers
 
-`run_agent`'s `on_event` is the actual per-event **callback**. At Tier 3, the
+`run_agent`'s `on_event` is the actual per-event callback. At Tier 3, the
 agent name is not known until inside a node's `run`, so `build_flow` takes an
 `on_event_factory` (agent name -> callback) instead — a deliberately different
 name, not the same parameter renamed. It is engine plumbing, not a domain param,
-and a callable is not serializable — so it is a **build-time** value, not a
+and a callable is not serializable — so it is a build-time value, not a
 `params` key: `build_flow(on_event_factory=<factory>)` -> `RunContext.on_event_factory`
 -> `agent_node` calls it with its own agent name and passes the result to
 `run_agent(on_event=...)`. (Same precedent as `run_instructions`; see

@@ -1,81 +1,46 @@
 # Agent flow
 
-Deterministic orchestration of coding-agent pipelines. `agent-flow` replaces the
-fragile "LLM orchestrator agent" pattern — where a model is asked to sequence the
-stages and inevitably hangs, loops, or "loses the thread" — with a **deterministic
-engine** that runs your agents as a graph and supervises each one as an external
-process.
+Deterministic orchestration of **coding agents** — agentic CLI tools like
+**OpenCode** (primary target), Claude Code or Codex, which run as their own
+process with their own agent loop, tools and model access. Not in-process agent
+frameworks like PydanticAI or LangGraph, where you build the agent inside your
+own program.
+
+`agent-flow` replaces the fragile "LLM orchestrator agent" pattern — where a
+model is asked to sequence the stages and inevitably hangs, loops, or "loses the
+thread" — with a **deterministic engine** that runs those agents as a graph and
+supervises each one as an external process.
 
 ## Why agent-flow
 
-Turning a set of coding agents (OpenCode, Claude Code, …) into a dependable
-pipeline comes down to five capabilities. agent-flow delivers each directly:
+1. **Deterministic orchestration.** The control flow is plain Python the engine
+   executes — a dependency graph with parallel fan-out and bounded backward
+   jump-backs. No model decides what runs next, so the same inputs run the same
+   stages in the same order.
 
-1. **Deterministic orchestration.** The control flow is **plain Python the engine
-   executes** — a directed graph with dependencies and parallel fan-out, plus
-   bounded backward jump-backs (so a flow/state machine, not a pure DAG): a gate
-   can rewind the flow to an earlier node, re-running it and everything
-   downstream, bounded by `max_cycles`. No model decides what runs next, so the
-   orchestrator cannot hang or improvise the sequence. Given the same inputs, the same stages
-   run in the same order.
+2. **Supervised subprocess agents.** A CLI agent can hang, crash, or misreport.
+   agent-flow supervises by **liveness** (killed only when it goes silent, not on
+   a wall-clock cap) and takes its verdict from a JSON **control sidecar** the
+   agent writes — no prose-parsing, no silently-accepted failure.
 
-2. **Reliable execution of a subprocess agent.** A CLI agent (OpenCode, Claude
-   Code, …) can hang, crash, or misreport, and nothing durable normally tells you
-   which. agent-flow supervises it by **liveness** (not a fixed wall-clock cap) —
-   killed only when it goes *silent*, with clean process-group termination — and
-   reads its real outcome from a small JSON **control sidecar** the agent writes
-   (no prose-parsing). A crashed, stalled, or invalid-output agent is detected and
-   handled, not silently accepted; this supervision is the executor's private
-   mechanism, never baked into the engine.
+3. **A controlled input plane.** Each prompt is composed from ordered channels
+   (completion protocol → run context/brief → node context/instructions → work
+   order). The engine *injects file content*, so an agent physically has the rules
+   instead of being told to go read them.
 
-3. **Controlled ingestion of context and runtime parameters.** A defined **input
-   plane** composes each agent's prompt from ordered channels (completion
-   protocol, run-wide context/brief, per-node context/instructions, templated work
-   order) — the engine *injects file content*, so an agent physically has the
-   rules rather than being told to go read them. Runtime parameters (model,
-   liveness timeout, domain params) resolve through one precedence chain
-   (CLI > env > .env > --config > run_config > default) and flow through a
-   **run-context service** — values can even be published by one node for
-   downstream nodes (`exports`). The store is task-scoped, so concurrent runs in
-   one process (an async server) never share params.
+4. **Runtime- and backend-agnostic.** `AgentRunner` abstracts the agent CLI
+   (OpenCode today; Claude Code, Codex next); `FlowBackend` abstracts execution
+   (in-process by default, opt-in Prefect). Everything else is written once.
 
-4. **Runtime- and backend-agnostic.** The subprocess executor's per-runtime wire
-   details are a further **`AgentRunner`** strategy — OpenCode today, Claude Code
-   and Codex next — where only "build the command" and "parse the event stream"
-   differ. Separately, the **`FlowBackend`** decides *how the graph runs*: a
-   Prefect-free **InProcessBackend** (default) or an opt-in **PrefectBackend**
-   (`--backend prefect`). The flow, re-runs, gates, input plane, and display layer
-   are written once and stay agnostic to both seams.
-
-5. **A unified programming model for *external* agents.** General workflow
-   engines (Prefect, Airflow, Dagster, …) can certainly *run* a graph, but they
-   offer no programming model for integrating such agentic tools (like OpenCode)
-   — no notion of an agent's prompt, injected context, typed result, control
-   verdict, or the re-run semantics an agent pipeline needs; you build all of that
-   yourself on top of raw tasks. The frameworks that *do* provide that model —
-   **PydanticAI (Graph)**, **LangGraph**, and similar — run the agents
-   **in-process**: the node *is* an LLM/tool call in
-   your Python process. agent-flow gives the same unified model (nodes with typed
-   input/output, a controlled context/instruction plane, gates, bounded re-runs)
-   but for agents that run as **external processes** — full coding agents like
-   OpenCode and Claude Code, supervised as subprocesses. It fills the gap between
-   "a workflow engine that runs anything but knows nothing about agents" and "an
-   agent framework that knows agents but only in-process". (An in-process executor
-   is supported too, so an in-process agent can be a node in the same graph.)
+5. **A programming model for *external* agents.** Workflow engines (Prefect,
+   Airflow) run graphs but know nothing about agents. Agent frameworks
+   (PydanticAI, LangGraph) know agents but run them **in-process**. agent-flow
+   gives that same model — typed input/output, context plane, gates, bounded
+   re-runs — to agents running as **external processes**. (In-process nodes work
+   too, in the same graph.)
 
 ## Feature shortlist
 
-- **Async-first, sync-friendly** — the engine core runs on
-  [`anyio`](https://anyio.readthedocs.io/): async-native agent libraries
-  (**PydanticAI**) are first-class in-process citizens (write an `async def` impl
-  that `await`s the agent — no bridge), and you can embed the flow in a
-  consumer's own event loop with `await arun_flow(...)` (a FastAPI handler, a
-  notebook). It stays additive: `run_flow` / `run_cli` / `run_agent` keep their
-  blocking signatures (thin `anyio.run` wrappers over the async natives
-  `arun_flow` / `arun_agent`), and every consumer callable — impls, gates,
-  exports, hooks — may be **sync OR async**; the engine does the right thing
-  either way. Write async where your agent library is async, plain `def` where it
-  isn't.
 - **Declarative FlowDef surface** — author a pipeline as DATA: a `FlowDef` of
   `NodeDef`s (pydantic, serializable to JSON/YAML, validated before it runs).
   Gates/exports/runs/schemas are referenced BY NAME and resolved via a
@@ -142,54 +107,41 @@ pipeline comes down to five capabilities. agent-flow delivers each directly:
   `--config` takes a file path or inline JSON and is repeatable + deep-merged.
   Domain params are typed by the flow's own `params_schema` (missing required →
   fail fast, exit 2).
+- **Async-first, sync-friendly** — the core runs on
+  [`anyio`](https://anyio.readthedocs.io/), so you can embed a flow in your own
+  event loop (`await arun_flow(...)` in a FastAPI handler) and async agent
+  libraries need no bridge. Additive, not a migration: `run_flow` / `run_cli` /
+  `run_agent` keep their blocking signatures, and every consumer callable —
+  impls, gates, exports, hooks — may be sync **or** async.
 - **Pluggable execution backend** — `FlowBackend` (ABC): a Prefect-free
   **InProcessBackend** (default; an `anyio` task group for parallel fan-out +
   `anyio.Semaphore` for the concurrency limit + stdlib logging, no temp server)
   or an opt-in **PrefectBackend** (`--backend prefect` / `build_flow(...,
   backend="prefect")`) for the run UI, scheduling, and scale. The core
   primitives + flow logic stay Prefect-free (import-isolation-guarded).
-- **Three usage tiers** — from one supervised agent up to a declared graph (below).
+- **Three levels of abstraction** — from one supervised agent up to a declared
+  graph (below).
 
-## Three usage tiers (high level → low level)
+## Levels of abstraction
 
-Pick the tier that fits; each is usable on its own. Higher tiers are more
-declarative; lower tiers give more control.
+Three ways in, each usable on its own — most consumers only need the first.
 
-```
-TIER 3  DECLARATIVE      a FlowDef (data) or agent_node() -> build_flow()
-  (most declarative)     a runnable flow; one node per agent
-        │ composes
-TIER 2  PRIMITIVES       call run_agent() as the leaf of YOUR OWN flow
-        │ uses
-TIER 1  ENGINE CORE      run_agent(): spawn + liveness-supervise + kill + sidecar verdict
-  (closest to the metal) runner-agnostic; backend-free
-        │ invokes
-        AGENT RUNTIME    OpenCode agents (.md) — external, unchanged
-```
+- **Declare the graph.** A `FlowDef` (data), or `agent_node` + `build_flow`. One
+  node per agent; the library builds the prompt, sidecar path and flow.
+  `examples/declarative.py`, `examples/imperative.py`.
+- **Write your own flow.** Call `run_agent` as the leaf of a hand-written flow.
+  `examples/custom_flow.py`.
+- **Run one supervised agent.** `run_agent`: spawn, liveness-supervise, kill,
+  read the sidecar verdict. Backend-free.
 
-- **Tier 3 — declare the graph** (a `FlowDef`, or `agent_node` + `build_flow`):
-  one node per agent; the library builds the prompt, sidecar path, and flow.
-  See `examples/declarative.py` and `examples/imperative.py`.
-- **Tier 2 — your own flow**: call `run_agent` as the leaf of a
-  hand-written flow. See `examples/custom_flow.py`.
-- **Tier 1 — one supervised agent** (`run_agent`): spawn + liveness-supervise +
-  kill + read the sidecar verdict. Backend-free.
+Diagram and details:
+[`docs/usage/index.md`](docs/usage/index.md#layering-high-level--low-level).
 
-### Example — a two-node flow (Tier 3, declarative)
+## Example — a two-node flow
 
-A minimal analyst → verifier pipeline: the analyst writes a report; the verifier
-checks it and can bounce the flow back to re-run the analyst. This is the
-**declarative surface** — a `FlowDef` of `NodeDef`s: pure DATA (no callables),
-serializable to JSON/YAML, validated before it runs.
-
-A **node** describes one step: which agent to run, what it depends on, and a gate
-(referenced BY NAME — the built-ins `require_file` / `rerun_on_signal`, or your
-own registered on a `FlowRegistry`). You describe the graph as data; the engine
-executes it — you never write the control flow. Each node's `inputs` (with
-`{param}` placeholders resolved from the run params) become the agent's work
-order. Nodes can also carry per-node `context=[...]` (file content injected into
-the prompt) and `instructions="..."`; run-wide equivalents live on the FlowDef.
-See [the input plane](docs/design/orchestrator/input-plane.md).
+An analyst writes a report; a verifier checks it and can bounce the flow back to
+re-run the analyst. The pipeline is pure DATA — no callables, serializable,
+validated before it runs — and gates are referenced by name.
 
 ```python
 from agent_flow import FlowDef, NodeDef, run_flow
@@ -220,29 +172,16 @@ run_flow(flow, product_key="acme", runtime="opencode")
 # …or, on an event loop:  await arun_flow(flow, product_key="acme", runtime="opencode")
 ```
 
-`run_flow` is the blocking one-liner (a thin `anyio.run` wrapper); from inside an
-event loop (a FastAPI handler, a notebook), call its async twin
-`await arun_flow(flow, …)` instead so it composes on the same loop with no bridge.
-
-Hand `flow` to the reusable CLI instead of calling `run_flow` directly to get
-`run_cli(flow)`'s `run` / `flow nodes` / `version` subcommands for free. Pass
-`run_cli(flow, version="1.2.0")` to surface your app's version alongside
-agent-flow's.
-
-Params are untyped above. To make the flow declare (and validate) what it needs,
-register a params model and name it — `FlowDef(params_schema="MyParams")`; the
-contract then travels with the flow. Non-portable settings (agent_dir, backend,
-timeouts) go in `run_config=` / `--config`, never on the FlowDef. See
-[flowdef](docs/design/orchestrator/flowdef.md).
-
-The same pipeline can be written imperatively with `agent_node(...)`, the
-lower-level Tier-3 form.
+Hand the same `flow` to `run_cli(flow)` for a `run` / `flow nodes` / `version`
+CLI. Add `params_schema=` to declare and validate the params it needs; put
+non-portable settings (`agent_dir`, backend, timeouts) in `run_config=` /
+`--config`, never on the `FlowDef`. Walk through it properly in
+[getting started](docs/usage/getting-started.md).
 
 ### Hooking your own logic
 
-The built-in gates cover the common cases. To plug in **your own** logic, write a
-function, register it on a `FlowRegistry`, and reference it from a node BY NAME —
-the node stays pure data, your code lives in the registry:
+Write a function, register it on a `FlowRegistry`, reference it from a node BY
+NAME — the node stays pure data, your code lives in the registry:
 
 ```python
 from agent_flow import FlowDef, NodeDef, FlowRegistry, run_flow
@@ -267,47 +206,27 @@ flow = FlowDef(name="tech", nodes=[
 run_flow(flow, registry=registry, product_key="acme", runtime="opencode")
 ```
 
-A gate that needs per-node config just takes extra keyword params — a gate is
-`(ctx, **config) -> Directive`, and the node's `gate_args` supply the config
-(bound for you). E.g. the built-in `rerun_on_signal(ctx, *, target)` used as
-`gate="rerun_on_signal", gate_args={"target": "tech-stack"}`. Other registrable
-kinds: a result→params export (`@registry.export`) and a custom run
-(`@registry.run` + `NodeDef(run_ref="…")`) for a node that runs your own code
-instead of an agent.
+Same pattern for a result→params export (`@registry.export`) and a custom run
+(`@registry.run`) for a node that runs your own code instead of an agent. See
+[gates](docs/design/gates.md) and
+[recipes](docs/usage/recipes.md).
 
 ### Mocking agents for tests & dev
 
-`mock_agent` applies the same idea to the agent itself: register a
-deterministic, no-token stand-in by agent name, then run with `--mock-agents`
-(or `mock_agents=True`) to route any node whose agent has one through it
-instead of a real runtime — no subprocess, no LLM. It is a MODE, not a
-runtime: a node without a registered mock still runs for real (partial
-mocking).
+Register a deterministic, no-token stand-in by agent name and run with
+`--mock-agents` — any node whose agent has one is routed through it instead of a
+real runtime. It is a MODE, not a runtime: a node without a mock still runs for
+real (partial mocking). Every example ships a mock mode, so you can run the whole
+pipeline without tokens. See
+[`docs/design/mock-agent.md`](docs/design/mock-agent.md).
 
-```python
-@registry.mock_agent("tech-stack-analyst")
-def tech_stack_mock(inv, ctx):
-    ctx.write_file("{run_dir}/tech-stack.md", "# Tech Stack\n\nPython, TypeScript.")
-    return {"status": "ok", "result": {"languages": ["Python"]}}
+### Where it runs
 
-run_flow(flow, registry=registry, product_key="acme", mock_agents=True)
-```
-
-`ctx` is a small, deterministic toolset: `write_file()`/`read_file()` accept the
-same `{run_dir}`/`{param}` templating as a node's `inputs`, and `input()` reads
-a structured work-order value — no prompt parsing, no LLM. See
-[`docs/design/orchestrator/mock-agent.md`](docs/design/orchestrator/mock-agent.md).
-
-**Orchestration backend.** `build_flow` compiles your graph into a runnable flow
-callable (an async coroutine — `run_flow` / `run_cli` bridge it for you) that
-dispatches execution to the selected backend. The default `InProcessBackend` runs
-in-process (an `anyio` task group + `anyio.Semaphore` + stdlib logging, no
-Prefect); the opt-in `PrefectBackend` (`build_flow(..., backend="prefect")`)
-routes execution through [**Prefect**](https://www.prefect.io/) for parallel
-fan-out, concurrency limits, and a run UI. The backend is a swappable seam — the
-engine owns all flow logic and stays backend-free, so the backend can change
-without touching your pipeline. See
-[`docs/design/orchestrator/backend.md`](docs/design/orchestrator/backend.md).
+`build_flow` dispatches execution to a swappable backend: the default
+`InProcessBackend` (no Prefect) or the opt-in `PrefectBackend`
+(`--backend prefect`) for a run UI and scale. The engine owns all flow logic and
+stays backend-free, so the backend can change without touching your pipeline. See
+[`docs/design/backend.md`](docs/design/backend.md).
 
 ## Install & run
 
@@ -318,9 +237,9 @@ configured with model access.
 **Lean core, optional extras.** The default install is small — enough to declare
 a pipeline and run it on the default in-process backend, with typed
 params/results and config (pydantic, pydantic-settings, pyyaml, jsonschema,
-python-dotenv). The heavy pieces are opt-in extras that match the runtime seams:
+python-dotenv). The heavy pieces are opt-in extras that match the runtime seams.
 
-Installed from PyPI as `petrarca-agent-flow` (the import name is `agent_flow`).
+Installed from PyPI as `petrarca-agent-flow` (the import name is `agent_flow`):
 
 | Install | Adds | Use when |
 |---|---|---|
@@ -331,19 +250,24 @@ Installed from PyPI as `petrarca-agent-flow` (the import name is `agent_flow`).
 | `petrarca-agent-flow[dev]` | all + toolchain | development (implies `[all]`) |
 
 ```bash
-pip install "petrarca-agent-flow[cli]"          # typical interactive use
-pip install "petrarca-agent-flow[cli,prefect]"  # + the Prefect backend
-task install                                    # editable dev install (implies [all])
+# typical interactive use
+pip install "petrarca-agent-flow[cli]"
+
+# + the Prefect backend
+pip install "petrarca-agent-flow[cli,prefect]"
+
+# editable dev install (implies [all])
+task install
 ```
 
 Using a feature without its extra raises a clear message telling you which
 extra to install (e.g. `run_cli` without `[cli]`, or `--backend prefect`
 without `[prefect]`).
 
-Then walk through your first pipeline, the two runnable examples (toy Tier-2 and
-tech-assessment Tier-3, each with a token-free `--mock-agents` mode), the
-`run_cli` flags/params, and writing agents that cooperate with agent-flow:
-**[`docs/usage/index.md`](docs/usage/index.md)**.
+Then walk through your first pipeline, the runnable examples (`declarative.py` /
+`imperative.py`, `custom_flow.py` — each with a token-free
+`--mock-agents` mode), the `run_cli` flags/params, and writing agents that
+cooperate with agent-flow: **[`docs/usage/index.md`](docs/usage/index.md)**.
 
 > Run real OpenCode runs from a normal shell **outside** an OpenCode session (a
 > nested OpenCode raises `UnknownError`).
@@ -358,7 +282,7 @@ standards live in **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
 
 ```
 src/agent_flow/     the library
-  core/             backend-free Tier-1 primitives (run_agent, control protocol,
+  core/             backend-free primitives (run_agent, control protocol,
                     result-schema, context ingestion, env)
   runners/          the agent-execution seam (AgentExecutor: Subprocess + InProcess + Mock)
                     and the subprocess wire adapters (AgentRunner) — OpenCode, …
@@ -368,8 +292,8 @@ src/agent_flow/     the library
                     the flow engine, flow-control gates, the one-call node, and
                     the run-time plumbing that ties the seams together
   flowdef/          the declarative FlowDef/NodeDef surface + compile_flow
-examples/           imperative.py & declarative.py (Tier 3) + custom_flow.py (Tier 2)
-docs/design/orchestrator/   the design (start at index.md)
+examples/           declarative.py, imperative.py, custom_flow.py, inprocess.py
+docs/design/   the design (start at index.md)
 ```
 
 Layer order: `utils < runners < core < engine/gates/node_builder < backends < cli`.
@@ -379,10 +303,10 @@ Layer order: `utils < runners < core < engine/gates/node_builder < backends < cl
 - **Using the library** (task-oriented) — install, write your first pipeline,
   write agents that work with agent-flow, and recipes for common tasks:
   [`docs/usage/index.md`](docs/usage/index.md).
-- **Design** (the architecture and why) — problem, principles, the three tiers,
+- **Design** (the architecture and why) — problem, principles, the layering,
   and one focused document per concept (supervision, control-file, engine,
   gates, node_builder, input-plane, result-schema, backend, cli-events):
-  [`docs/design/orchestrator/index.md`](docs/design/orchestrator/index.md).
+  [`docs/design/index.md`](docs/design/index.md).
 
 ## Contributing & License
 

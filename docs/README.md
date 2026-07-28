@@ -5,9 +5,9 @@
   library, and recipes for common tasks. Start at
   [`usage/index.md`](usage/index.md).
 
-- **Design** (the architecture and why) — `design/orchestrator/` is an OKF
+- **Design** (the architecture and why) — `design/` is an OKF
   bundle describing the library's internals and each concept. Start at
-  [`design/orchestrator/index.md`](design/orchestrator/index.md).
+  [`design/index.md`](design/index.md).
 
 - See the repository [`README.md`](../README.md) for a quick orientation and
   how to run the bundled examples.

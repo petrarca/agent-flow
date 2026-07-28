@@ -48,11 +48,16 @@ src/agent_flow/
                          #   inprocess default, prefect opt-in (DEFAULT_BACKEND="inprocess")
   cli/                   # run_cli + display helpers (typer/rich, opt-in [cli] extra)
 examples/
-  toy_pipeline/          # Tier-2 demo (hand-written flow) + its .opencode/agent/*.md
-  tech_assessment/       # Tier-3 demo (declared graph) + its .opencode/agent/*.md
+  declarative.py         # Tier-3 demo (a FlowDef of NodeDefs)
+  imperative.py          # Tier-3 demo (agent_node + build_nodes)
+  custom_flow.py         # Tier-2 demo (hand-written Prefect flow around run_agent)
+  inprocess.py           # in-process agent impls (no subprocess)
+  mock_agents.py         # --mock-agents substitution mode
+  .opencode/agent/*.md   # the agent definitions the examples share
 docs/
   usage/                 # consumer OKF bundle (getting-started, writing-agents, recipes)
-  design/orchestrator/   # design OKF bundle (one concept per file; start at index.md)
+  design/                # design OKF bundle (one concept per file; start at index.md)
+  research/              # empirical findings from probing external systems
 deploy/                  # docker-compose (Prefect server + Postgres) for persistent mode
 ```
 
@@ -187,7 +192,7 @@ inputs/context/paths. To hand a value TO the agent, put it in `inputs`.
 
 ## Documentation
 
-Docs are OKF bundles (`docs/usage/`, `docs/design/orchestrator/`) — every file
+Docs are OKF bundles (`docs/usage/`, `docs/design/`) — every file
 has a `type` frontmatter field. When you change behavior, update the matching
 concept doc and verify code snippets run. The README covers install + the three
 tiers + running the examples.
@@ -199,7 +204,7 @@ Every doc opens with a YAML frontmatter block. Keys (in this order):
 - `type` — **required**, the doc's role. Vocabulary in use:
   - `Design Overview` / `Usage Overview` — the `index.md` at a bundle root (the
     concept map / entry point).
-  - `Concept` — one design concept per file (`design/orchestrator/*.md`): the
+  - `Concept` — one design concept per file (`design/*.md`): the
     engine, gates, supervision, the control-file, the input-plane, etc.
   - `Design` — a design *proposal/plan* for a change (broader than one Concept),
     e.g. `async-first.md`, `serve-executor.md`.

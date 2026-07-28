@@ -11,7 +11,7 @@ timestamp: 2026-07-26T00:00:00Z
 `FlowDef` is the recommended way to author a pipeline: a pipeline as **pure
 data**. Where `agent_node`/`Node` build the runtime graph imperatively (Python
 objects that carry callables), a `FlowDef` of `NodeDef`s is a serializable
-pydantic model — no callables — that **compiles** to the same runtime `Node`s.
+pydantic model — no callables — that compiles to the same runtime `Node`s.
 
     FlowDef / NodeDef   (data — the surface you write)
         │  compile_flow(flow_def, registry)     resolve names -> callables
@@ -44,7 +44,7 @@ FlowDef does not add runtime capability, only a data representation.
 ## NodeDef
 
 One node, as data. Every field mirrors `agent_node`'s authoring options, but
-gates/exports/schemas are **names** (resolved via the registry), never callables.
+gates/exports/schemas are names (resolved via the registry), never callables.
 
 ```python
 NodeDef(
@@ -71,7 +71,7 @@ or any name the run config defines), not a raw timeout — the run config's
 concrete `idle_timeout_s` is an ENVIRONMENT fact, not pipeline data, so it lives
 in the run config's `nodes.<name>` section, not on the NodeDef.
 
-A node runs **either** an `agent` (the standard "run one agent" node) **or** a
+A node runs either an `agent` (the standard "run one agent" node) or a
 `run_ref` (a registered custom run — see below) — exactly one. `exports` and
 `export_ref` are mutually exclusive. `impl_ref` is not an alternative to `agent`:
 it selects HOW the (named) agent runs — in-process rather than as a subprocess —
@@ -117,7 +117,7 @@ result_schema / run_ref / export_ref / impl_ref exists in the registry.
 
 ## The FlowRegistry — names resolve to code
 
-A FlowDef holds only names. A `FlowRegistry` holds the **implementations** they
+A FlowDef holds only names. A `FlowRegistry` holds the implementations they
 resolve to, so the definition stays data and the code lives in one place. The
 built-in gates (`require_file`, `rerun_on_signal`, `rerun_on_named`) are seeded
 into every registry, so the common cases need no registration.
@@ -172,12 +172,12 @@ A node references a gate by name: `gate="rerun_to", gate_args={"target": "…"}`
 
 Two more registration kinds control HOW an agent runs, not what it does:
 
-- `@registry.agent_impl("name")` — an **in-process** agent: a Python callable
+- `@registry.agent_impl("name")` — an in-process agent: a Python callable
   `(inv) -> AgentResult | pydantic model | dict` referenced by
   `NodeDef(impl_ref="name")`. The node then runs as a direct call via
   `InProcessExecutor` (no subprocess, no sidecar) instead of spawning a runtime;
   `agent` stays as the label. See [node_builder.md](node_builder.md).
-- `@registry.mock_agent("name")` — a deterministic, no-token **stand-in** for the
+- `@registry.mock_agent("name")` — a deterministic, no-token stand-in for the
   agent named `name`, used only under the `--mock-agents` mode
   (`mock_agents=True`). When the mode is on, any node whose `agent` matches runs
   the behaviour via `MockExecutor` instead of its normal executor; mocks are keyed

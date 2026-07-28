@@ -9,7 +9,7 @@ timestamp: 2026-07-27T00:00:00Z
 # The input plane
 
 Several channels feed an agent's prompt, each with a different owner and
-lifetime. They compose in a **fixed order** into the final prompt:
+lifetime. They compose in a fixed order into the final prompt:
 
 ```
 [1 completion protocol]         library, ALWAYS      where to write status + the control JSON shape
@@ -23,8 +23,8 @@ lifetime. They compose in a **fixed order** into the final prompt:
 [9 work order]                  flow, DECLARED       the node's input DATA, templated
 ```
 
-Note the symmetry: at BOTH the run scope and the node scope, a **standing**
-channel (declared on the flow) is followed by an **additional** channel supplied
+Note the symmetry: at BOTH the run scope and the node scope, a standing
+channel (declared on the flow) is followed by an additional channel supplied
 at run time from the run config. `-i`/`--instructions` is the run-scope one;
 `--instruct NODE=…` is the node-scope one. Neither replaces its standing
 counterpart — both APPEND.
@@ -34,10 +34,10 @@ counterpart — both APPEND.
 Every channel is one cell of a small grid, which is why the order above is
 self-explanatory rather than arbitrary:
 
-- **scope** — how far it reaches and how long it lives: **run** → **node** →
+- **scope** — how far it reaches and how long it lives: run → node →
   **attempt**.
-- **kind** — what it is: **context** (ingested FILE CONTENT), **instructions**
-  (inline text), **data** (the work order).
+- **kind** — what it is: context (ingested FILE CONTENT), instructions
+  (inline text), data (the work order).
 
 | # | scope | kind | name | code |
 |---|---|---|---|---|
@@ -53,7 +53,7 @@ self-explanatory rather than arbitrary:
 
 The same word means the same thing at every scope — `run_instructions` and a
 node's `instructions` are both inline STANDING guidance, differing only in reach.
-And each scope has a matching **additional** channel supplied at run time that
+And each scope has a matching additional channel supplied at run time that
 APPENDS to the standing one: that is why the CLI keeps `--instructions`/`-i`
 (run scope) beside `--instruct NODE=…` (node scope) — one pattern, two scopes.
 
@@ -68,7 +68,7 @@ run-specific guidance, then the concrete task. "Context" is the fix for the
 files and injects their *content*, so the rules are physically in the prompt,
 not a reference to go fetch.
 
-Plus a **separate** channel that is NOT part of this prompt:
+Plus a separate channel that is NOT part of this prompt:
 
 - **Standing persona** lives in the agent `.md` (opencode loads it via
   `--agent <name>`). *What the agent is* is the agent's concern; the library
@@ -88,7 +88,7 @@ Plus a **separate** channel that is NOT part of this prompt:
   read them (the failure that motivated nested `AGENTS.md`).
 - **(3) run instructions** — the flow's STANDING global brief, declared on the
   flow: `FlowDef(run_instructions="…")` (or `build_flow(run_instructions=…)`),
-  threaded via `RunContext.run_instructions`. A typed build-time value, **not** a
+  threaded via `RunContext.run_instructions`. A typed build-time value, not a
   `params` key. Example: *"Follow the team's coding standards and cite a source
   for every finding."*
 - **(4) run ADDITIONAL instructions** — this run's extra run-wide brief, supplied
@@ -96,7 +96,7 @@ Plus a **separate** channel that is NOT part of this prompt:
   `--instructions-file`), the run config `instructions:` key, or
   programmatically `run_cli(..., run_config={"instructions": "…"})` /
   `run_flow(..., run_config={"instructions": "…"})`. Threaded via
-  `RunContext.run_additional_instructions`. It does **not** replace the flow's
+  `RunContext.run_additional_instructions`. It does not replace the flow's
   standing brief — both render (fixing a 0.3.0 bug where the flow's brief was
   dropped under `run_cli`). A flow that declares no `run_instructions` behaves
   exactly as before: (4) is then the only run-wide brief.
@@ -109,7 +109,7 @@ Plus a **separate** channel that is NOT part of this prompt:
 - **(7) per-node RUN-TIME instruction** — an extra instruction attached to a node
   at RUN time (not in the flow): CLI `--instruct NODE="…"` (repeatable), a
   `nodes.<node>.instructions` entry in the `--config`, or programmatically
-  `run_config={"nodes": {"node": {"instructions": "…"}}}`. It is appended **LAST**
+  `run_config={"nodes": {"node": {"instructions": "…"}}}`. It is appended LAST
   (after (6), before the work order), so it is the most recent standing guidance —
   an additive, last-word override ("ignore the prior instruction; do X instead").
   CLI `--instruct` wins over a config `nodes:` entry per node. May template run
@@ -183,11 +183,11 @@ thing — they are effectively reserved names in the params bag.
 
 Params are not only set at start. They live in a run-scoped **run-context
 service** (`run_context.py`) — a thread-safe store the engine installs from the
-initial params, held in a **ContextVar** so it is scoped to the RUN's async task
+initial params, held in a ContextVar so it is scoped to the RUN's async task
 tree, not the process. Two flows running concurrently in one process (an async
 server handling two requests) each get their own store, so neither reads nor
 overwrites the other's params. A node reads a *snapshot* of it when it starts (so it sees a
-stable view for its execution), and a node can **publish** values into it for
+stable view for its execution), and a node can publish values into it for
 downstream nodes via `agent_node(exports=...)`:
 
 - declarative `{param_name: field}` — copy fields (attribute or dict key) into
@@ -202,7 +202,7 @@ Example: the readiness check captures provenance and `exports` it, so every
 downstream agent stamps the same `analysis_timestamp` / `pipeline_commit`
 without re-capturing it.
 
-Scope is same-process and **downstream-only** — exports target nodes that run
+Scope is same-process and downstream-only — exports target nodes that run
 *after* the publisher, never parallel-group siblings (which may be serialized).
 "Same-process" means the store is not distributed: nodes run as tasks in one
 process and share the run's store; it is per-RUN, not per-process, so concurrent
@@ -236,7 +236,7 @@ facet of the per-node run config `nodes.<node>` (which also carries `model`,
   ```
 - **Programmatic** — `run_config={"nodes": {"analyst": {"instructions": "…"}}}`.
 
-CLI `--instruct` **wins over** a config `nodes:` entry per node; the resolved
+CLI `--instruct` wins over a config `nodes:` entry per node; the resolved
 per-node overrides are threaded via `RunContext.node_overrides` (a
 `{node: {instructions, model, agent_dir, duration, idle_timeout_s, options}}`
 map) and each agent-node applies its own entry. An unknown node name in `nodes:`
@@ -256,14 +256,14 @@ differently.
 
 ## Mapping to the old orchestrator vocabulary
 
-- "stuff currently in the orchestrator" → **(6)** per-node `instructions` and
+- "stuff currently in the orchestrator" → (6) per-node `instructions` and
   **(9)** `inputs`.
-- "stuff passed when we start the orchestrator" → the flow's **(3)** standing
-  brief plus the **(4)** `-i` addition, and params interpolated into **(9)**.
+- "stuff passed when we start the orchestrator" → the flow's (3) standing
+  brief plus the (4) `-i` addition, and params interpolated into (9).
 
 ## Rendering: two seams, one invariant
 
-Channels 2–9 reach a renderer as **parts**, never pre-joined (`PromptParts`).
+Channels 2–9 reach a renderer as parts, never pre-joined (`PromptParts`).
 Two seams compose as a pipeline, so overriding either — or both — is well
 defined:
 
@@ -303,7 +303,7 @@ the inner one's text.
 **The invariant: channel 1 is not renderable.** The completion protocol is half
 of the verdict contract — the executor injects a sidecar path and then reads back
 that exact path — so a prompt renderer cannot touch it. A runner may *replace* it
-(`build_verdict_preamble`) precisely because a runner owns **both** halves and
+(`build_verdict_preamble`) precisely because a runner owns both halves and
 keeps them in step; a structured-output runner would swap the instruction and the
 harvest together.
 

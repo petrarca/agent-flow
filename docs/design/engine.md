@@ -21,19 +21,19 @@ backend a `run_node` closure. The backend (InProcessBackend by default, PrefectB
 opt-in) supplies only execution mechanics — parallel fan-out, concurrency limit,
 logger, and bootstrap/teardown.
 
-The engine does **not** import Tier 1 — it meets `run_agent` only through the
+The engine does not import Tier 1 — it meets `run_agent` only through the
 caller-supplied `Node.run`. (The [node builder](node_builder.md) module is the one
 place that bridges both, on purpose.)
 
 ## Async-first
 
-The engine core is **async** (on [`anyio`](https://anyio.readthedocs.io/)): the
+The engine core is async (on [`anyio`](https://anyio.readthedocs.io/)): the
 call chain `interpret → run_node → run_group → _walk → _walk_session → the flow
 callable` is a chain of coroutines, and the callable `build_flow` returns is an
 `async def`. This makes an async-native agent (PydanticAI) a first-class
 in-process node and lets the flow run inside a consumer's event loop.
 
-The change is **additive** — every consumer callable may be sync `def` OR async
+The change is additive — every consumer callable may be sync `def` OR async
 `async def`, and the engine dispatches through a single `await`-if-awaitable point
 (`_maybe_await`): a node's `run`, a `gate`, an `exports` impl, and the observing
 hooks. A sync callable's plain return passes straight through; an async one is
@@ -93,7 +93,7 @@ otherwise unchanged — only the consumer callables are awaited-if-awaitable:
 - `Restart` (and `GoTo` to self) → re-run the node in place, bounded by
   `max_cycles`.
 - `Stop` → raise `NodeBlocked` (halts the run).
-- `GoTo(other)` → return a `NodeOutcome(status, goto=other)` for the **walker** to
+- `GoTo(other)` → return a `NodeOutcome(status, goto=other)` for the walker to
   act on (see jump-back below). `interpret` does not handle cross-node jumps
   itself — that requires the group sequence, which only the walker owns.
 
@@ -103,7 +103,7 @@ callback: `blocking` → `NodeBlocked`; `degrade` → status `degraded`.
 ## `build_flow` — compile to a runnable flow callable
 
 `build_flow(nodes, *, name, llm_tag, llm_concurrency, on_event_factory, on_node_event, run_instructions, run_additional_instructions, run_context, agent_dir, node_overrides, durations, options, backend="inprocess", registry=None)`
-returns an **async** callable `async f(run_dir="", start_from="", only="", **params) -> dict[str, NodeOutcome]`
+returns an async callable `async f(run_dir="", start_from="", only="", **params) -> dict[str, NodeOutcome]`
 (`build_flow`'s own body stays sync — only the returned callable is a coroutine;
 `await` it, or use the sync `run_flow` / `run_cli` wrappers that bridge it with
 `anyio.run`). It:
@@ -111,13 +111,13 @@ returns an **async** callable `async f(run_dir="", start_from="", only="", **par
 - fails fast at build time on cycles/unknown deps (`plan_groups`),
 - resolves the selected `backend` (default `"inprocess"`) and dispatches each
   group's execution to it (solo inline; parallel fan-out via the backend),
-- honors bounded **cross-node jump-back**,
+- honors bounded cross-node jump-back,
 - honors `start_from` (enter at a group, run forward) and `only` (run exactly
   one group, stop),
 - applies an optional LLM concurrency limit on `llm_tag` (an `anyio.Semaphore` on
   the in-process backend; a server-side limit on the Prefect backend).
 
-The backend is resolved **lazily inside `build_flow`** (via
+The backend is resolved lazily inside `build_flow` (via
 `agent_flow.backends.get_backend`) so the engine module imports without pulling
 any backend, keeping Prefect optional.
 
@@ -125,8 +125,8 @@ any backend, keeping Prefect optional.
 
 The walker (`_walk`) owns the planned group order and the results/jump state, so
 it — not `interpret` — implements backward `GoTo`. When a group's node returns
-`GoTo(target)` for an **earlier** group, the walker rewinds to the target's group
-and re-runs from there, **bounded per target by the target node's `max_cycles`**.
+`GoTo(target)` for an earlier group, the walker rewinds to the target's group
+and re-runs from there, bounded per target by the target node's `max_cycles`.
 Forward or unknown targets are ignored with a log (a gate mistake fails visibly,
 not silently). This is how "a verifier node decides an earlier analyst node must
 re-run" is realized — not a built-in analyst/verifier pairing, just an edge plus

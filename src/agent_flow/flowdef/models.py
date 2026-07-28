@@ -101,7 +101,7 @@ class FlowDef(BaseModel):
 
     # Flow-wide PORTABLE declarations. Named for their SCOPE: `run_*` spans the
     # whole run; a NodeDef's `instructions`/`context` are one node. Same word,
-    # different scope — see docs/design/orchestrator/input-plane.md.
+    # different scope — see docs/design/input-plane.md.
     #
     # agent_dir / backend / llm_concurrency are NOT here: a filesystem path, a
     # deployment choice, and an environment capacity are run config, not portable

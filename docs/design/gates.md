@@ -8,7 +8,7 @@ timestamp: 2026-07-23T07:51:35Z
 
 # Gates
 
-A **gate** is the consumer's optional hook: after an agent runs, it inspects what
+A gate is the consumer's optional hook: after an agent runs, it inspects what
 the agent produced (files on disk, the control `result`) and returns a
 **directive** that steers the flow. This is the seam that keeps domain knowledge
 — "what a report is, when a re-run is needed" — out of the engine.
@@ -16,7 +16,7 @@ the agent produced (files on disk, the control `result`) and returns a
 A gate is a callable `(ctx, **config) -> Directive`, where the node's `gate_args`
 supply the config (bound with `functools.partial` at resolve time, so after
 binding the engine calls it with just `ctx`). A gate with no per-node config is
-simply `(ctx) -> Directive`. A node with **no** gate behaves as if it returned
+simply `(ctx) -> Directive`. A node with no gate behaves as if it returned
 `Continue()` — absent means continue.
 
 ## Directives (the closed set)
@@ -25,7 +25,7 @@ simply `(ctx) -> Directive`. A node with **no** gate behaves as if it returned
 |---|---|
 | `Continue()` | proceed to the next node (the default). |
 | `Restart(instruction="")` | re-run THIS node's agent, bounded by `max_cycles`. The optional `instruction` is injected verbatim into the target's next run. |
-| `GoTo(node, instruction="")` | resume the flow at a named node — self (= Restart) or an **earlier** node (bounded cross-node jump-back, see [engine](engine.md)). |
+| `GoTo(node, instruction="")` | resume the flow at a named node — self (= Restart) or an earlier node (bounded cross-node jump-back, see [engine](engine.md)). |
 | `Stop(reason="")` | abort the whole pipeline (e.g. a blocking-criticality failure). |
 
 The closed union makes flow control discoverable and typo-proof: a reader sees
@@ -48,7 +48,7 @@ GateContext(
 )
 ```
 
-Prefer **`ctx.obj`** whenever the node declared a `result_schema`: it is the
+Prefer `ctx.obj` whenever the node declared a `result_schema`: it is the
 validated pydantic instance, so `ctx.obj.ready` reads the structured result
 cleanly — no digging a magic key out of `result`. `ctx.obj` is `None` when there
 is no schema; fall back to `ctx.result` then.

@@ -1,28 +1,20 @@
 ---
 type: Guide
-title: Advanced recipes (lower-level)
-description: Lower-level how-tos using the imperative agent_node/build_flow surface and gate callables — gates, re-run loops, parallel steps, typed output, live events, dropping to a lower tier.
+title: Advanced recipes
+description: Advanced how-tos — parallel steps, re-run loops, exports, typed output, partial runs, prompt rendering, backends, live events, and dropping below the declarative surface.
 tags: [agent-flow, advanced, recipes, how-to, agent_node, gates, cli]
 timestamp: 2026-07-23T08:54:40Z
 ---
 
-# Advanced recipes (lower-level)
+# Advanced recipes
 
-These how-tos use the **imperative** surface — `agent_node` / `build_flow` and
-gate callables — which sits below the declarative [FlowDef](../design/orchestrator/flowdef.md).
-Each assumes you've read [getting-started.md](getting-started.md).
+Beyond the basics in [recipes.md](recipes.md): parallel steps, re-run loops,
+exports, partial runs, prompt rendering and backends. Examples use `FlowDef`,
+the recommended surface; the last two sections drop below it deliberately.
 
-> For defining and running a declarative FlowDef pipeline, built-in gates,
-> custom registry logic, and run-wide brief/context:
-> see [recipes.md](recipes.md).
-
-> **The pipeline callable is async.** `build_flow(...)` returns an *async* flow
-> callable, so `pipeline(**params)` is a coroutine. The snippets below that call
-> it directly (`build_flow(nodes, …)(product_key=…)`) assume you either `await` it
-> on an event loop or bridge it with `anyio.run(lambda: pipeline(**params))`.
-> `run_cli` does this bridge for you — nothing to think about when you use the
-> CLI. Consumer callables here (gate callables, a hand-written node `run`, an
-> `impl`, hooks) may each be sync `def` or `async def`.
+Where a snippet calls a `build_flow(...)` pipeline directly, note it returns an
+*async* callable — `await` it or use `anyio.run(lambda: pipeline(...))`.
+`run_flow` and `run_cli` bridge it for you.
 
 ## Run a pipeline from the CLI (no bespoke command)
 
@@ -55,15 +47,20 @@ python -m my_pkg.pipeline run --config run.yml --config '{"durations": {"long": 
 # run.yml — generic run settings (the lowest explicit source)
 runtime: opencode
 run_dir: "{repos_root}/{product_key}/output"
-agent_dir: /work/pipelines/tech-assessment   # often unnecessary (runner probes .opencode/)
+# often unnecessary: the runner probes for .opencode/
+agent_dir: /work/pipelines/tech-assessment
 llm_concurrency: 2
 instructions: |
   Follow the team's coding standards and cite a source for every finding.
-durations: {long: 900}          # map a node's portable duration NAME to seconds
-options: {serve_url: "http://localhost:4096"}   # runtime-specific, an open bag
+# map a node's portable duration NAME to seconds
+durations: {long: 900}
+
+# runtime-specific settings, an open bag
+options: {serve_url: "http://localhost:4096"}
 nodes:                          # per-node run config (the shadow of a NodeDef)
   analyst:
-    instructions: "Weight the security assessment heavily."   # appended last to that node
+    # appended last to that node's prompt
+    instructions: "Weight the security assessment heavily."
     duration: long
     model: azure-claude/Claude-Opus-5
 ```
@@ -86,10 +83,11 @@ to `run_config`, which is how/where it runs).
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-@registry.params_model("MyParams")           # register it BY NAME
+# register it BY NAME so a FlowDef can reference it
+@registry.params_model("MyParams")
 class MyParams(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-    product_key: str                        # required — no default
+    product_key: str                          # required
     repos_root: str = Field(default="/tmp/repos")
 
 # DECLARATIVE (preferred): the flow declares its own signature.
@@ -122,7 +120,7 @@ helper (so you don't hand-encode the marker):
 from agent_flow import runtime_param
 
 class MyParams(BaseSettings):
-    product_key: str                        # user input
+    product_key: str                          # user input
     # set at run time by a node's exports; not something you pass with -p:
     analysis_timestamp: str = Field(default="UNKNOWN", json_schema_extra=runtime_param())
 ```
@@ -141,37 +139,38 @@ which reuses `build_run_config` and `preflight` in its own Tier-2 CLI.
 ## Check that a step actually produced its file
 
 ```python
-agent_node("hello", "hello-analyst", inputs={"REPORT": "{run_dir}/hello.md"},
-           gate_ref="require_file", gate_args={"path": "{run_dir}/hello.md"})
+NodeDef(name="hello", agent="hello-analyst",
+        inputs={"REPORT": "{run_dir}/hello.md"},
+        gate="require_file", gate_args={"path": "{run_dir}/hello.md"})
 ```
 
-Built-in gates are referenced **by name** (`gate_ref="require_file"` +
-`gate_args={...}`); the `gate=` param takes only a bare callable you wrote. If the
-control sidecar says `ok` but `hello.md` is missing or empty, the node is re-run
-(bounded by `max_cycles`, default 1). See
-[gates.md](../design/orchestrator/gates.md).
+If the sidecar says `ok` but the file is missing or empty, the node re-runs,
+bounded by `max_cycles` (default 1). Imperatively the same gate is
+`agent_node(..., gate_ref="require_file", gate_args={...})`; `gate=` there takes
+a bare callable you wrote.
 
 ## A verifier that can trigger a re-run
 
-There's no built-in "verifier" concept — it's a plain node that depends on the
-step it checks, with a gate that can send the flow back:
+A verifier is a plain node that depends on the step it checks, with a gate that
+can send the flow back:
 
 ```python
-nodes = [
-    agent_node("hello", "hello-analyst", inputs={"REPORT": "{run_dir}/hello.md"},
-               gate_ref="require_file", gate_args={"path": "{run_dir}/hello.md"}),
-    agent_node("hello-verify", "hello-verifier",
-               depends_on=("hello",),
-               inputs={"REPORT": "{run_dir}/hello.md"},
-               criticality="degrade",           # a failed check shouldn't halt the run
-               gate_ref="rerun_on_signal", gate_args={"target": "hello"}),
-]
+FlowDef(name="p", nodes=[
+    NodeDef(name="hello", agent="hello-analyst",
+            inputs={"REPORT": "{run_dir}/hello.md"},
+            gate="require_file", gate_args={"path": "{run_dir}/hello.md"}),
+    NodeDef(name="hello-verify", agent="hello-verifier",
+            depends_on=["hello"],
+            inputs={"REPORT": "{run_dir}/hello.md"},
+            # a failed check shouldn't halt the run
+            criticality="degrade",
+            gate="rerun_on_signal", gate_args={"target": "hello"}),
+])
 ```
 
-`hello-verifier.md` must itself say **when** to set `rerun_required` — see
-[writing-agents.md](writing-agents.md#using-rerun_required-optional--most-agents-never-need-this).
-The re-run is bounded by `hello`'s `max_cycles` (default 1) — it will not loop
-forever even if the verifier keeps asking.
+The agent's own `.md` must say when to set `rerun_required` — see
+[writing-agents.md](writing-agents.md#requesting-a-re-run). The re-run is bounded
+by `hello`'s `max_cycles`, so it cannot loop forever.
 
 ## Run independent steps in parallel
 
@@ -179,51 +178,51 @@ Nodes sharing a `parallel_group` are dispatched concurrently once their
 dependencies are met:
 
 ```python
-nodes = [
-    agent_node("tech-stack", "tech-stack-analyst", inputs={"REPORT": "{run_dir}/tech-stack.md"}),
-    agent_node("domain", "domain-analyst", depends_on=("tech-stack",),
-               parallel_group="analysis", inputs={"REPORT": "{run_dir}/domain.md"}),
-    agent_node("coupling", "coupling-analyst", depends_on=("tech-stack",),
-               parallel_group="analysis", inputs={"REPORT": "{run_dir}/coupling.md"}),
-]
+FlowDef(name="p", nodes=[
+    NodeDef(name="tech-stack", agent="tech-stack-analyst",
+            inputs={"REPORT": "{run_dir}/tech-stack.md"}),
+    NodeDef(name="domain", agent="domain-analyst", depends_on=["tech-stack"],
+            parallel_group="analysis", inputs={"REPORT": "{run_dir}/domain.md"}),
+    NodeDef(name="coupling", agent="coupling-analyst", depends_on=["tech-stack"],
+            parallel_group="analysis", inputs={"REPORT": "{run_dir}/coupling.md"}),
+])
 ```
 
 `domain` and `coupling` both depend only on `tech-stack`, so they run
-concurrently. Cap total concurrency with `build_flow(..., llm_concurrency=2)`.
+concurrently. Cap total concurrency with `run_config={"llm_concurrency": 2}`.
 
 ## Pass a run-wide brief to every agent
 
-A global directive every agent should see — e.g. from your CLI:
+A directive every agent should see:
 
 ```python
-build_flow(nodes, name="my-pipeline", run_instructions=brief)
+FlowDef(name="my-pipeline", run_instructions=brief, nodes=[...])
 ```
 
 ```bash
 python my_flow.py run --instructions "Follow the team's coding standards and cite a source for every finding."
 ```
 
-(`--instructions`/`-i` is already wired by `run_cli` — no need to add it
-yourself; see `examples/declarative.py`.) It's injected into **every** agent's
-prompt, after the control protocol. See
-[input-plane.md](../design/orchestrator/input-plane.md).
+`run_cli` wires `-i/--instructions` for you. The text is appended to the flow's
+own `run_instructions` (it does not replace it) and injected into every prompt
+after the control protocol. See
+[input-plane.md](../design/input-plane.md).
 
 ## Give one node an extra, specific instruction
 
 Additive to the run-wide brief, for one node only (set at BUILD time):
 
 ```python
-agent_node("tech-stack", "tech-stack-analyst",
-           inputs={"REPORT": "{run_dir}/tech-stack.md"},
-           instructions="List concrete versions where known; prefer a compact table.")
+NodeDef(name="tech-stack", agent="tech-stack-analyst",
+        inputs={"REPORT": "{run_dir}/tech-stack.md"},
+        instructions="List concrete versions where known; prefer a compact table.")
 ```
 
 ## Steer one node at RUN time (`--instruct` / `nodes.<n>.instructions`)
 
-To steer a node for a run *without* editing the flow — or to persist per-product
-steering in config — attach a per-node instruction at run time. It is appended
-**LAST** (after the build-time instruction, before the work order), so it is the
-most recent standing guidance and overrides earlier ones by recency:
+Attach a per-node instruction at run time, without editing the flow. It is
+appended after the build-time instruction and before the work order, so it is the
+last standing guidance the agent reads:
 
 ```bash
 # CLI (repeatable; NODE=text like -p):
@@ -243,15 +242,13 @@ nodes:
 run_flow(flow_def, run_config={"nodes": {"analyst": {"instructions": "…"}, "summary": {"instructions": "…"}}})
 ```
 
-CLI `--instruct` wins over a config `nodes:` entry (per node). An unknown node
-name is a hard error, not silently ignored. Pairs naturally with re-entering the
-flow at a node to iterate. See
-[input-plane](../design/orchestrator/input-plane.md#per-node-run-time-instructions).
+`--instruct` wins over a config `nodes:` entry, per node. An unknown node name
+is a hard error. Pairs well with re-entering the flow at a node to iterate.
 
 ## Start partway through the flow (`--start-from`)
 
-Begin at a chosen node (or parallel-group) and run forward, skipping the nodes
-before it — to iterate on a late stage without re-running the expensive upstream:
+Begin at a node (or parallel-group) and run forward, to iterate on a late stage
+without re-running the expensive upstream:
 
 ```bash
 # re-run only extractor -> summary -> …, steering the extractor for this pass:
@@ -261,28 +258,22 @@ python my_flow.py run -p product_key=acme \
 ```
 
 ```python
-anyio.run(lambda: build_flow(nodes, name="my-pipeline")(product_key="acme", start_from="extractor"))
+run_flow(flow, product_key="acme", start_from="extractor")
 ```
 
-`start_from` names a **node** or a **parallel-group** (`agent_node(parallel_group=…)`):
-a group name enters the whole fan-out; a member node resolves to the same group
-(you can't enter "in the middle" of a parallel group — the group is the unit).
+A group name enters the whole fan-out; a member node resolves to its group. You
+cannot enter the middle of a parallel group.
 
-**Caveat — you assert the upstream is done.** Skipping earlier nodes means their
-side-effects did not happen this run: their **output files must already exist**
-(from a prior run) for the start node to read, and any params they would have
-**exported** (e.g. a readiness check's `pipeline_commit`) won't be set — runtime
--populated params fall back to their defaults. `start_from` is a forward entry
-point set once; it is distinct from re-run jump-back (a gate can still send the
-flow back to a skipped node, and it will run then). CLI/programmatic only — not a
-persisted config setting.
+You are asserting the upstream already ran. Skipped nodes produce no files and
+export no params this run, so the start node's inputs must already exist and
+runtime-populated params fall back to their defaults. A gate can still jump back
+into a skipped node, and it will run then. CLI and programmatic only, never
+persisted in config.
 
 ## Run a single node and stop (`--only`)
 
-The surgical complement to `--start-from`: run **exactly one** node (or
-parallel-group) and stop — for iterating on one stage without running anything
-after it either. `--start-from` runs *from* a group *to the end*; `--only` runs
-*just* that group.
+`--start-from` runs from a group to the end; `--only` runs just that group and
+stops.
 
 ```bash
 # re-run ONLY the extractor, nothing before or after it:
@@ -292,54 +283,44 @@ python my_flow.py run -p product_key=acme \
 ```
 
 ```python
-anyio.run(lambda: build_flow(nodes, name="my-pipeline")(product_key="acme", only="extractor"))
+run_flow(flow, product_key="acme", only="extractor")
 ```
 
-Same **group granularity** as `start_from`: a group name runs the whole fan-out;
-a member node resolves to its group (you can't run half a parallel group). In
-`--only` mode the walk runs that one group and stops — **gate jump-backs are
-ignored** (there is nothing downstream to resume into).
-
-The same upstream caveat applies, and now downstream too: everything else is
-skipped, so any output files or exported params the chosen node depends on must
-already exist (runtime-populated params fall back to their defaults). `--only`
-and `--start-from` are **mutually exclusive** — setting both is an error.
-CLI/programmatic only — not a persisted config setting.
+Same group granularity as `start_from`. Gate jump-backs are ignored in `--only`
+mode, since there is nothing downstream to resume into. The upstream caveat above
+applies in both directions: everything else is skipped, so whatever the node
+reads must already exist. `--only` and `--start-from` are mutually exclusive.
 
 ## Change how the prompt is rendered
 
-A node's `inputs` are rendered into the prompt as **XML tags** (the default):
+A node's `inputs` render into the prompt as XML tags by default:
 
 ```
 <PRODUCT_KEY>acme</PRODUCT_KEY>
 <REPORT>/run/report.md</REPORT>
 ```
 
-Why tags rather than `KEY: value`: a closing tag **delimits** the value, so a
-multi-line or structured value is unambiguous — a line-oriented work order has no
-continuation marker, so the second line of a value is indistinguishable from the
-next key. Tags are also the shape Anthropic recommends for Claude prompts. Your
-agent `.md` needs no change: it refers to the KEY *name* (`REPORT`), which is
-identical either way.
+A closing tag delimits the value, so a multi-line value is unambiguous — a
+line-oriented `KEY: value` order has no continuation marker. Your agent `.md` is
+unaffected either way: it refers to the key *name*.
 
-To override it, register a renderer — it is a **registry registration, not a
-parameter**, so `build_flow`/`agent_node` do not grow a knob per presentation
-choice (the same reasoning as gates and exports):
+To override it, register a renderer:
 
 ```python
 from agent_flow import render_work_order_lines
 
-registry.work_order(render_work_order_lines)      # opt back into KEY: value
+# opt back into the KEY: value shape
+registry.work_order(render_work_order_lines)
 ```
 
 ### Take over the whole prompt body
 
-`work_order` restyles the data block. To control the **entire** layout — every
-channel, in your own order and wording — register a prompt renderer instead. It
-receives the channels unassembled:
+`work_order` restyles the data block. To control the entire layout, register a
+prompt renderer instead. It receives the channels unassembled:
 
 ```python
-from agent_flow import render_prompt   # the default, if you want to fall back
+# the default renderer, if you want to fall back to it
+from agent_flow import render_prompt
 
 @registry.prompt
 def all_xml(parts):
@@ -353,17 +334,14 @@ def all_xml(parts):
     return "\n".join(out)
 ```
 
-The two seams compose as a **pipeline**, so setting both is unambiguous: the
-work-order renderer produces `parts.work_order`, then the prompt renderer lays
-out the body. `parts.inputs` keeps the work order structured, so a prompt
-renderer can ignore the rendered text and format the data itself.
+The two compose: the work-order renderer produces `parts.work_order`, then the
+prompt renderer lays out the body. `parts.inputs` keeps the data structured, so a
+prompt renderer can format it itself.
 
-**One thing you cannot render: the completion protocol.** That block is half of
-the verdict contract — the executor injects a control-file path and then reads
-back that exact path — so it is owned by the runner and prepended after your
-renderer runs. To change it, implement `build_verdict_preamble` on a runner,
-which moves the instruction and the harvest together. See
-[input-plane](../design/orchestrator/input-plane.md).
+The completion protocol is the one block you cannot render — it is owned by the
+runner and prepended after your renderer runs. To change it, implement
+`build_verdict_preamble` on a runner. See
+[input-plane](../design/input-plane.md).
 
 Or supply your own — any `(resolved: dict[str, str]) -> str`:
 
@@ -379,109 +357,110 @@ so a renderer never has to think about `{param}` substitution.
 
 ## Make agents actually read rules/standards (ingest context)
 
-Telling an agent to "read the security rules" is unreliable; injecting the
-rules' **content** into the prompt is not. Name context files — globally and/or
-per node — and the engine reads them and puts their content in the prompt:
+Telling an agent to read the security rules is unreliable; injecting their
+content is not. Name context files, run-wide or per node, and the engine reads
+them into the prompt:
 
 ```python
-# every agent gets the security + style rules:
-build_flow(nodes, name="p",
-           run_context=["{run_dir}/rules/security.md", "{run_dir}/rules/coding-standards.md"])
-
-# only the architecture node also gets the architecture rules:
-agent_node("architecture", "architecture-analyst",
-           inputs={"REPORT": "{run_dir}/architecture.md"},
-           context=["{run_dir}/rules/architecture.md"])
+FlowDef(
+    name="p",
+    # every agent gets the security + style rules
+    run_context=["{run_dir}/rules/security.md", "{run_dir}/rules/coding-standards.md"],
+    nodes=[
+        # only this node also gets the architecture rules
+        NodeDef(name="architecture", agent="architecture-analyst",
+                inputs={"REPORT": "{run_dir}/architecture.md"},
+                context=["{run_dir}/rules/architecture.md"]),
+    ],
+)
 ```
 
-Sources are paths or globs, may template run params (`{run_dir}`, `{product_key}`,
-…), and a source matching no file is warned about and skipped (never a crash).
-Content is injected *before* the inline instructions at each scope. See
-[input-plane.md](../design/orchestrator/input-plane.md). (At Tier 1/2, read the
-files yourself — or use `agent_flow.read_context_blocks(...)` — and pass the
-resulting string as `run_agent(run_context=...)`.)
+Sources are paths or globs and may template run params. A source matching no
+file is warned about and skipped, never a crash. Content is injected before the
+inline instructions at each scope. Calling `run_agent` directly, pass an
+already-read string as `run_context=` (`read_context_blocks` does the reading).
 
 ## Get typed output from an agent
 
-```python
-# No Pydantic needed — a plain JSON-schema dict:
-schema = {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}
-agent_node("tech-stack", "tech-stack-analyst", result_schema=schema)
+Register the schema by name, then reference it. A pydantic model or a plain
+JSON-schema dict both work:
 
-# Or, with a Pydantic model (pydantic is a core dependency — always available):
+```python
 from pydantic import BaseModel
-from agent_flow import PydanticSchema
 
 class TechStackResult(BaseModel):
     summary: str
     languages: list[str]
 
-agent_node("tech-stack", "tech-stack-analyst", result_schema=PydanticSchema(TechStackResult))
-```
-
-The mirror on the way IN is `input_schema` — same accepted forms, validated
-against the node's RESOLVED work order before the agent runs, and surfaced to an
-in-process impl as `inv.input_obj`:
-
-```python
 class TechStackIn(BaseModel):
     product_key: str
     report: str
 
-agent_node("tech-stack", "tech-stack-analyst",
-           input_schema=TechStackIn,        # typed IN
-           result_schema=TechStackResult,   # typed OUT
-           inputs={"product_key": "{product_key}", "report": "{run_dir}/tech-stack.md"})
+registry.schema("TechStackResult")(TechStackResult)
+registry.schema("TechStackIn")(TechStackIn)
+
+NodeDef(name="tech-stack", agent="tech-stack-analyst",
+        input_schema="TechStackIn",        # typed IN
+        result_schema="TechStackResult",   # typed OUT
+        inputs={"product_key": "{product_key}", "report": "{run_dir}/tech-stack.md"})
 ```
 
-See [Type a node's inputs](recipes.md#type-a-nodes-inputs-input_schema) for the
-declarative form and the failure semantics.
+`input_schema` is the mirror of `result_schema`: same accepted forms, validated
+against the resolved work order before the agent runs, and surfaced to an
+in-process impl as `inv.input_obj`. See
+[Type a node's inputs](recipes.md#type-a-nodes-inputs-input_schema) for the
+failure semantics.
+
+Working imperatively you can pass the class or dict directly —
+`agent_node(..., result_schema=PydanticSchema(TechStackResult))` — the registry
+exists so the declarative surface stays serializable.
 
 The schema is injected into the agent's prompt and the result is validated
 (never fails the run — check `result["_result_valid"]` in a gate if you need to
-act on it). See [result-schema.md](../design/orchestrator/result-schema.md).
+act on it). See [result-schema.md](../design/result-schema.md).
 
 ## Publish a value to downstream nodes (`exports`) {#exports}
 
-A node can discover a value and hand it to the nodes that follow — without
-threading it through your own code. `agent_node(exports=...)` merges values from
-the node's `result` into the run-scoped param store, so **downstream** nodes
-template `{name}` against them.
+A node can discover a value and hand it to the nodes that follow. `exports`
+merges values from the node's `result` into the run-scoped param store, so
+downstream nodes template `{name}` against them.
 
 ```python
-# Declarative: copy result fields into params (rename allowed via the key).
-agent_node("readiness", "readiness-check", result_schema=ReadinessResult,
-           exports={"analysis_timestamp": "analysis_timestamp",
-                    "pipeline_commit": "pipeline_commit"})
+# copy result fields into params (the key renames)
+NodeDef(name="readiness", agent="readiness-check", result_schema="ReadinessResult",
+        exports={"analysis_timestamp": "analysis_timestamp",
+                 "pipeline_commit": "pipeline_commit"})
 
-# Callable: full control. With a result_schema set, exports receives the
-# VALIDATED typed object directly (else the raw dict) — no key digging.
-agent_node("readiness", "readiness-check", result_schema=ReadinessResult,
-           exports=lambda r: {"mode": r.suggested_mode})
+# or register a function for full control; with a result_schema set it receives
+# the VALIDATED typed object, so there is no key digging
+@registry.export("publish_mode")
+def publish_mode(result):
+    return {"mode": result.suggested_mode}
 
-# A later node then templates the exported value like any other param:
-agent_node("analyst", "analyst", depends_on=("readiness",),
-           inputs={"ANALYSIS_TIMESTAMP": "{analysis_timestamp}", "MODE": "{mode}"})
+NodeDef(name="readiness", agent="readiness-check", result_schema="ReadinessResult",
+        export_ref="publish_mode")
+
+# a later node templates the exported value like any other param
+NodeDef(name="analyst", agent="analyst", depends_on=["readiness"],
+        inputs={"ANALYSIS_TIMESTAMP": "{analysis_timestamp}", "MODE": "{mode}"})
 ```
 
-The engine applies exports after the node settles, so later nodes pick the values
-up automatically. Pair this with a **runtime-populated** params field (see
-[typed params](#typed-required-domain-params)) to give the
-placeholder a sensible default and keep it out of the resolved-params summary.
+Exports are applied after the node settles, so later nodes pick them up
+automatically. Pair with a runtime-populated params field (see
+[typed params](#typed-required-domain-params)) to give the placeholder a default
+and keep it out of the resolved-params summary.
 
-Scope: same-process, **downstream-only** — exports reach nodes that run *after*
-the publisher, never parallel-group siblings. See
-[input-plane.md](../design/orchestrator/input-plane.md#run-context-params-can-also-flow-from-a-node).
+Exports reach nodes that run *after* the publisher, never parallel-group
+siblings.
 
 ### What a gate sees
 
 Prefer the typed object; fall back to the dict:
 
-- **`ctx.obj`** — the **validated pydantic instance** when the node attached a
-  `PydanticSchema`, else `None`. Read structured fields directly: `ctx.obj.ready`.
-- **`ctx.result`** — the raw envelope. The agent's result dict is at
-  `ctx.result["result"]`; schema-check flags at `ctx.result["_result_valid"]` /
-  `["_result_errors"]`. Use this for the no-schema case or the envelope fields.
+- `ctx.obj` — the validated pydantic instance when the node attached a
+  `PydanticSchema`, else `None`. Read fields directly: `ctx.obj.ready`.
+- `ctx.result` — the raw envelope. The agent's data is at `ctx.result["result"]`,
+  schema flags at `["_result_valid"]` / `["_result_errors"]`.
 
 ```python
 def gate(ctx):
@@ -491,19 +470,18 @@ def gate(ctx):
     if not ctx.result["_result_valid"]:                 # schema check failed
         return Restart(instruction=f"invalid result: {ctx.result['_result_errors']}")
 
-    data = ctx.result.get("result", {})                 # dict/no-schema case
+    # the dict / no-schema case
+    data = ctx.result.get("result", {})
     return Restart() if not data.get("summary") else Continue()
 ```
 
-In short: **read `ctx.obj` when you set a schema; `ctx.result` otherwise.**
+Read `ctx.obj` when you set a schema, `ctx.result` otherwise.
 
 ## Choose the execution backend (`--backend`)
 
-The DAG runs on a swappable execution backend. The default is a Prefect-free
-**in-process** backend — an `anyio` task group for parallel groups, an
-`anyio.Semaphore` for the concurrency limit, stdlib logging. No temporary server,
-fast startup, one fewer heavy dependency. It is the right choice for everyday
-single runs.
+The graph runs on a swappable backend. The default is in-process and
+Prefect-free: no temporary server, fast startup, one fewer heavy dependency.
+Right for everyday single runs.
 
 ```bash
 # default: in-process backend (nothing to pass)
@@ -516,23 +494,21 @@ export AGENT_FLOW_BACKEND=prefect
 ```
 
 ```python
-build_flow(nodes, name="p", backend="inprocess")     # default
-build_flow(nodes, name="p", backend="prefect")   # opt-in
+# the default
+run_flow(flow, run_config={"backend": "inprocess"})
+
+# opt-in
+run_flow(flow, run_config={"backend": "prefect"})
 ```
 
-The **engine owns the flow logic** (ordering, parallel fan-out, jump-back,
-`--start-from`/`--only`, run-context); the backend only executes. So switching
-backends changes *how* nodes run, never *what* runs or in what order — the
-outcomes are identical. Prefect is imported only when you select `prefect`, so
-the core primitives and a default local run stay Prefect-free.
-
-Adding another backend (Hatchet, Temporal, a bespoke loop) = subclass
-`FlowBackend` and register it; nothing in your pipeline changes.
+The engine owns the flow logic; the backend only executes. Switching backends
+changes how nodes run, never what runs or in what order. Prefect is imported only
+when you select it. To add another backend, subclass `FlowBackend` and register
+it — nothing in your pipeline changes.
 
 ## Watch progress live
 
-Via `run_cli`, the **default** view prints one line per node transition, with the
-agent label and elapsed time, then an end-of-run table:
+The default `run_cli` view prints one line per node transition, then a table:
 
 ```
     > tech-stack running (tech-stack-analyst)
@@ -545,20 +521,16 @@ check tech-stack ok (tech-stack-analyst) 15.2s
 │ tech-stack  │ opencode:tech-stack-analyst │ ok      │    15.2s │
 ```
 
-The Agent column is **runtime-qualified**: `<runtime>:<agent>` — the runtime
-being how the node actually ran (`opencode` / `claude` for a subprocess runtime,
-`inproc` for an in-process impl, `mock` for a `--mock-agents` substitution). With
-partial mocking, real and mocked nodes are told apart at a glance
-(`opencode:analyst` vs `mock:verifier`).
+The Agent column is qualified by how the node actually ran: `opencode:analyst`
+for a subprocess, `inproc:` for an in-process impl, `mock:` for a substitution —
+so under partial mocking you can tell them apart at a glance.
 
-Pass `--show-events/-v` instead for the raw per-event firehose (one projected
-line per agent event — `tool edit … (+12/-3)`, text, `step done (N tokens)`) —
-useful for debugging. **Ctrl-C** stops cleanly: the running agent's process group
-is killed and the CLI exits 130 (no orphaned opencode, no raw traceback).
+`--show-events/-v` switches to the per-event firehose (`tool edit … (+12/-3)`,
+text, `step done (N tokens)`), useful for debugging. Ctrl-C stops cleanly: the
+agent's process group is killed and the CLI exits 130.
 
-`--show-diffs` renders each edit/write as a diff block. It **composes** with the
-other views — use it alone to keep the compact node table and *also* see what each
-edit changed, or with `--show-events` to add diff blocks to the firehose:
+`--show-diffs` renders each edit/write as a diff block and composes with the
+other views:
 
 | flags | base view | diff blocks |
 |---|---|---|
@@ -598,17 +570,15 @@ pipeline = build_flow(
 ```
 
 The flow returns `dict[str, NodeOutcome]` (status + `duration_s` per node). See
-[cli-events.md](../design/orchestrator/cli-events.md).
+[cli-events.md](../design/cli-events.md).
 
 ## Drop to a lower tier for full control
 
-`agent_node` covers the common "one agent, KEY: value inputs" case. When it
-doesn't fit — e.g. one node needs to call two agents in sequence, or compose a
-prompt in a way `inputs`/`instructions` can't express — write the `Node`'s `run`
-yourself. It may be sync `def` or `async def`; the engine handles both. Prefer
-`async def` + `await arun_agent(...)` so the supervision runs on the engine's
-event loop; a sync `def run` that calls the blocking `run_agent` also works but is
-offloaded to a worker thread:
+`agent_node` covers the common "one agent, KEY: value inputs" case. When a node
+needs something else — two agents in sequence, or a prompt `inputs`/`instructions`
+cannot express — write its `run` yourself. Prefer `async def` with `arun_agent`
+so supervision runs on the engine's loop; a sync `def` calling `run_agent` works
+too, offloaded to a worker thread:
 
 ```python
 from agent_flow import Node, arun_agent, get_runner
@@ -622,8 +592,37 @@ async def run(ctx):
 Node("custom", run=run, depends_on=("hello",))
 ```
 
-This still plugs into `build_flow` — a hand-written `Node` and an `agent_node`
-mix freely in the same graph. Or skip the declarative engine entirely: `await
-arun_agent(...)` (or the blocking `run_agent(...)`) inside your own flow (Tier 2 —
-see `examples/custom_flow.py`), or outside any backend altogether (Tier 1). See
-[index.md](../design/orchestrator/index.md) for the three tiers.
+Hand-written `Node`s and `agent_node`s mix freely in one graph.
+
+### One agent, no engine
+
+The lowest level is a single supervised agent: no graph, no backend, no gates.
+`run_agent` spawns it, supervises liveness, kills it if it goes silent, and
+returns the verdict it wrote to its control file.
+
+```python
+from pathlib import Path
+
+from agent_flow import get_runner, run_agent
+
+run_dir = Path("/tmp/hello-run")
+run_dir.mkdir(parents=True, exist_ok=True)
+
+result = run_agent(
+    agent="hello-analyst",
+    prompt="Write a one-line markdown report to /tmp/hello-run/hello.md",
+    run_dir=run_dir,
+    runner=get_runner("opencode"),
+    # where the agent .md files live (opencode --dir)
+    agent_dir=Path("."),
+)
+
+# {'status': 'ok', 'agent': 'hello-analyst', ...}
+print(result.control)
+print(result.control["status"], result.duration_s, result.tokens)
+```
+
+The completion protocol is injected for you, so the agent knows where to write
+its verdict — the same contract the engine relies on. `arun_agent` is the async
+twin. Use this to script a single agent, or as the leaf of a flow you write
+yourself; see `examples/custom_flow.py`.

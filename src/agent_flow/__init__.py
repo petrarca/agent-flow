@@ -54,7 +54,7 @@ backend. The opt-in extras add the heavy pieces: `petrarca-agent-flow[prefect]`
 (the Prefect backend) and `petrarca-agent-flow[cli]` (typer + rich for run_cli /
 display). See
 examples/ for how to build a pipeline on this library, and
-docs/design/orchestrator/ for the full design.
+docs/design/ for the full design.
 """
 
 from loguru import logger as _loguru_logger
