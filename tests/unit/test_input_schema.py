@@ -235,9 +235,9 @@ def test_before_node_hook_can_fill_params_for_that_node():
         seen[inv.node] = inv.inputs.get("mode")
         return {"status": "ok"}
 
-    a = agent_node("a", "x", impl=impl, inputs={"mode": "{mode}"}, registry=reg)
-    b = agent_node("b", "x", impl=impl, inputs={"mode": "{mode}"}, depends_on=("a",), registry=reg)
-    c = agent_node("c", "x", impl=impl, inputs={"mode": "{mode}"}, depends_on=("b",), registry=reg)
+    a = agent_node("a", "x", impl=impl, inputs={"mode": "{mode}"})
+    b = agent_node("b", "x", impl=impl, inputs={"mode": "{mode}"}, depends_on=("a",))
+    c = agent_node("c", "x", impl=impl, inputs={"mode": "{mode}"}, depends_on=("b",))
 
     with tempfile.TemporaryDirectory() as d:
         anyio.run(lambda: build_flow([a, b, c], name="h", registry=reg)(run_dir=d))

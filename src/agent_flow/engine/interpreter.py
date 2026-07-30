@@ -109,6 +109,7 @@ async def interpret(
                         durations=dict(durations or {}),
                         options=dict(options or {}),
                         one_time_instruction=attempt_instruction,
+                        registry=registry,
                     )
                 )
             )

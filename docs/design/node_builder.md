@@ -38,16 +38,23 @@ agent_node(
     agent_dir=None,          # imperative override (usually run config / probed)
     exports=None, export_ref=None,   # result->params publish hook (inline map or by name)
     impl=None,               # run IN-PROCESS: a callable (inv) -> result; no subprocess
-    registry=None,           # FlowRegistry, used to resolve a mock_agent by AGENT NAME
 ) -> Node
 ```
 
 `agent` is the runtime agent name (e.g. an opencode `--agent`). It is
 **domain-neutral** — the library attaches no meaning to it.
 
-`impl` and `registry` select HOW the agent runs (see "Executor selection"); they
-never change what `agent` means. There is no `mock_agent=` param — a mock is
-resolved by agent name from the `registry` under the `--mock-agents` mode.
+`impl` selects HOW the agent runs (see "Executor selection"); it never changes
+what `agent` means. There is no `mock_agent=` param and no `registry=` param: a
+mock is resolved by agent name from the run's `FlowRegistry` under the
+`--mock-agents` mode, and that registry reaches the node on its `RunContext`
+(from `build_flow(registry=...)` / `run_cli(registry=...)`).
+
+The registry is run-scoped, not node-scoped — one registry serves every node in
+a flow, and no call site in the library or its examples has ever wanted two. It
+arrives on the context so a node cannot consult a different registry than the
+flow was built with; when it was a per-node argument, omitting it silently
+disabled `--mock-agents` for that node and the real agent ran instead.
 
 ## No analyst/verifier concept
 

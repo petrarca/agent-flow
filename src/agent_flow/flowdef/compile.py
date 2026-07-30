@@ -235,7 +235,6 @@ def _compile_agent_node(nd: NodeDef, registry, schema) -> Node:
         export_ref=nd.export_ref,
         duration=nd.duration,
         impl=impl,
-        registry=registry,
     )
 
 

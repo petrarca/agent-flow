@@ -68,7 +68,6 @@ def agent_node(
     exports: Callable[[dict], Any] | dict[str, str] | None = None,
     export_ref: str | None = None,
     impl: Callable[..., Any] | None = None,
-    registry: Any | None = None,
 ) -> Node:
     """Build a `Node` that runs ONE runtime agent as a supervised subprocess.
 
@@ -126,21 +125,22 @@ def agent_node(
             composed prompt, model, run_dir, result_schema, ...). `agent` remains
             the display label. The declarative equivalent is NodeDef.impl_ref +
             registry.agent_impl(name). See runners/inprocess.py.
-        registry: optional FlowRegistry carrying `mock_agent` behaviours (and/or
-            gates, exports, schemas). When `--mock-agents` mode is ON
-            (mock_agents=True param) and the registry has a registered
-            `mock_agent` for this node's `agent` name, the node runs that
-            behaviour via MockExecutor — no subprocess, no tokens. Mocks are
-            keyed by AGENT name (not by node), so one registration covers every
-            node that runs the same agent. Absent registry or no matching
-            `mock_agent`, the node runs normally (partial mock). Mock is NOT a
-            runtime. See runners/mock_exec.py and docs design/mock-agent.md.
+    The FlowRegistry is NOT a parameter: it is run-scoped and arrives on the
+    RunContext, from `build_flow(registry=...)`. It carries the `mock_agent`
+    behaviours plus any gate / export / schema / renderer registrations. When
+    `--mock-agents` mode is on and the registry holds a `mock_agent` for this
+    node's `agent` name, the node runs that behaviour through MockExecutor — no
+    subprocess, no tokens. Mocks are keyed by AGENT name, not by node, so one
+    registration covers every node running that agent; with no matching entry
+    the node runs normally (partial mock). Mock is not a runtime. See
+    runners/mock_exec.py and docs design/mock-agent.md.
 
     Returns a plain `Node`, so it mixes freely with hand-written `run` nodes.
     """
     inputs = inputs or {}
 
     async def run(ctx: RunContext) -> dict:
+        registry = ctx.registry
         from loguru import logger
 
         from agent_flow.core import read_context_blocks

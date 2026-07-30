@@ -131,10 +131,12 @@ def test_registry_get_unknown_mock_agent_raises():
 # --- mode routing: node_builder picks MockExecutor only when mode is on -----
 
 
-async def _run_node(node, tmp_path, **params):
+async def _run_node(node, tmp_path, registry=None, **params):
     from agent_flow.flow_types import RunContext
 
-    ctx = RunContext(node=node, run_dir=tmp_path, cycles=0, params=params)
+    # The registry is run-scoped: build_flow puts it on the RunContext. A Tier-2
+    # caller driving a node directly supplies it the same way.
+    ctx = RunContext(node=node, run_dir=tmp_path, cycles=0, params=params, registry=registry)
     return await node.run(ctx)
 
 
@@ -148,8 +150,8 @@ async def test_mode_on_with_mock_agent_routes_to_mock(tmp_path):
 
     r = FlowRegistry()
     r.mock_agent("analyst")(stub)
-    node = agent_node("n", "analyst", inputs={"REPORT": "{run_dir}/r.md"}, registry=r)
-    out = await _run_node(node, tmp_path, mock_agents=True)
+    node = agent_node("n", "analyst", inputs={"REPORT": "{run_dir}/r.md"})
+    out = await _run_node(node, tmp_path, registry=r, mock_agents=True)
     assert out["result"] == {"hit": "mock"}
     assert (tmp_path / "r.md").exists()
 
@@ -168,7 +170,7 @@ async def test_mode_off_ignores_mock_agent(tmp_path):
 
     r = FlowRegistry()
     r.mock_agent("analyst")(stub)
-    node = agent_node("n", "analyst", inputs={"R": "{run_dir}/r.md"}, registry=r)
+    node = agent_node("n", "analyst", inputs={"R": "{run_dir}/r.md"})
     with pytest.raises(ValueError):  # unknown runtime -> get_executor raises
         await _run_node(node, tmp_path, mock_agents=False, runtime="does-not-exist")
     assert called["mock"] is False

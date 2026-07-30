@@ -28,8 +28,8 @@ async def test_on_node_event_and_durations(tmp_path):
 
     events: list[tuple] = []
     nodes = [
-        agent_node("analyze", agent="selftest-analyst", registry=registry),
-        agent_node("verify", agent="selftest-analyst", depends_on=("analyze",), registry=registry),
+        agent_node("analyze", agent="selftest-analyst"),
+        agent_node("verify", agent="selftest-analyst", depends_on=("analyze",)),
     ]
     flow = build_flow(
         nodes,

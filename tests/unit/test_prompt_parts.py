@@ -25,7 +25,7 @@ def _prompt_for(registry, **flow_kwargs) -> str:
         seen["inv"] = inv
         return {"status": "ok"}
 
-    n = agent_node("n", "a", impl=impl, instructions="Be brief.", inputs={"PRODUCT": "acme"}, registry=registry)
+    n = agent_node("n", "a", impl=impl, instructions="Be brief.", inputs={"PRODUCT": "acme"})
     with tempfile.TemporaryDirectory() as d:
         anyio.run(lambda: build_flow([n], name="w", registry=registry, **flow_kwargs)(run_dir=d))
     return seen["prompt"]

@@ -342,7 +342,7 @@ def test_registry_can_override_the_work_order_renderer():
         return {"status": "ok"}
 
     def _run(reg, tag):
-        n = agent_node(tag, "a", impl=impl, inputs={"K": "v"}, registry=reg)
+        n = agent_node(tag, "a", impl=impl, inputs={"K": "v"})
         with tempfile.TemporaryDirectory() as d:
             anyio.run(lambda: build_flow([n], name="w", registry=reg)(run_dir=d))
 

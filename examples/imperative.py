@@ -62,8 +62,7 @@ def _analyst(name: str, agent: str, report: str, *, depends_on=(), parallel_grou
         # path. Node-local inputs are available to gates and win over same-named
         # global params (but never flow into the shared run-context).
         gate_args={"path": "{REPORT}"},
-        registry=REGISTRY,
-    )
+            )
 
 
 def _verifier(name: str, agent: str, report: str, subject: str) -> Node:
@@ -75,8 +74,7 @@ def _verifier(name: str, agent: str, report: str, subject: str) -> Node:
         criticality="degrade",
         gate_ref="rerun_on_signal",
         gate_args={"target": subject},
-        registry=REGISTRY,
-    )
+            )
 
 
 def build_nodes() -> list[Node]:

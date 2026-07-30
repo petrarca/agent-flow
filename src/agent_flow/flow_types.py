@@ -104,6 +104,14 @@ class RunContext:
     # imposes NO heading or wrapping; the caller that produced it owns the full
     # framing. Plain-text prompt content, NOT a param. Empty on a first/clean run.
     one_time_instruction: str = ""
+    # The run's FlowRegistry — the consumer's namespace of gates, exports,
+    # schemas, mock agents and renderer overrides. Run-scoped, not node-scoped:
+    # one registry serves every node in a flow. It reaches a node from here
+    # rather than being restated per node, so a node cannot end up consulting a
+    # different registry than the flow was built with — which silently disabled
+    # --mock-agents for any node that omitted it. Typed loosely to keep this
+    # module a leaf (registry sits above the flow vocabulary).
+    registry: Any | None = None
 
 
 # A node's work: perform the invocation, return whatever the gate will inspect
