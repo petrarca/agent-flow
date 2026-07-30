@@ -14,9 +14,8 @@ Cancellation (Ctrl-C, a cancelled task group) ALWAYS reaps the whole process
 group through a SHIELDED cancel scope, so an opencode and its MCP children are
 never orphaned.
 
-Separated from `subprocess_exec.py` so the executor reads as the policy — build
-the command, supervise, read the verdict — and this module holds the process
-mechanics it delegates to.
+Separate from `subprocess_exec.py` so the executor reads as policy — build the
+command, supervise, read the verdict — while the process mechanics live here.
 """
 
 from __future__ import annotations

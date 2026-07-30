@@ -23,11 +23,9 @@ domain-specific check ("a report file was written") and any flow routing belong
 to the orchestration layer's GATE, not here — this module supervises exactly one
 subprocess and knows nothing about stages, artifacts or the DAG.
 
-This lives in `runners/` beside its three sibling executors (`inprocess`,
-`mock_exec`, and the planned `serve_executor`) rather than under `core/`. It
-implements the `AgentExecutor` ABC defined in `runners/executor.py`; while the
-implementation sat in `core/` the factory that selects between the four had to
-import back across the package boundary, which made `core <-> runners` a cycle.
+It lives beside its three sibling executors (`inprocess`, `mock_exec`, and the
+planned `serve_executor`) and implements the `AgentExecutor` ABC defined in
+`runners/executor.py`, so `get_executor` is a flat dispatch over one package.
 The anyio process mechanics it delegates to live in `supervision.py`.
 """
 

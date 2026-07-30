@@ -5,19 +5,14 @@ A pure LEAF module: it imports only `gates` (for the `Gate` type) and the
 standard library, and it imports nothing from the engine, the backends, the
 runners or `core`. That is the whole point of the module.
 
-These types used to live in `engine.py`. Both backends and the backend ABC need
-`Node`/`NodeOutcome` for their signatures, so `backends` had to import `engine`
-while `engine.build_flow` imports `backends` to resolve a backend by name — a
-package cycle broken only by a function-local import. Parameterising the
-execution seam with a type owned by the thing being sequenced is the wrong
-direction for a swappable backend: the backend should depend on the vocabulary,
-not on the engine implementation. Hoisting the vocabulary into a leaf removes
-the cycle outright and leaves the dependency pointing one way:
+The vocabulary sits below both the engine and the backends because both need it:
+the backend ABC and every backend take `Node`/`NodeOutcome` in their signatures,
+and `engine.build_flow` resolves a backend by name. Parameterising the execution
+seam with a type owned by the thing being sequenced is the wrong direction for a
+swappable backend — a backend depends on the vocabulary, not on the engine it is
+swappable for. So the arrows point one way:
 
     backends -> flow_types <- engine
-
-`engine` re-exports every name here, so `from agent_flow.engine import Node`
-keeps working; `flow_types` is simply where they now live.
 """
 
 from __future__ import annotations

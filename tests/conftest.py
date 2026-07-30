@@ -7,10 +7,21 @@ docker-free); integration tests run via `-m integration`.
 """
 
 import json
+import os
 import shlex
 import shutil
 import tempfile
 from pathlib import Path
+
+# Prefect reads its settings ONCE, at first import, so a PREFECT_* set after
+# that is ignored for the life of the process. Several tests import prefect
+# (one of them deletes it from sys.modules and re-imports it), so the first
+# import can happen before any backend calls bootstrap(). With the API log
+# handler left enabled, prefect queues records for an API that does not exist
+# and reports the failure at interpreter exit — "Error logging to API / All
+# connection attempts failed" printed after the pytest summary. Set here, at
+# conftest import, which precedes every test module.
+os.environ.setdefault("PREFECT_LOGGING_TO_API_ENABLED", "false")
 
 import pytest
 

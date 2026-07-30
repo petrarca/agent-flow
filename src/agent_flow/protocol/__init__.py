@@ -11,11 +11,9 @@ result schema is EMBEDDED in that same preamble (`schema_dict`) — so a schema 
 not merely adjacent to the protocol, it is transmitted as part of it.
 
 Why it is its own package: both `core` (which supervises a run) and `runners`
-(which build the argv and assemble a result) need these definitions. While they
-lived under `core/`, `runners` had to reach back up into `core` through
-function-local imports, so `core <-> runners` was a real package cycle that the
-project's own guard could not see. Moving the shared half BELOW both makes the
-dependency one-directional:
+(which build the argv and assemble a result) need these definitions. Filed under
+either one, the other has to import upward. Below both, the dependency is
+one-directional:
 
     core -> runners -> protocol
 

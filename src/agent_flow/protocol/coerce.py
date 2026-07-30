@@ -1,12 +1,10 @@
 """`coerce_schema` — the factory that turns an accepted schema form into a
 `ResultSchema`.
 
-It lives apart from the types it returns on purpose. The factory must know
-every concrete implementation (`JsonSchema`, `PydanticSchema`) while each
-implementation only needs the shared `ValidationOutcome` type — so putting the
-factory beside the types forced `schema` to reach back into `schema_pydantic`
-through a function-local import to avoid a cycle. Hoisting it one level up
-turns that cycle into a DAG:
+It lives apart from the types it returns on purpose. The factory must know every
+concrete implementation (`JsonSchema`, `PydanticSchema`), while each
+implementation needs only the shared `ValidationOutcome`. Placing it one level
+above both keeps that a DAG rather than a mutual dependency:
 
     coerce -> schema_pydantic -> schema
 """

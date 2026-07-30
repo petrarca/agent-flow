@@ -412,21 +412,18 @@ deadline.)
 
 These are changes needed beyond the executor itself:
 
-### `get_executor` transport dispatch — LANDED
+### `get_executor` transport dispatch
 
-This gap is closed. `runners/__init__.py:get_executor(name)` no longer hardwires
-`SubprocessExecutor`: it branches on `spec.transport`, enforces `needs_endpoint`,
-and lazily imports `ServeExecutor` for the `http-sse` path — a module that does
-not exist yet, so reaching that branch raises `ModuleNotFoundError` (pinned by
-`tests/unit/test_options.py`). The remaining work is the executor itself, not
-the factory.
+`runners/__init__.py:get_executor(name)` branches on `spec.transport`, enforces
+`needs_endpoint`, and lazily imports `ServeExecutor` for the `http-sse` path.
+That module does not exist, so reaching the branch raises `ModuleNotFoundError`
+— pinned by `tests/unit/test_options.py`. The outstanding work is the executor
+itself, not the factory.
 
-`SubprocessExecutor` has also moved to `runners/subprocess_exec.py`, beside the
-siblings a `serve_executor.py` would join, so the factory is a flat dispatch
-over one package rather than an import back into `core/`.
+`SubprocessExecutor` lives in `runners/subprocess_exec.py`, beside the siblings
+a `serve_executor.py` joins, so the factory is a flat dispatch over one package.
 
-The original sketch of the change, kept for the shape of the `serve_url`
-threading:
+The shape of the `serve_url` threading:
 
 ```python
 # today

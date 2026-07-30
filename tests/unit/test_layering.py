@@ -1,19 +1,20 @@
 """Architecture fitness functions: dependency DIRECTION and total acyclicity.
 
-`test_prefect_isolation.py` already guards the EAGER import graph — the one that
-can deadlock at package init. It deliberately ignores function-local imports,
-which is correct for what it claims and silent about what follows: a cycle that
-is "broken" by a deferred import is still a cycle in the design, and the guard
-passes by construction. Three such cycles existed here (`core <-> runners`,
-`engine <-> backends`, `preflight <-> runners`) and were invisible to it.
+`test_prefect_isolation.py` guards the EAGER import graph — the one that can
+deadlock at package init — and deliberately ignores function-local imports,
+which is correct for what it claims. A cycle broken by a deferred import does
+not deadlock, but it is still two modules that cannot be understood or changed
+independently, and that guard passes on it by construction.
 
-The two tests below close that gap:
+The tests here cover what that leaves open:
 
   - `test_no_import_cycles_including_deferred` walks EVERY import, at any nesting
     depth, so a function-local import cannot hide a cycle.
   - `test_layer_direction` asserts the dependency arrows point one way. Absence
     of cycles is not the same claim: A -> B is acyclic whichever way it runs, and
     only one of the two directions is the architecture.
+  - `test_forbidden_edges` names the rules rank cannot express — `engine -> core`
+    is a downward edge and exactly what the tier rule forbids.
 """
 
 from __future__ import annotations

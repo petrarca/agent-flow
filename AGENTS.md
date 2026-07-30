@@ -28,11 +28,11 @@ The dependency direction is strictly downward: **Tier 3 (`engine/`) must not
 import Tier 1** (`core`/`runners`) — they meet only through a node's `run`
 callable. `node_builder/` is the single package allowed to bridge both.
 
-This is no longer a convention: `tests/unit/test_layering.py` enforces it. It
-asserts the layer order, a table of forbidden edges (the tier rule among them),
-and total acyclicity INCLUDING function-local imports — the loophole that let
-three package cycles hide from the eager-import guard. Add a top-level package
-and that test fails until you place it in the layer table deliberately.
+`tests/unit/test_layering.py` enforces this. It asserts the layer order, a table
+of forbidden edges (the tier rule among them), and acyclicity INCLUDING
+function-local imports — a deferred import hides a cycle from the eager-import
+guard, so both are checked. Adding a top-level package fails that test until you
+place it in the layer table deliberately.
 
 ## Project Structure
 
