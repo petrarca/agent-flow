@@ -205,10 +205,10 @@ def _resolve_params(model: type | None, cli_params: dict[str, str], console) -> 
 
 def _run_preflight(runtime: str, agent_dir: str, backend: str, console) -> None:
     """Run runtime/backend pre-flight checks; on any fatal failure show them and exit 2."""
-    from agent_flow import preflight
+    from agent_flow.preflight import check, fatal_failures
 
-    results = preflight.check(runtime, agent_dir, backend)
-    failures = preflight.fatal_failures(results)
+    results = check(runtime, agent_dir, backend)
+    failures = fatal_failures(results)
     if failures:
         print_preflight_results(results, title="Pre-flight checks (run aborted)", console=console)
         missing = ", ".join(c.name for c in failures)
@@ -252,7 +252,7 @@ def _run_with_view(
         on_event_factory = None
         on_node_event = NodeProgressPrinter(console=console).on_node_event
 
-    from agent_flow.engine import NodeBlocked
+    from agent_flow.flow_types import NodeBlocked
 
     try:
         _build_and_run(

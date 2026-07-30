@@ -21,7 +21,10 @@ import shlex
 import shutil
 from pathlib import Path
 
-from agent_flow.runners.base import MODE_PROCESS, TRANSPORT_SUBPROCESS, AgentInvocation, AgentRunnerInfo, Event, LaunchSpec, RunnerSpec
+from agent_flow.protocol import build_control_preamble
+from agent_flow.runners.events import Event
+from agent_flow.runners.invocation import AgentInvocation, AgentRunnerInfo
+from agent_flow.runners.spec import MODE_PROCESS, TRANSPORT_SUBPROCESS, Check, LaunchSpec, RunnerSpec
 
 # Regex to extract key=value pairs for `error` and `ref` from an opencode
 # stderr ERROR line.  opencode's logfmt formatter (logging.ts) quotes values
@@ -88,8 +91,6 @@ class OpenCodeRunner:
         AND remote opencode runners share this preamble; they differ only in how
         the executor reads the file back (off disk vs over the file API).
         """
-        from agent_flow.core.control_protocol import build_control_preamble
-
         return build_control_preamble(agent, control_file, result_schema)
 
     def build_command(self, inv: AgentInvocation) -> LaunchSpec:
@@ -205,8 +206,6 @@ class OpenCodeRunner:
 
     def preflight_checks(self, agent_dir: str | Path | None) -> list:
         """opencode-specific pre-conditions: binary on PATH, not nested, agent layout."""
-        from agent_flow.preflight import Check
-
         checks: list[Check] = [_opencode_installed_check(), _not_nested_check()]
         # opencode resolves agents from `<agent_dir>/.opencode/agent*`.
         if agent_dir:
@@ -361,8 +360,6 @@ def _opencode_debug_config(cwd: str | None = None) -> dict:
 
 
 def _opencode_installed_check():
-    from agent_flow.preflight import Check
-
     path = shutil.which("opencode")
     if path:
         return Check("opencode-installed", True, True, f"found at {path}")
@@ -371,8 +368,6 @@ def _opencode_installed_check():
 
 def _not_nested_check():
     import os
-
-    from agent_flow.preflight import Check
 
     if os.environ.get("OPENCODE") == "1":
         return Check(

@@ -37,7 +37,8 @@ from __future__ import annotations
 import abc
 from dataclasses import dataclass, field
 
-from agent_flow.runners.base import AgentInvocation
+from agent_flow.protocol import coerce_schema
+from agent_flow.runners.invocation import AgentInvocation
 
 # Canonical separator for a runtime-qualified agent label: "<runtime>:<agent>"
 # (e.g. "opencode:my-agent", "inproc:some-agent", "mock:some-agent"). A colon is
@@ -180,8 +181,6 @@ class AgentExecutor(abc.ABC):
         is always in `control["result"]` regardless, so a gate can read it either
         way.
         """
-        from agent_flow.core.schema import coerce_schema
-
         schema = coerce_schema(inv.result_schema)
         outcome = schema.validate(control.get("result", {})) if schema is not None else None
         return AgentResult(

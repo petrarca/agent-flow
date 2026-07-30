@@ -32,8 +32,8 @@ from typing import Any
 
 import anyio
 
-from agent_flow.runners.base import AgentInvocation
 from agent_flow.runners.executor import AgentExecutor, AgentResult
+from agent_flow.runners.invocation import AgentInvocation
 from agent_flow.utils import resolve_template
 
 # A mock_agent behaviour: structured inputs + tools in, a control envelope out.

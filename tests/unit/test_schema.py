@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent_flow.core.schema import JsonSchema, ResultSchema, ValidationOutcome, coerce_schema
+from agent_flow.protocol import JsonSchema, ResultSchema, ValidationOutcome, coerce_schema
 
 _JSON_SCHEMA = {
     "type": "object",
@@ -29,7 +29,7 @@ def test_coerce_rejects_bad_type():
 def test_coerce_pydantic_model_class_wraps_pydanticschema():
     from pydantic import BaseModel
 
-    from agent_flow.core.schema_pydantic import PydanticSchema
+    from agent_flow.protocol import PydanticSchema
 
     class R(BaseModel):
         x: int
@@ -71,7 +71,7 @@ def test_validation_outcome_defaults():
 def test_pydantic_schema_valid_returns_instance():
     from pydantic import BaseModel
 
-    from agent_flow.core.schema_pydantic import PydanticSchema
+    from agent_flow.protocol import PydanticSchema
 
     class R(BaseModel):
         summary: str
@@ -88,7 +88,7 @@ def test_pydantic_schema_valid_returns_instance():
 def test_pydantic_schema_invalid_reports_errors():
     from pydantic import BaseModel
 
-    from agent_flow.core.schema_pydantic import PydanticSchema
+    from agent_flow.protocol import PydanticSchema
 
     class R(BaseModel):
         summary: str

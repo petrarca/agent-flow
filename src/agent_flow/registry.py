@@ -279,7 +279,7 @@ class FlowRegistry:
         """The registered prompt-body renderer, or the library default."""
         if self._prompt_renderer is not None:
             return self._prompt_renderer
-        from agent_flow.runners.base import render_prompt
+        from agent_flow.runners.prompt import render_prompt
 
         return render_prompt
 

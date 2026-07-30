@@ -26,7 +26,7 @@ from typing import Any, cast
 import anyio
 
 from agent_flow.backends.base import FlowBackend, RunNode
-from agent_flow.engine import NodeOutcome
+from agent_flow.flow_types import NodeOutcome
 
 
 class PrefectBackend(FlowBackend):
@@ -121,12 +121,18 @@ class PrefectBackend(FlowBackend):
         `prefect` extra); this is the first place a --backend prefect run touches
         it, so a missing install fails here with a clear, actionable message.
         """
+        from agent_flow.backends._prefect_env import bootstrap
         from agent_flow.utils import require_extra
 
-        require_extra("prefect", "prefect", "the Prefect execution backend (--backend prefect)")
-        from agent_flow.backends._prefect_env import bootstrap
-
+        # bootstrap() BEFORE require_extra, which imports prefect: prefect reads
+        # its settings once, at first import, so any PREFECT_* set afterwards is
+        # ignored for the life of the process. Bootstrapping second left
+        # logging-to-API enabled, and the handler then queued records for an API
+        # that does not exist — surfacing at interpreter exit as "Error logging
+        # to API / All connection attempts failed". bootstrap() only writes
+        # os.environ and imports nothing, so it is safe before the guard.
         bootstrap()
+        require_extra("prefect", "prefect", "the Prefect execution backend (--backend prefect)")
 
     def teardown(self) -> None:
         return None  # Prefect's temp server manages its own lifecycle

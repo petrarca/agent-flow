@@ -14,7 +14,8 @@ only executes.
 
 import pytest
 
-from agent_flow.engine import Node, build_flow
+from agent_flow.engine import build_flow
+from agent_flow.flow_types import Node
 
 pytestmark = pytest.mark.integration
 

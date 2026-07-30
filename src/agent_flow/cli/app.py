@@ -24,7 +24,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from agent_flow.engine import Node
+    from agent_flow.flow_types import Node
     from agent_flow.flowdef import FlowDef
     from agent_flow.run_config import RunConfig
 

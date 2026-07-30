@@ -27,7 +27,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_flow import FlowRegistry, agent_node, load_env
-from agent_flow.engine import Node
+from agent_flow.flow_types import Node
 from examples import mock_agents  # the flow-supplied mock behaviours (--mock-agents mode)
 
 load_env()
@@ -62,8 +62,7 @@ def _analyst(name: str, agent: str, report: str, *, depends_on=(), parallel_grou
         # path. Node-local inputs are available to gates and win over same-named
         # global params (but never flow into the shared run-context).
         gate_args={"path": "{REPORT}"},
-        registry=REGISTRY,
-    )
+            )
 
 
 def _verifier(name: str, agent: str, report: str, subject: str) -> Node:
@@ -75,8 +74,7 @@ def _verifier(name: str, agent: str, report: str, subject: str) -> Node:
         criticality="degrade",
         gate_ref="rerun_on_signal",
         gate_args={"target": subject},
-        registry=REGISTRY,
-    )
+            )
 
 
 def build_nodes() -> list[Node]:

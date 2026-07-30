@@ -7,11 +7,11 @@ Stop). This keeps artifact knowledge in the gate, out of the engine.
 
 Signals:
 
-  1. produced(report_path) -> did the agent actually write a non-empty report
-     file? A gate can use this to veto an otherwise-ok run (e.g. return
-     Restart() when the control says ok but no report landed). This is a genuine
-     FILESYSTEM check about the agent's WORK PRODUCT — the artifact the agent was
-     told to write.
+  1. produced(path) -> did the agent actually write a non-empty file there? A
+     gate can use this to veto an otherwise-ok run (e.g. return Restart() when
+     the control says ok but nothing landed). This is a genuine FILESYSTEM check
+     about the agent's WORK PRODUCT — the artifact the agent was told to write.
+     The library attaches no meaning to what that artifact IS; the gate does.
 
   2. rerun_targets(control) -> does the agent's CONTROL ENVELOPE name any NODES
      in its `rerun_required` field? Operates on the ALREADY-HARVESTED envelope
@@ -26,9 +26,9 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def produced(report_path: Path) -> bool:
-    """True if the agent wrote a non-empty report file."""
-    return report_path.exists() and report_path.stat().st_size > 0
+def produced(path: Path) -> bool:
+    """True if the agent wrote a non-empty file at `path`."""
+    return path.exists() and path.stat().st_size > 0
 
 
 def rerun_targets(control: dict | None) -> list[str]:

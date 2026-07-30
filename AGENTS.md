@@ -24,28 +24,51 @@ Code / …) are both pluggable.
 - **Tier 1 — engine core**: `run_agent` spawns + liveness-supervises + kills +
   reads the control sidecar. Runtime-agnostic; no Prefect.
 
-The dependency direction is strictly downward: **Tier 3 (`engine.py`) must not
-import Tier 1** (`core.agent_runtime`/`runners`) — they meet only through a
-node's `run` callable. `batteries.py` is the single module allowed to bridge
-both.
+The dependency direction is strictly downward: **Tier 3 (`engine/`) must not
+import Tier 1** (`core`/`runners`) — they meet only through a node's `run`
+callable. `node_builder/` is the single package allowed to bridge both.
+
+This is enforced, not merely stated. The contracts live in `pyproject.toml`
+under `[tool.importlinter]` — layer order, the tier rule, the leaf packages
+(`gates`, `protocol`), and acyclicity — and `tests/unit/test_layering.py` runs
+them, so a violation fails in `task fct` rather than after a push. They are NOT
+in `task verify`: one place only.
+
+import-linter builds the graph with grimp, which sees FUNCTION-LOCAL imports as
+well as module-level ones. That matters here: `test_prefect_isolation.py`'s
+cycle guard inspects module-level imports only — correct for what it claims,
+since only those deadlock at package init — and cycles broken by a deferred
+import are invisible to it.
+
+Adding a top-level package fails `test_layering.py` until you place it in the
+layers contract deliberately. `lint-imports` also runs standalone for ad-hoc
+checks.
 
 ## Project Structure
 
 ```
 src/agent_flow/
   __init__.py            # Public API exports (keep in sync with what ships)
-  engine.py              # Node / RunContext / build_flow / plan_groups / interpret / _walk (Tier 3)
-  batteries.py           # agent_node — one-call node (bridges engine + run_agent)
-  gates.py               # Directive (Continue/Restart/GoTo/Stop) + GateContext + ready gates
-  run_config.py          # RunConfig (pydantic-settings) / build_run_config / get_settings lifecycle
-  run_context.py         # RunContextService — open domain params + exports
-  preflight.py           # runtime pre-flight checks (opencode/agent_dir/prefect) -> Check results
-  utils.py               # resolve_run_dir / default_temp_base / require_extra (pure top-level leaf)
-  core/                  # Tier-1 primitives, GUARANTEED backend-free (run_agent,
-                         #   control protocol, result-schema, context ingestion, env)
-  runners/               # agent-runtime seam (AgentRunner Protocol) + get_runner registry
+  const.py utils.py      # pure leaves: no agent_flow imports at all
+  _version.py            # __version__, its own leaf so no submodule imports the root
+  protocol/              # the library <-> agent AGREEMENT, below core AND runners:
+                         #   control.py (sidecar protocol) + schema/coerce (typed output)
+  runners/               # agent-runtime seam (AgentRunner Protocol) + get_runner registry;
+                         #   the four executors incl. subprocess_exec.py + supervision.py
+  core/                  # Tier-1: run_agent / arun_agent, context ingestion, env
+  flow_types.py          # Node / RunContext / NodeOutcome — the DAG vocabulary
+  gates/                 # types (Directive/GateContext) + signals + the shipped
+                         #   gates. A pure leaf: a gate needs nothing from the runtime
+  run_context.py         # RunContextService — open domain params + exports (ContextVar)
+  preflight.py           # runtime pre-flight checks (opencode/agent_dir/prefect) -> Check
+  run_config/            # RunConfig (models) / --config sources / run params
+  registry.py            # name -> impl for gates, exports, schemas, mocks, renderers
+  node_builder/          # agent_node — the Tier-3 <-> Tier-1 bridge:
+                         #   work_order / resolve (precedence) / executor_choice / builder
   backends/              # execution seam (FlowBackend ABC) + get_backend;
                          #   inprocess default, prefect opt-in (DEFAULT_BACKEND="inprocess")
+  engine/                # Tier 3: planner / interpreter / walker / builder (build_flow)
+  flowdef/               # serializable FlowDef + NodeDef -> compiled flow
   cli/                   # run_cli + display helpers (typer/rich, opt-in [cli] extra)
 examples/
   declarative.py         # Tier-3 demo (a FlowDef of NodeDefs)
@@ -192,8 +215,12 @@ inputs/context/paths. To hand a value TO the agent, put it in `inputs`.
 
 ## Documentation
 
-Docs are OKF bundles (`docs/usage/`, `docs/design/`) — every file
-has a `type` frontmatter field. When you change behavior, update the matching
+Docs are OKF bundles (`docs/usage/`, `docs/design/`, `docs/adr/`) — every file
+has a `type` frontmatter field. `docs/adr/` holds the numbered decision records:
+a design doc says what a thing IS, an ADR says what was decided and what was
+given up for it. Start a new one from the handbook's `templates/adr-template.md`;
+an ADR is immutable once accepted, so change direction with a new record and
+`superseded_by`, not an edit. When you change behavior, update the matching
 concept doc and verify code snippets run. The README covers install + the three
 tiers + running the examples.
 

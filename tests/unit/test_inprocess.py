@@ -12,10 +12,10 @@ import pytest
 from pydantic import BaseModel
 
 from agent_flow.core.agent_runtime import AgentResult
-from agent_flow.core.schema_pydantic import PydanticSchema
 from agent_flow.engine import interpret
 from agent_flow.gates import Continue
 from agent_flow.node_builder import agent_node
+from agent_flow.protocol import PydanticSchema
 from agent_flow.registry import FlowRegistry
 from agent_flow.runners import AgentInvocation
 from agent_flow.runners.inprocess import InProcessExecutor, adapt_result

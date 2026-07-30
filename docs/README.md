@@ -9,5 +9,8 @@
   bundle describing the library's internals and each concept. Start at
   [`design/index.md`](design/index.md).
 
+- **Decisions** (why a direction was taken) — `adr/` holds the numbered decision
+  records. Start at [`adr/index.md`](adr/index.md).
+
 - See the repository [`README.md`](../README.md) for a quick orientation and
   how to run the bundled examples.

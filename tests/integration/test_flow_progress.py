@@ -12,7 +12,7 @@ pytestmark = pytest.mark.integration
 
 # build_flow defaults to the local backend (no Prefect), so no bootstrap needed.
 from agent_flow import agent_node, build_flow  # noqa: E402
-from agent_flow.engine import NodeOutcome  # noqa: E402
+from agent_flow.flow_types import NodeOutcome  # noqa: E402
 
 
 def _stub(inv, ctx):  # a trivial mock_agent behaviour
@@ -28,8 +28,8 @@ async def test_on_node_event_and_durations(tmp_path):
 
     events: list[tuple] = []
     nodes = [
-        agent_node("analyze", agent="selftest-analyst", registry=registry),
-        agent_node("verify", agent="selftest-analyst", depends_on=("analyze",), registry=registry),
+        agent_node("analyze", agent="selftest-analyst"),
+        agent_node("verify", agent="selftest-analyst", depends_on=("analyze",)),
     ]
     flow = build_flow(
         nodes,

@@ -6,7 +6,7 @@ emission itself is covered in integration (it needs the Prefect task).
 """
 
 from agent_flow.cli import NodeProgressPrinter, print_results_table
-from agent_flow.engine import NodeOutcome
+from agent_flow.flow_types import NodeOutcome
 from agent_flow.runners.executor import qualified_agent
 
 

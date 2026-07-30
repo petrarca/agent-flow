@@ -7,7 +7,9 @@ dict-valued setting (durations/nodes/options) instead of replacing the whole map
 
 import pytest
 
-from agent_flow.run_config import _assemble_config, _deep_merge, _is_inline_json, build_run_config
+from agent_flow.run_config import build_run_config
+from agent_flow.run_config.models import RunConfig
+from agent_flow.run_config.sources import _assemble_config, _deep_merge, _is_inline_json
 
 # --- the primitives ---------------------------------------------------------
 
@@ -101,7 +103,7 @@ def test_unknown_key_in_any_layer_fails(tmp_path):
 
 def test_non_mapping_inline_rejected():
     with pytest.raises(ValueError, match="must be a mapping"):
-        _assemble_config(["[1, 2, 3]"])
+        _assemble_config(["[1, 2, 3]"], set(RunConfig.model_fields) | {"params"})
 
 
 def test_empty_yaml_file_is_harmless(tmp_path):

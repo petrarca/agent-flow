@@ -20,24 +20,9 @@ failures at once rather than one-at-a-time.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
-
-@dataclass(frozen=True)
-class Check:
-    """One pre-flight check outcome.
-
-    name    short identifier (e.g. "opencode-installed").
-    ok      True if the check passed.
-    fatal   True if a failure must abort the run (vs. a non-blocking warning).
-    detail  human-readable explanation (why it failed, or what was found).
-    """
-
-    name: str
-    ok: bool
-    fatal: bool
-    detail: str
+from agent_flow.runners.spec import Check
 
 
 def check_agent_dir_exists(agent_dir: str | Path | None) -> Check:

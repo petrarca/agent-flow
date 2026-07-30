@@ -72,7 +72,7 @@ def endpoint_runtime(monkeypatch):
     serve_url resolution in get_executor becomes observable (a subprocess runtime
     ignores serve_url, which is why the opencode-based test could not see it)."""
     import agent_flow.runners as R
-    from agent_flow.runners.base import TRANSPORT_HTTP_SSE, RunnerSpec
+    from agent_flow.runners.spec import TRANSPORT_HTTP_SSE, RunnerSpec
 
     class _RemoteRunner:
         def spec(self):

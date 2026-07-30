@@ -1,7 +1,7 @@
 """Unit test: the supervision layer forwards real events to on_event."""
 
-from agent_flow.core.agent_runtime import _apply_event
 from agent_flow.runners import Event
+from agent_flow.runners.supervision import _apply_event
 
 
 class _FakeRunner:
@@ -16,7 +16,7 @@ class _FakeRunner:
         return Event(raw=line)
 
     def build_command(self, inv):  # pragma: no cover - unused here
-        from agent_flow.runners.base import LaunchSpec
+        from agent_flow.runners.spec import LaunchSpec
 
         return LaunchSpec(argv=[], display="")
 

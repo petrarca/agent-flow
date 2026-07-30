@@ -7,14 +7,27 @@ docker-free); integration tests run via `-m integration`.
 """
 
 import json
+import os
 import shlex
 import shutil
 import tempfile
 from pathlib import Path
 
+# Prefect reads its settings ONCE, at first import, so a PREFECT_* set after
+# that is ignored for the life of the process. Several tests import prefect
+# (one of them deletes it from sys.modules and re-imports it), so the first
+# import can happen before any backend calls bootstrap(). With the API log
+# handler left enabled, prefect queues records for an API that does not exist
+# and reports the failure at interpreter exit — "Error logging to API / All
+# connection attempts failed" printed after the pytest summary. Set here, at
+# conftest import, which precedes every test module.
+os.environ.setdefault("PREFECT_LOGGING_TO_API_ENABLED", "false")
+
 import pytest
 
-from agent_flow.runners.base import AgentInvocation, AgentRunnerInfo, Event, LaunchSpec
+from agent_flow.runners.events import Event
+from agent_flow.runners.invocation import AgentInvocation, AgentRunnerInfo
+from agent_flow.runners.spec import LaunchSpec
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -191,5 +204,5 @@ def spy_executor(monkeypatch):
         spy.kwargs = kwargs
         return _FakeExecutor()
 
-    monkeypatch.setattr("agent_flow.node_builder.get_executor", _get_executor)
+    monkeypatch.setattr("agent_flow.node_builder.executor_choice.get_executor", _get_executor)
     return spy

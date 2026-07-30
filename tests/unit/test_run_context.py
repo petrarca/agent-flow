@@ -2,7 +2,8 @@
 
 import pytest
 
-from agent_flow.engine import Node, interpret
+from agent_flow.engine import interpret
+from agent_flow.flow_types import Node
 from agent_flow.gates import GoTo
 from agent_flow.run_context import (
     RunContextService,

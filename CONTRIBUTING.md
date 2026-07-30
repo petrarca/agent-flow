@@ -46,8 +46,9 @@ Example: `feat/claude-code-runner`
 - Type-annotate public functions.
 - No bare `except Exception` — catch concrete types (note: `except A, B:` without
   `as` is valid Python 3.14 per PEP 758; do not "fix" it to parentheses).
-- Keep the **core** dependency-light. Core deps (always installed): `pydantic`,
-  `pydantic-settings`, `pyyaml`, `jsonschema`, `python-dotenv`. Optional extras:
+- Keep the **core** dependency-light. Core deps (always installed): `anyio`,
+  `pydantic`, `pydantic-settings`, `pyyaml`, `jsonschema`, `python-dotenv`,
+  `loguru`. Optional extras:
   `[prefect]` (the Prefect backend) and `[cli]` (`typer` + `rich`). An optional
   dep must be **lazy-imported at its entry point**, never at module-import time —
   `prefect` only inside `backends/prefect.py`, `rich`/`typer` only inside `cli/`.
@@ -56,7 +57,7 @@ Example: `feat/claude-code-runner`
   `test_prefect_isolation` guard proves core + runners + InProcessBackend import and
   run with `prefect` blocked.
 - Respect the layering: the engine (Tier 3) must not import the runtime core
-  (Tier 1); they meet only through a node's `run` callable (`batteries` is the
+  (Tier 1); they meet only through a node's `run` callable (`node_builder/` is the
   one bridge). See `docs/design/index.md`.
 
 ### Testing

@@ -62,7 +62,7 @@ all = ["prefect>=3.0.0", "typer>=0.12", "rich>=13.0"]
 # Development tooling. Includes the runtime extras (prefect + cli) so `task
 # install` yields a full dev env able to run the entire test suite (the
 # integration suite exercises the Prefect backend; CLI tests need rich/typer).
-dev = ["petrarca-agent-flow[all]", "ruff", "mypy", "pytest", "pytest-cov", "pre-commit", "setuptools-scm"]
+dev = ["petrarca-agent-flow[all]", "ruff", "mypy", "pytest", "pytest-cov", "pre-commit", "setuptools-scm", "import-linter"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -107,3 +107,81 @@ files = ["src/agent_flow"]
 # the public contract — this keeps them honest. Third-party stubs are not
 # required (several deps ship none), hence ignore_missing_imports.
 ignore_missing_imports = true
+
+# --- Architecture contracts (import-linter) ---------------------------------
+# The layering is a build-failing constraint, not a convention. import-linter
+# builds the import graph with grimp, which sees FUNCTION-LOCAL imports as well
+# as module-level ones — the loophole that let three package cycles hide from a
+# module-level-only guard.
+#
+# These run in the unit test suite (tests/unit/test_layering.py), NOT as a
+# separate `task verify` step: `task fct` is the normal loop, so a violation
+# fails where the change is made rather than after a push. Cycles and layering
+# are "atomic, triggered" fitness functions in the Building Evolutionary
+# Architectures taxonomy, which is the unit-test category, and the whole check
+# costs ~0.1s. `lint-imports` still works standalone for ad-hoc use.
+[tool.importlinter]
+root_package = "agent_flow"
+
+# Dependencies point one way. Highest layer first; a module may import anything
+# BELOW it and nothing above. Modules sharing a line are the same rank.
+[[tool.importlinter.contracts]]
+name = "Layered architecture"
+type = "layers"
+layers = [
+    "agent_flow.cli",
+    "agent_flow.flowdef",
+    "agent_flow.engine",
+    "agent_flow.registry",
+    "agent_flow.node_builder",
+    "agent_flow.core | agent_flow.preflight",
+    "agent_flow.runners | agent_flow.backends",
+    "agent_flow.flow_types | agent_flow.run_config | agent_flow.utils",
+    "agent_flow.protocol | agent_flow.gates | agent_flow.const | agent_flow.run_context",
+]
+
+# The tier rule, which layer rank cannot express: engine -> core is a DOWNWARD
+# edge and still exactly what the rule forbids. allow_indirect_imports keeps this
+# about DIRECT coupling — the engine legitimately reaches Tier 1 transitively
+# through node_builder, which is the nominated bridge.
+[[tool.importlinter.contracts]]
+name = "Tier 3 must not import Tier 1"
+type = "forbidden"
+source_modules = ["agent_flow.engine"]
+forbidden_modules = ["agent_flow.core", "agent_flow.runners"]
+allow_indirect_imports = true
+
+# A gate decides from what it is handed. Keeping it a leaf is what makes the
+# tier rule true of Tier 3 generally, not just of the engine.
+[[tool.importlinter.contracts]]
+name = "Gates are a leaf"
+type = "forbidden"
+source_modules = ["agent_flow.gates"]
+forbidden_modules = [
+    "agent_flow.core",
+    "agent_flow.runners",
+    "agent_flow.engine",
+    "agent_flow.backends",
+    "agent_flow.node_builder",
+    "agent_flow.registry",
+]
+
+# protocol is the shared leaf both core and runners depend on.
+[[tool.importlinter.contracts]]
+name = "protocol is a leaf"
+type = "forbidden"
+source_modules = ["agent_flow.protocol"]
+forbidden_modules = ["agent_flow.core", "agent_flow.runners", "agent_flow.engine", "agent_flow.backends", "agent_flow.cli"]
+
+# A backend depends on the flow vocabulary, never on the engine it is
+# swappable for.
+[[tool.importlinter.contracts]]
+name = "Backends do not depend on the engine"
+type = "forbidden"
+source_modules = ["agent_flow.backends"]
+forbidden_modules = ["agent_flow.engine"]
+
+[[tool.importlinter.contracts]]
+name = "No import cycles"
+type = "acyclic_siblings"
+ancestors = ["agent_flow"]

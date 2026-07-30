@@ -125,4 +125,4 @@ built-in pairing (see [engine](engine.md) jump-back).
 `src/agent_flow/gates.py` (`Directive`, `Continue`/`Restart`/`GoTo`/`Stop`,
 `GateContext`, `Gate`, `require_file`, `rerun_on_signal`, `rerun_on_named`).
 The `produced` / `rerun_targets` helpers the gates read live in
-`agent_flow.core` (report_signals).
+`agent_flow.gates.signals`.

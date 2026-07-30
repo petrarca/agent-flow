@@ -14,7 +14,7 @@ from agent_flow.runners import (
     register,
     runner_specs,
 )
-from agent_flow.runners.base import RunnerSpec
+from agent_flow.runners.spec import RunnerSpec
 
 
 def _inv(**kw) -> AgentInvocation:
@@ -54,7 +54,7 @@ def test_opencode_spec():
 def test_opencode_build_verdict_preamble_matches_control_preamble():
     # The runner's verdict preamble IS the shared sidecar preamble — opencode
     # delegates to build_control_preamble, so the output must be identical.
-    from agent_flow.core.control_protocol import build_control_preamble
+    from agent_flow.protocol import build_control_preamble
 
     runner = OpenCodeRunner()
     schema = {"type": "object", "properties": {"answer": {"type": "string"}}}
@@ -245,7 +245,7 @@ def test_parse_stderr_line_returns_none_for_empty():
 
 
 def test_launch_spec_capture_stderr_default_false():
-    from agent_flow.runners.base import LaunchSpec
+    from agent_flow.runners.spec import LaunchSpec
 
     spec = LaunchSpec(argv=["opencode", "run"], display="opencode run ...")
     assert spec.capture_stderr is False

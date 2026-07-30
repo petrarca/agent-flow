@@ -21,7 +21,7 @@ import anyio
 from loguru import logger as _LOGGER
 
 from agent_flow.backends.base import FlowBackend, RunNode
-from agent_flow.engine import NodeBlocked, NodeOutcome
+from agent_flow.flow_types import NodeBlocked, NodeOutcome
 
 
 def _first_of_type(eg: BaseExceptionGroup, exc_type: type[BaseException]) -> BaseException | None:

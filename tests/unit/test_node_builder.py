@@ -3,7 +3,8 @@
 import anyio
 import pytest
 
-from agent_flow.engine import Node, NodeOutcome, _walk, plan_groups
+from agent_flow.engine import _walk, plan_groups
+from agent_flow.flow_types import Node, NodeOutcome
 from agent_flow.gates import Continue, GateContext, GoTo, Restart, require_file, rerun_on_signal
 from agent_flow.node_builder import agent_node, build_work_order, control_path
 
@@ -71,8 +72,8 @@ def test_gate_receives_validated_result_obj(tmp_path, monkeypatch):
     from pydantic import BaseModel
 
     from agent_flow.core.agent_runtime import AgentResult
-    from agent_flow.core.schema_pydantic import PydanticSchema
     from agent_flow.engine import interpret
+    from agent_flow.protocol import PydanticSchema
 
     class R(BaseModel):
         summary: str
@@ -92,7 +93,7 @@ def test_gate_receives_validated_result_obj(tmp_path, monkeypatch):
         name = "fake"
         run = staticmethod(_run)
 
-    monkeypatch.setattr("agent_flow.node_builder.get_executor", lambda _runtime, **_kw: _FakeExecutor())
+    monkeypatch.setattr("agent_flow.node_builder.executor_choice.get_executor", lambda _runtime, **_kw: _FakeExecutor())
 
     seen = {}
 
@@ -341,7 +342,7 @@ def test_registry_can_override_the_work_order_renderer():
         return {"status": "ok"}
 
     def _run(reg, tag):
-        n = agent_node(tag, "a", impl=impl, inputs={"K": "v"}, registry=reg)
+        n = agent_node(tag, "a", impl=impl, inputs={"K": "v"})
         with tempfile.TemporaryDirectory() as d:
             anyio.run(lambda: build_flow([n], name="w", registry=reg)(run_dir=d))
 

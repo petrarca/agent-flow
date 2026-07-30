@@ -17,7 +17,7 @@ agent, hand it a work order, point it at a control file, get the result."*
 It is a convenience, not a new layer: it returns a plain `Node`, so it mixes
 freely with hand-written `run` callables in the same graph. It is the one module
 that depends on BOTH the [engine](engine.md) (`Node`) and the execution seam
-(`AgentInvocation` + `AgentExecutor`), keeping `engine.py` itself decoupled from
+(`AgentInvocation` + `AgentExecutor`), keeping `engine/` itself decoupled from
 the runtime.
 
 ## Signature
@@ -38,16 +38,48 @@ agent_node(
     agent_dir=None,          # imperative override (usually run config / probed)
     exports=None, export_ref=None,   # result->params publish hook (inline map or by name)
     impl=None,               # run IN-PROCESS: a callable (inv) -> result; no subprocess
-    registry=None,           # FlowRegistry, used to resolve a mock_agent by AGENT NAME
 ) -> Node
 ```
 
 `agent` is the runtime agent name (e.g. an opencode `--agent`). It is
 **domain-neutral** — the library attaches no meaning to it.
 
-`impl` and `registry` select HOW the agent runs (see "Executor selection"); they
-never change what `agent` means. There is no `mock_agent=` param — a mock is
-resolved by agent name from the `registry` under the `--mock-agents` mode.
+`impl` selects HOW the agent runs (see "Executor selection"); it never changes
+what `agent` means. There is no `mock_agent=` param and no `registry=` param: a
+mock is resolved by agent name from the run's `FlowRegistry` under the
+`--mock-agents` mode, and that registry reaches the node on its `RunContext`
+(from `build_flow(registry=...)` / `run_cli(registry=...)`).
+
+The registry is run-scoped, not node-scoped — one registry serves every node in
+a flow, and no call site in the library or its examples has ever wanted two. It
+arrives on the context so a node cannot consult a different registry than the
+flow was built with; when it was a per-node argument, omitting it silently
+disabled `--mock-agents` for that node and the real agent ran instead. See
+[ADR-0003](../adr/0003-run-scoped-registry-on-the-run-context.md).
+
+### Why the signature is wide
+
+Twenty keyword-only parameters is deliberate, not drift. No PEP or major style
+guide sets a maximum, and a configuration-heavy factory with many keyword-only
+options is the accepted Python idiom — several standard-library and widely-used
+third-party APIs have as many or more. Every parameter here maps to a distinct,
+orthogonal concept, and being keyword-only keeps call sites self-documenting.
+
+Grouping some into parameter objects has been considered and rejected. The
+accepted criteria for that refactoring are semantic cohesion, reuse across
+several functions, and cross-field validation — not count — and the candidate
+groups here fail on reuse and validation. Grouping the largest (DAG placement)
+would bury `depends_on`, which nearly every node sets.
+
+The inline/by-name pairs stay separate for the same reason they exist: `gate`
+supplies behaviour, `gate_ref` defers to the registry, and the latter is what
+keeps a `NodeDef` serializable. A `Callable | str` union would say what is
+allowed but not how it is interpreted.
+
+The real cost of change here is not the count but the dispersal: adding a
+per-node setting touches the builder, the resolution chain, and — where the
+setting is also declarable — `NodeDef` and `NodeRunConfig`. That follows from the
+split between what the flow declares and what the run configures.
 
 ## No analyst/verifier concept
 
@@ -115,5 +147,5 @@ ready gates.
 
 ## Where it lives
 
-`src/agent_flow/node_builder.py` (`agent_node`, `resolve_work_order`,
+`src/agent_flow/node_builder/` (`agent_node`, `resolve_work_order`,
 `build_work_order`, `control_path`).

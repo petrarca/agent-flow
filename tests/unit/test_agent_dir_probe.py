@@ -73,7 +73,7 @@ def test_probe_agent_dir_runner_without_probe_is_none(monkeypatch):
 
     class _Bare:
         def spec(self):
-            from agent_flow.runners.base import RunnerSpec
+            from agent_flow.runners.spec import RunnerSpec
 
             return RunnerSpec(runtime="bare", mode="process", transport="subprocess", name="bare")
 

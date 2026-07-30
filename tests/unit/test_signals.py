@@ -1,9 +1,9 @@
-"""Unit tests for report_signals — produced() (file check) + rerun_targets() (envelope)."""
+"""Unit tests for gates.signals — produced() (file check) + rerun_targets() (envelope)."""
 
 from pathlib import Path
 
-from agent_flow.core.report_signals import produced, rerun_targets
 from agent_flow.gates import Continue, GateContext, GoTo, rerun_on_named, rerun_on_signal
+from agent_flow.gates.signals import produced, rerun_targets
 
 
 class _N:

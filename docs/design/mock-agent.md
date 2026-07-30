@@ -125,7 +125,7 @@ node.run:
       executor = get_executor(runtime)
 ```
 
-`engine.py` contains no reference to `runtime`, mock, or any executor type. The
+`engine/` contains no reference to `runtime`, mock, or any executor type. The
 engine knows only `Node.run(ctx) -> dict`, gate directives, criticality and
 jump-back, so gates, `exports` and re-runs cannot tell a mock run from a real one.
 
