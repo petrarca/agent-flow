@@ -36,13 +36,15 @@ SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "agent_flow"
 # above it, the Tier-1 API above those, the orchestration layer above that, and
 # the execution backends plus the CLI on top.
 LAYERS: list[set[str]] = [
-    {"const", "utils", "logging_setup", "_version"},  # pure leaves: no agent_flow imports
-    {"protocol"},  # the library <-> agent agreement
-    {"runners"},  # runtime adapters + the four executors
-    {"core"},  # Tier-1: run_agent
-    {"gates", "flow_types", "run_context", "preflight"},  # flow vocabulary
-    {"run_config", "registry", "node_builder"},  # declaration plane
-    {"backends"},  # execution seam: depends on the vocabulary, never on the engine
+    # Leaves: no agent_flow imports at all. `gates` is here because a gate is the
+    # consumer's hook — it decides flow control from what it is handed, and needs
+    # nothing from the runtime to do so.
+    {"const", "logging_setup", "_version", "protocol", "gates", "run_context"},
+    {"flow_types", "run_config", "utils"},  # the DAG vocabulary + run settings
+    {"runners", "backends"},  # the two execution seams
+    {"core", "preflight"},  # Tier-1: run_agent, and the pre-run checks
+    {"node_builder"},  # the Tier-3 <-> Tier-1 bridge
+    {"registry"},  # name -> impl, incl. the shipped renderers
     {"engine"},  # Tier-3: build_flow, the walk, backend resolution
     {"flowdef"},  # serializable FlowDef -> compiled flow (calls build_flow)
     {"cli"},  # presentation
@@ -59,6 +61,7 @@ FORBIDDEN: list[tuple[str, str, str]] = [
     ("backends", "engine", "a backend depends on the flow vocabulary, never on the engine it is swappable for"),
     ("protocol", "*", "protocol is the leaf both core and runners depend on; it may import nothing"),
     ("flow_types", "engine", "the flow vocabulary must not depend on the engine that consumes it"),
+    ("gates", "*", "a gate decides from what it is handed; keeping it a leaf keeps the tier rule true of Tier 3 generally"),
 ]
 
 

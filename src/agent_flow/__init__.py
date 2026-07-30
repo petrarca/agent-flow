@@ -62,7 +62,7 @@ from loguru import logger as _loguru_logger
 from agent_flow._version import __version__
 from agent_flow.backends import FlowBackend, InProcessBackend, get_backend
 from agent_flow.cli import NodeProgressPrinter, event_printer, get_console, print_preflight_results, print_results_table, run_cli
-from agent_flow.core import AgentResult, arun_agent, load_env, produced, read_context_blocks, rerun_targets, run_agent
+from agent_flow.core import AgentResult, arun_agent, load_env, read_context_blocks, run_agent
 from agent_flow.engine import build_flow, interpret, plan_groups
 from agent_flow.flow_types import Node, NodeBlocked, NodeOutcome, RunContext
 from agent_flow.flowdef import FlowDef, NodeDef, arun_flow, compile_flow, run_flow
@@ -74,9 +74,11 @@ from agent_flow.gates import (
     GoTo,
     Restart,
     Stop,
+    produced,
     require_file,
     rerun_on_named,
     rerun_on_signal,
+    rerun_targets,
 )
 from agent_flow.logging_setup import LIBRARY_LOGGER, setup_logging
 from agent_flow.node_builder import (

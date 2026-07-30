@@ -46,8 +46,9 @@ src/agent_flow/
   runners/               # agent-runtime seam (AgentRunner Protocol) + get_runner registry;
                          #   the four executors incl. subprocess_exec.py + supervision.py
   core/                  # Tier-1: run_agent / arun_agent, context ingestion, env
-  flow_types.py          # Node / RunContext / NodeOutcome — the DAG vocabulary (leaf)
-  gates.py               # Directive (Continue/Restart/GoTo/Stop) + GateContext + ready gates
+  flow_types.py          # Node / RunContext / NodeOutcome — the DAG vocabulary
+  gates/                 # types (Directive/GateContext) + signals + the shipped
+                         #   gates. A pure leaf: a gate needs nothing from the runtime
   run_context.py         # RunContextService — open domain params + exports (ContextVar)
   preflight.py           # runtime pre-flight checks (opencode/agent_dir/prefect) -> Check
   run_config/            # RunConfig (models) / --config sources / run params

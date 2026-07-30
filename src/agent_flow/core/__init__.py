@@ -37,7 +37,6 @@ from __future__ import annotations
 from agent_flow.core.agent_runtime import DEFAULT_IDLE_TIMEOUT_S, AgentResult, arun_agent, run_agent
 from agent_flow.core.context import read_context_blocks
 from agent_flow.core.env import load_env
-from agent_flow.core.report_signals import produced, rerun_targets
 from agent_flow.runners.executor import AgentContentFailedError, AgentCrashError, AgentTimeoutError
 
 __all__ = [
@@ -51,9 +50,6 @@ __all__ = [
     "DEFAULT_IDLE_TIMEOUT_S",
     # context ingestion (files -> prompt content)
     "read_context_blocks",
-    # file-based signals (gate building blocks)
-    "produced",
-    "rerun_targets",
     # environment
     "load_env",
 ]
