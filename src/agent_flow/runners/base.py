@@ -452,3 +452,19 @@ class AgentRunner(RunnerBase, Protocol):
     def parse_event(self, line: str) -> Event:
         """Parse one stdout line into an Event (liveness + tokens/cost)."""
         ...
+
+
+@dataclass(frozen=True)
+class Check:
+    """One pre-flight check outcome.
+
+    name    short identifier (e.g. "opencode-installed").
+    ok      True if the check passed.
+    fatal   True if a failure must abort the run (vs. a non-blocking warning).
+    detail  human-readable explanation (why it failed, or what was found).
+    """
+
+    name: str
+    ok: bool
+    fatal: bool
+    detail: str

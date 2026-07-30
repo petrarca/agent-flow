@@ -11,8 +11,9 @@ import json
 
 import pytest
 
-from agent_flow.core.agent_runtime import SubprocessExecutor, run_agent
+from agent_flow.core.agent_runtime import run_agent
 from agent_flow.runners.executor import AgentContentFailedError, AgentCrashError, AgentTimeoutError
+from agent_flow.runners.subprocess_exec import SubprocessExecutor
 
 # stub_runner is a fixture (tests/conftest.py) — not a plain import — so it
 # resolves identically regardless of pytest invocation style (tests/ has no
