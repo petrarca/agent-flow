@@ -45,8 +45,7 @@ from anyio.abc import ByteReceiveStream, Process
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from loguru import logger
 
-from agent_flow.core.control_protocol import build_control_preamble
-from agent_flow.core.schema import ResultSchema, coerce_schema
+from agent_flow.protocol import ResultSchema, build_control_preamble, coerce_schema
 from agent_flow.runners import AgentInvocation, AgentRunner, Event
 from agent_flow.runners.base import DEFAULT_IDLE_TIMEOUT_S, compose_prompt
 from agent_flow.runners.executor import AgentCrashError, AgentExecutor, AgentResult, AgentTimeoutError

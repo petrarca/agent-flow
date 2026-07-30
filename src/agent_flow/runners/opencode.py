@@ -21,6 +21,7 @@ import shlex
 import shutil
 from pathlib import Path
 
+from agent_flow.protocol import build_control_preamble
 from agent_flow.runners.base import MODE_PROCESS, TRANSPORT_SUBPROCESS, AgentInvocation, AgentRunnerInfo, Event, LaunchSpec, RunnerSpec
 
 # Regex to extract key=value pairs for `error` and `ref` from an opencode
@@ -88,8 +89,6 @@ class OpenCodeRunner:
         AND remote opencode runners share this preamble; they differ only in how
         the executor reads the file back (off disk vs over the file API).
         """
-        from agent_flow.core.control_protocol import build_control_preamble
-
         return build_control_preamble(agent, control_file, result_schema)
 
     def build_command(self, inv: AgentInvocation) -> LaunchSpec:

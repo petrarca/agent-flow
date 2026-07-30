@@ -69,7 +69,7 @@ def _validate_inputs(node: str, input_schema: object, resolved: dict[str, str]) 
     """
     if input_schema is None:
         return None
-    from agent_flow.core.schema import coerce_schema
+    from agent_flow.protocol import coerce_schema
 
     schema = coerce_schema(input_schema)
     if schema is None:
