@@ -191,5 +191,5 @@ def spy_executor(monkeypatch):
         spy.kwargs = kwargs
         return _FakeExecutor()
 
-    monkeypatch.setattr("agent_flow.node_builder.get_executor", _get_executor)
+    monkeypatch.setattr("agent_flow.node_builder.executor_choice.get_executor", _get_executor)
     return spy

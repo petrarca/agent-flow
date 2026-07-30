@@ -1,20 +1,13 @@
-"""Node builder — the one-call helper for the common case: a node that runs ONE agent.
+"""`agent_node` — build a Node that runs ONE runtime agent.
 
-Layer 3's `Node` takes a `run` callable, which is maximally flexible but means a
-consumer hand-writes prompt-building, control-path derivation, and the executor
-call for every node. The overwhelmingly common shape is simply: "run one agent,
-hand it a work order of KEY: value inputs, get the result." `agent_node(...)`
-builds exactly that node in one call.
+The bridge between Tier 3 (the engine, which knows only `Node.run`) and Tier 1
+(an executor supervising an agent). It is the only non-facade module that
+imports both sides.
 
-It is a CONVENIENCE, not a new layer: it returns a plain `Node`, so it composes
-with hand-written `run` callables in the same graph. Domain-neutral by design —
-there is NO notion of "analyst"/"verifier" here. A verifier is just another
-`agent_node` that `depends_on` its subject and carries a `rerun_on_signal(...)`
-gate; the engine's bounded `GoTo` drives the re-run. Any node can route flow to
-any upstream node — the library imposes no adjacency.
-
-This module is the one place allowed to depend on BOTH the engine (Node) and the
-runner/executor seam — keeping `engine.py` itself decoupled from the runtime.
+`agent_node` returns a plain `Node` whose `run` closure, per attempt: resolves
+the work order, composes the prompt channels, resolves the per-node settings
+(`resolve.py`), picks an executor (`executor_choice.py`), runs it, and returns
+the control envelope for the gate to inspect.
 """
 
 from __future__ import annotations
@@ -22,14 +15,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from agent_flow.core import DEFAULT_IDLE_TIMEOUT_S
 from agent_flow.flow_types import Criticality, Node, RunContext
 from agent_flow.gates import Gate
-from agent_flow.runners import AgentInvocation, MockExecutor, get_executor, probe_agent_dir
-from agent_flow.runners.base import PromptParts, render_prompt
-from agent_flow.runners.executor import AgentExecutor
-from agent_flow.runners.inprocess import InProcessExecutor
-from agent_flow.utils import resolve_duration, resolve_template
+from agent_flow.node_builder.executor_choice import select_executor
+from agent_flow.node_builder.resolve import resolve_node_settings
+from agent_flow.node_builder.work_order import DEFAULT_WORK_ORDER_RENDERER, _validate_inputs, resolve_work_order
+from agent_flow.runners.base import AgentInvocation, PromptParts, render_prompt
+from agent_flow.utils import resolve_template
 
 
 def control_path(node_name: str) -> str:
@@ -52,107 +44,6 @@ def _node_logger():
         from loguru import logger
 
         return logger.info
-
-
-def _validate_inputs(node: str, input_schema: object, resolved: dict[str, str]) -> object | None:
-    """Validate a node's RESOLVED work order against its `input_schema`.
-
-    The mirror of the result-schema check, on the way IN. Runs after templating,
-    so an unresolved `{param}`/`{export}` surfaces as a real schema error here —
-    before an agent is spawned — instead of reaching the agent as the literal
-    text "{mode}". Returns the typed instance (a pydantic model) for an in-process
-    impl to use, or None when no schema is declared (or a plain dict JSON-schema
-    was used, which validates but yields no new object).
-
-    Raises ValueError on invalid input; `interpret` maps that through the node's
-    criticality like any other node failure (blocking halts, degrade degrades).
-    """
-    if input_schema is None:
-        return None
-    from agent_flow.protocol import coerce_schema
-
-    schema = coerce_schema(input_schema)
-    if schema is None:
-        return None
-    outcome = schema.validate(resolved)
-    if not outcome.valid:
-        raise ValueError(f"node {node!r}: inputs do not match input_schema: {'; '.join(outcome.errors)}")
-    return outcome.obj
-
-
-def resolve_work_order(inputs: dict[str, str], params: dict[str, Any]) -> dict[str, str]:
-    """Resolve `{param}` templates in every input value; return the structured dict.
-
-    This is the single place where input values are resolved. Both the prompt
-    representation (KEY: value lines) and the structured MockAgentContext.input()
-    dict are derived from it.
-    """
-    return {key: resolve_template(val, params) for key, val in inputs.items()}
-
-
-# A work-order RENDERER turns the resolved `{KEY: value}` work order into the
-# prompt text an agent sees. It is a seam: the default is XML, and a consumer may
-# pass any callable (per node, or flow-wide) to control the shape entirely.
-WorkOrderRenderer = Callable[[dict[str, str]], str]
-
-
-def render_work_order_xml(resolved: dict[str, str]) -> str:
-    """Render the work order as XML-ish tags — the DEFAULT.
-
-        <PRODUCT_KEY>acme</PRODUCT_KEY>
-        <REPORT>/run/report.md</REPORT>
-
-    Why this and not `KEY: value`: a closing tag DELIMITS the value, so a
-    multi-line or structured value is unambiguous (a line-oriented work order has
-    no continuation marker, so its second line is indistinguishable from the next
-    key). Tags are also the shape Anthropic recommends for Claude prompts, and an
-    agent resolves `<REPORT>` without being told anything about the format — the
-    instructions in an agent's .md refer to the KEY name, which is unchanged.
-
-    A multi-line value is placed on its own lines so both the value and the
-    surrounding tags stay readable. Values are NOT XML-escaped: this is prompt
-    text for a model, not a document for a parser, and escaping would only make
-    it harder to read.
-    """
-    parts: list[str] = []
-    for key, val in resolved.items():
-        if "\n" in val:
-            parts.append(f"<{key}>\n{val}\n</{key}>")
-        else:
-            parts.append(f"<{key}>{val}</{key}>")
-    return "\n".join(parts)
-
-
-def render_work_order_lines(resolved: dict[str, str]) -> str:
-    """Render the work order as `KEY: value` lines — the pre-0.3 shape.
-
-        PRODUCT_KEY: acme
-        REPORT: /run/report.md
-
-    Kept as a shipped renderer so a pipeline tuned on this shape can opt back in
-    (`build_flow(work_order_renderer=render_work_order_lines)`). Note a value
-    containing a newline is ambiguous here — that is precisely what the XML
-    default fixes.
-    """
-    return "\n".join(f"{key}: {val}" for key, val in resolved.items())
-
-
-#: Used when neither the node nor the flow supplies a renderer.
-DEFAULT_WORK_ORDER_RENDERER: WorkOrderRenderer = render_work_order_xml
-
-
-def build_work_order(inputs: dict[str, str], params: dict[str, Any], *, render: WorkOrderRenderer | None = None) -> str:
-    """Resolve `{param}` templates in `inputs` and render the work-order prompt.
-
-    Each value may reference run params via `{name}` (e.g. "{product_key}"); the
-    library exposes nothing implicitly — the consumer decides the keys. The
-    completion protocol (CONTROL_FILE + control JSON shape) is injected separately
-    by the executor, so it is NOT part of these inputs.
-
-    `render` selects the shape (default: `render_work_order_xml`).
-    """
-    resolved = resolve_work_order(inputs, params)
-    return (render or DEFAULT_WORK_ORDER_RENDERER)(resolved)
 
 
 def agent_node(
@@ -306,32 +197,8 @@ def agent_node(
         prompt = render_body(parts)
         shared_ctx = parts.run_context
 
-        runtime = ctx.params.get("runtime", "opencode")
-        # Per-setting precedence (most specific first): the run config's per-node
-        # entry (this run) > the agent_node() arg (the flow's standing declaration)
-        # > the run-wide value > the RUNNER PROBE > (empty -> preflight error).
-        # `ov` is that per-node entry. agent_dir is templated; the probe is the
-        # comfort fallback so the common case needs no explicit agent_dir at all.
-        explicit_agent_dir = ov.get("agent_dir") or agent_dir or ctx.agent_dir or ""
-        eff_agent_dir = resolve_template(explicit_agent_dir, tmpl) if explicit_agent_dir else (probe_agent_dir(runtime) or "")
-        # model: empty ("") means "no model" — the runner omits --model and the
-        # runtime resolves it (never a hardcoded one).
-        eff_model = ov.get("model") or model or ctx.params.get("model") or ""
-        # Liveness budget resolution, most specific first:
-        #   1. the per-node run-config idle_timeout_s (a raw second-count override),
-        #   2. the per-node duration NAME (run config's, then the flow-declared),
-        #   3. the run-wide idle timeout (rides `params`, read per node at run time),
-        #   4. the library default.
-        # build_flow already rejected an unknown duration name; the resolve here is
-        # also the sole guard when a Tier-2 flow calls interpret() without build_flow.
-        run_wide_idle = int(ctx.params.get("idle_timeout_s") or DEFAULT_IDLE_TIMEOUT_S)
-        eff_duration = ov.get("duration") or duration
-        if ov.get("idle_timeout_s") is not None:
-            eff_idle = int(ov["idle_timeout_s"])
-        elif eff_duration:
-            eff_idle = resolve_duration(name, eff_duration, ctx.durations)
-        else:
-            eff_idle = run_wide_idle
+        st = resolve_node_settings(name=name, ctx=ctx, ov=ov, tmpl=tmpl, agent_dir=agent_dir, model=model, duration=duration)
+        runtime, eff_agent_dir, eff_model, eff_duration, eff_idle = st.runtime, st.agent_dir, st.model, st.duration, st.idle_timeout_s
         log = _node_logger()
         log(f"node {name}: agent={agent} runtime={runtime} model={eff_model} duration={eff_duration or '(run-wide)'} idle_timeout_s={eff_idle}")
         # on_event_factory is a typed RunContext field (engine plumbing), NOT a
@@ -373,33 +240,18 @@ def agent_node(
         #   2. an in-process impl -> InProcessExecutor (direct Python call).
         #   3. else -> the runtime string selects a subprocess executor.
         # Same neutral invocation either way.
-        mock_on = bool(ctx.params.get("mock_agents"))
-        # Resolve the mock_agent behaviour by AGENT name (not node name) from the
-        # registry. Mocks are per-agent: one registration covers every node that
-        # runs the same agent. Partial mock: no matching registration -> normal path.
-        # Registry namespacing: mock_agent and agent_impl live in SEPARATE registry
-        # dicts — a name "classify" as a mock_agent never collides with "classify"
-        # as an agent_impl, gate, or export. When mock mode is on and a mock_agent
-        # exists for this agent, it WINS over an in-process impl (the mock_agents
-        # mode is designed to override everything, including impl nodes).
-        _mock_behaviour = registry.get_mock_agent(agent) if (mock_on and registry is not None and registry.has_mock_agent(agent)) else None
-        if _mock_behaviour is not None:
-            _behaviour_name = getattr(_mock_behaviour, "__name__", repr(_mock_behaviour))
-            log(f"node {name}: --mock-agents ON -> MockExecutor (agent={agent} behaviour={_behaviour_name})")
-            # Annotated at the seam type: the three branches below pick different
-            # concrete executors, all of which satisfy the AgentExecutor contract.
-            executor: AgentExecutor = MockExecutor(_mock_behaviour, work_order=resolved_inputs, tmpl=tmpl)
-        elif impl is not None:
-            # In-process runs are labeled "inproc" (their canonical runtime), NOT
-            # the `runtime` string — that names a SUBPROCESS runtime and does not
-            # describe an in-process call.
-            executor = InProcessExecutor(impl)
-        else:
-            # Runtime-specific options: run-wide (ctx.options) with this node's
-            # own entry merged OVER it (per-node wins, key by key). An open bag
-            # the runtime interprets — e.g. serve_url for a remote runtime.
-            eff_options = {**ctx.options, **(ov.get("options") or {})}
-            executor = get_executor(runtime, options=eff_options)
+        executor = select_executor(
+            name=name,
+            agent=agent,
+            ctx=ctx,
+            ov=ov,
+            registry=registry,
+            impl=impl,
+            runtime=runtime,
+            resolved_inputs=resolved_inputs,
+            tmpl=tmpl,
+            log=log,
+        )
         logger.debug(f"node {name}: executor={type(executor).__name__} prompt_chars={len(inv.prompt)} inputs={list(resolved_inputs)}")
         result = await executor.run(inv)
         log(
