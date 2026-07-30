@@ -1,54 +1,24 @@
-"""Run configuration — the CLI's own settings, as a pydantic-settings model.
+"""`RunConfig` and `NodeRunConfig` — the run-scoped settings model.
 
-A pipeline run needs two kinds of input:
+The flow declares what the pipeline IS, SAYS and NEEDS; this declares HOW and
+WHERE this particular run behaves. Every field is an environment fact — a model
+string, a path, a timeout — never a property of the portable pipeline.
 
-  - GENERIC run settings the library understands: runtime, run_dir, agent_dir,
-    instructions, llm_concurrency, show_events. THIS module owns them, as the
-    `RunConfig` settings model below.
-  - DOMAIN params (arbitrary, consumer-defined): e.g. product_key, repos_root.
-    Those live in a SEPARATE, flow-supplied settings model (see run_cli's
-    `params_model`); the library attaches no meaning to them. They are threaded
-    to pipeline(**params) and used for {name} templating in inputs/context/paths.
-
-`RunConfig` is a `pydantic_settings.BaseSettings`. It resolves values from,
-in decreasing precedence:
-
-  1. CLI overrides      — init kwargs from the CLI flags (build_run_config drops
-                          None so an unset flag does not clobber lower sources)
-  2. environment        — AGENT_FLOW_* variables (e.g. AGENT_FLOW_RUNTIME)
-  3. .env file          — same AGENT_FLOW_* names
-  4. --config sources    — one or more file paths and/or inline JSON, deep-merged
-                          in order; generic keys at the top level (a `params:`
-                          section is ignored here; the domain model reads it)
-  5. field defaults
-
-This precedence is expressed via `settings_customise_sources`. The generic
-settings use the `AGENT_FLOW_` env prefix so they never collide with a flow's
-bare-named domain params (product_key, product_repos_root, …).
-
-`build_run_config(...)` is the constructor: it collapses every source into ONE
-RunConfig instance, which the caller then threads explicitly. There is no
-process-wide settings singleton — each run holds its own config, so two flows in
-one process cannot read or clobber each other's settings.
-
-There is deliberately no "product" (or any domain) concept here.
+Precedence, most specific first: CLI flag > AGENT_FLOW_* env > .env file >
+--config source > programmatic base > field default.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
-from pydantic_settings import (
-    BaseSettings,
-    PydanticBaseSettingsSource,
-    SettingsConfigDict,
-)
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from pydantic_settings.sources import InitSettingsSource
 
-from agent_flow.core import DEFAULT_IDLE_TIMEOUT_S
+from agent_flow.const import DEFAULT_IDLE_TIMEOUT_S
+from agent_flow.run_config.sources import _assemble_config, _validate_config_keys
 
 # The json_schema_extra KEY that marks a params_model field as runtime-populated
 # (set at run time — e.g. by a node's exports — not a user input). Named here so
@@ -112,81 +82,6 @@ def runtime_param_fields(model: type | None) -> set[str]:
         if isinstance(extra, dict) and extra.get(RUNTIME_PARAM_KEY):
             out.add(fname)
     return out
-
-
-def _is_inline_json(value: str) -> bool:
-    """True when a --config value is inline JSON (starts with `{` or `[`) vs a file path.
-
-    A leading `[` is included so an inline array is parsed and then rejected by the
-    mapping check — a clearer error than treating it as a (missing) file path.
-    """
-    stripped = value.strip()
-    return stripped.startswith("{") or stripped.startswith("[")
-
-
-def _load_config_source(value: str) -> dict[str, Any]:
-    """Read one --config value — inline JSON `{...}` or a YAML/JSON file path — to a dict."""
-    import json
-
-    import yaml
-
-    if _is_inline_json(value):
-        data = json.loads(value)
-        origin = "inline config"
-    else:
-        path = Path(value)
-        if not path.exists():
-            raise FileNotFoundError(f"run config file not found: {value}")
-        data = yaml.safe_load(path.read_text())
-        origin = f"run config {value}"
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise ValueError(f"{origin} must be a mapping at the top level")
-    return data
-
-
-def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Recursively merge `overlay` onto `base`; dict values merge, scalars/lists replace.
-
-    Deep so a patch tweaks ONE key of a dict-valued setting — e.g.
-    `{"durations": {"long": 900}}` over `{"durations": {"short": 60, "long": 600}}`
-    keeps `short` — rather than replacing the whole `durations` map. A per-node
-    entry under `nodes:` merges the same way, one node at a time.
-    """
-    merged = dict(base)
-    for key, value in overlay.items():
-        existing = merged.get(key)
-        if isinstance(existing, dict) and isinstance(value, dict):
-            merged[key] = _deep_merge(existing, value)
-        else:
-            merged[key] = value
-    return merged
-
-
-def _validate_config_keys(data: dict[str, Any]) -> dict[str, Any]:
-    """Reject unknown top-level keys (a typo), against RunConfig fields + `params`.
-
-    Shared by the --config assembly and the programmatic run_config= base, so both
-    fail loudly on the same typo. Returns the dict unchanged for chaining.
-    """
-    allowed = set(RunConfig.model_fields) | {"params"}
-    unknown = set(data) - allowed
-    if unknown:
-        raise ValueError(f"unknown run config keys {sorted(unknown)} (allowed: {sorted(RunConfig.model_fields)} + params)")
-    return data
-
-
-def _assemble_config(sources: list[str]) -> dict[str, Any]:
-    """Load each --config source in order and deep-merge them (later wins).
-
-    Validates the top-level keys of the MERGED result once (so a typo in any
-    layer fails loudly). Returns the merged dict, ready to feed the settings model.
-    """
-    merged: dict[str, Any] = {}
-    for value in sources:
-        merged = _deep_merge(merged, _load_config_source(value))
-    return _validate_config_keys(merged)
 
 
 class RunConfig(BaseSettings):
@@ -282,8 +177,9 @@ class RunConfig(BaseSettings):
         sources: list[str] = []
         if _config_sources:
             sources = [str(_config_sources)] if isinstance(_config_sources, (str, Path)) else [str(s) for s in _config_sources]
-        type(self)._af_config_data = _assemble_config(sources) if sources else None
-        type(self)._af_base_data = _validate_config_keys(dict(_base)) if _base else None
+        _allowed = set(RunConfig.model_fields) | {"params"}
+        type(self)._af_config_data = _assemble_config(sources, _allowed) if sources else None
+        type(self)._af_base_data = _validate_config_keys(dict(_base), _allowed) if _base else None
         try:
             super().__init__(**kwargs)
         finally:
@@ -353,76 +249,3 @@ class RunConfig(BaseSettings):
             params.setdefault("model", self.model)
         params.setdefault("idle_timeout_s", str(self.idle_timeout_s))
         return params
-
-
-def validate_params(model: type | None, values: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate domain params against a flow's params model; return a str dict.
-
-    The PURE core of param resolution, shared by both entry points: the CLI wraps
-    it to pretty-print a ValidationError and exit 2, while the programmatic
-    `run_flow` lets the ValidationError propagate to its caller (a library must
-    raise, not exit). `model is None` -> pass the values through untyped.
-
-    Values are dumped in JSON mode and stringified because `params` are the
-    `{name}` templating bag (all strings); None becomes "".
-    """
-    if model is None:
-        return dict(values)
-    obj = model(**values)
-    return {k: ("" if v is None else str(v)) for k, v in obj.model_dump(mode="json").items()}
-
-
-def normalize_run_config(run_config: "dict[str, Any] | RunConfig | None") -> dict[str, Any] | None:
-    """Coerce a programmatic run_config= (dict OR RunConfig) to a plain dict, or None.
-
-    A RunConfig instance is dumped with defaults EXCLUDED, so it contributes only
-    the settings the caller actually set — it behaves as a base layer, not a wall
-    of defaults that would shadow env/.env.
-    """
-    if run_config is None:
-        return None
-    if isinstance(run_config, RunConfig):
-        return run_config.model_dump(exclude_defaults=True)
-    return dict(run_config)
-
-
-def build_run_config(
-    config_file: str | Path | list[str] | None = None,
-    base: "dict[str, Any] | RunConfig | None" = None,
-    **cli_overrides: Any,
-) -> RunConfig:
-    """Construct a RunConfig from the source stack, honoring the precedence chain.
-
-    Args:
-        config_file: optional `--config` source(s). Each is a file path OR inline
-            JSON (`{...}`); a list is deep-merged in order (later wins).
-        base: the programmatic `run_config=` — a dict or a RunConfig — the
-            pipeline author's own defaults, the LOWEST explicit source (below
-            --config).
-        **cli_overrides: generic settings set on the CLI. A None value means "not
-            set on the CLI" and is dropped so a lower-priority source (env / .env
-            / --config / base / default) wins — else a None init kwarg would clobber it.
-
-    Precedence (first wins): CLI > env (AGENT_FLOW_*) > .env > --config > base > default.
-    """
-    init_kwargs = {k: v for k, v in cli_overrides.items() if v is not None}
-    return RunConfig(_config_sources=config_file, _base=normalize_run_config(base), **init_kwargs)
-
-
-def parse_params(items: list[str] | None) -> dict[str, str]:
-    """Parse repeatable `KEY=VALUE` CLI strings into a params dict.
-
-    Values stay strings (they feed a domain settings model and {name} templating).
-    `KEY=` yields "". A missing `=` raises ValueError (so `--param foo` fails
-    loudly).
-    """
-    out: dict[str, str] = {}
-    for item in items or []:
-        if "=" not in item:
-            raise ValueError(f"--param must be KEY=VALUE, got {item!r}")
-        key, _, value = item.partition("=")
-        key = key.strip()
-        if not key:
-            raise ValueError(f"--param has empty key: {item!r}")
-        out[key] = value
-    return out

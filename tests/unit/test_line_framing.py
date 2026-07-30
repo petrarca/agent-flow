@@ -9,7 +9,7 @@ subprocess, feeding a fake byte stream chunk-by-chunk.
 import anyio
 import pytest
 
-from agent_flow.runners.subprocess_exec import _iter_lines
+from agent_flow.runners.supervision import _iter_lines
 
 
 class _FakeByteStream:
