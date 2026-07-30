@@ -23,7 +23,7 @@ from collections.abc import Callable
 from typing import Any
 
 from agent_flow.core import DEFAULT_IDLE_TIMEOUT_S
-from agent_flow.engine import Criticality, Node, RunContext
+from agent_flow.flow_types import Criticality, Node, RunContext
 from agent_flow.gates import Gate
 from agent_flow.runners import AgentInvocation, MockExecutor, get_executor, probe_agent_dir
 from agent_flow.runners.base import PromptParts, render_prompt

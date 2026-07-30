@@ -252,7 +252,7 @@ def _run_with_view(
         on_event_factory = None
         on_node_event = NodeProgressPrinter(console=console).on_node_event
 
-    from agent_flow.engine import NodeBlocked
+    from agent_flow.flow_types import NodeBlocked
 
     try:
         _build_and_run(

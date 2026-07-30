@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 
-from agent_flow.engine import Node
+from agent_flow.flow_types import Node
 from agent_flow.flowdef.models import FlowDef, NodeDef
 
 if TYPE_CHECKING:

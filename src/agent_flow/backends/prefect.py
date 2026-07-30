@@ -26,7 +26,7 @@ from typing import Any, cast
 import anyio
 
 from agent_flow.backends.base import FlowBackend, RunNode
-from agent_flow.engine import NodeOutcome
+from agent_flow.flow_types import NodeOutcome
 
 
 class PrefectBackend(FlowBackend):

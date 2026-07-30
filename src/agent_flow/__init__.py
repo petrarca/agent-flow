@@ -76,15 +76,8 @@ from agent_flow.core import (
     rerun_targets,
     run_agent,
 )
-from agent_flow.engine import (
-    Node,
-    NodeBlocked,
-    NodeOutcome,
-    RunContext,
-    build_flow,
-    interpret,
-    plan_groups,
-)
+from agent_flow.engine import build_flow, interpret, plan_groups
+from agent_flow.flow_types import Node, NodeBlocked, NodeOutcome, RunContext
 from agent_flow.flowdef import FlowDef, NodeDef, arun_flow, compile_flow, run_flow
 from agent_flow.gates import (
     Continue,

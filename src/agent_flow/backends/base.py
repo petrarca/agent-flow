@@ -26,7 +26,7 @@ import abc
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from agent_flow.engine import Node, NodeOutcome
+from agent_flow.flow_types import Node, NodeOutcome
 
 # A coroutine closure the engine hands the backend: run ONE node to a
 # NodeOutcome. It is fully backend-agnostic (it awaits interpret + emits node
