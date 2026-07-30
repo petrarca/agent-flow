@@ -107,17 +107,17 @@ runtime, which can only be handed text.
 
 ## Where it lives
 
-`src/agent_flow/core/schema.py` (`ResultSchema`, `JsonSchema`, `ValidationOutcome`,
-`coerce_schema`) and `src/agent_flow/core/schema_pydantic.py` (`PydanticSchema`).
+`src/agent_flow/protocol/schema.py` (`ResultSchema`, `JsonSchema`, `ValidationOutcome`,
+`coerce_schema`) and `src/agent_flow/protocol/schema_pydantic.py` (`PydanticSchema`).
 **Injection** into the prompt is subprocess-specific (`SubprocessExecutor` embeds
-the schema in the control preamble, `core/agent_runtime.py`). Validation is
+the schema in the control preamble, `runners/subprocess_exec.py`). Validation is
 the shared `AgentExecutor.assemble_result` in `src/agent_flow/runners/executor.py`
 — used by `SubprocessExecutor`, `MockExecutor`, and (via `adapt_result`)
 `InProcessExecutor` — so typed output behaves identically across execution
 models, and `result_obj`/`result_valid`/`result_errors` are populated only by
 that validation. All of these types are re-exported at the top level, so
 consumers import them as `from agent_flow import PydanticSchema` (etc.); the
-`core.schema_pydantic` path is
+`protocol.schema_pydantic` path is
 the internal location.
 
 `input_schema` is validated by `node_builder._validate_inputs` (before the

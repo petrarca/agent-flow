@@ -139,5 +139,5 @@ A ─► B(depends A). B's gate returns GoTo("A") once →
 
 ## Where it lives
 
-`src/agent_flow/engine.py` (`Node`, `RunContext`, `NodeOutcome`, `plan_groups`,
+`src/agent_flow/engine/` (`Node`, `RunContext`, `NodeOutcome`, `plan_groups`,
 `interpret`, `build_flow`, `_walk`).

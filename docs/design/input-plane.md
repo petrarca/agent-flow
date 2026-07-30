@@ -309,17 +309,17 @@ harvest together.
 
 ## Where it lives
 
-`src/agent_flow/core/control_protocol.py` (block 1, the control preamble —
-prepended by `SubprocessExecutor` in `core/agent_runtime.py`, subprocess-only).
+`src/agent_flow/protocol/control.py` (block 1, the control preamble —
+prepended by `SubprocessExecutor` in `runners/subprocess_exec.py`, subprocess-only).
 `runners/base.py` holds `PromptParts` and the default `render_prompt`;
 `node_builder.agent_node` fills the parts (reading context files into content,
 templating, rendering the work order) and calls the registered renderer.
 `compose_prompt(inv)` remains for a Tier-1/2 caller assembling a prompt from an
 invocation directly. The `RunContext.run_instructions` /
 `run_additional_instructions` / `run_context` / `node_overrides` /
-`one_time_instruction` plumbing lives in `engine.py` (`build_flow`); the CLI
+`one_time_instruction` plumbing lives in `engine/` (`build_flow`); the CLI
 `--instruct` + config `nodes:` handling lives in `cli/commands/run.py`, with the
-`nodes` field (a `dict[str, NodeRunConfig]`) on `run_config.py`. A FlowDef's
+`nodes` field (a `dict[str, NodeRunConfig]`) on `run_config/`. A FlowDef's
 `run_context` AND `run_instructions` are threaded onto `RunCliContext` by
 `cli/app.py` — neither has its declaration honoured any other way under
 `run_cli`, so without that wire `run_cli` would silently drop them while

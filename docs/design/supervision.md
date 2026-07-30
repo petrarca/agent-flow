@@ -139,10 +139,20 @@ neutral view to one readable line when `--show-events` is on.
 
 ## Where it lives
 
-`src/agent_flow/core/agent_runtime.py` holds `SubprocessExecutor` (spawn +
-`_supervise` + shielded kill + sidecar read; its `run` is `async def`) and the
-async `arun_agent` shim that delegates to it, plus the sync `run_agent`
-`anyio.run` wrapper. The `src/agent_flow/runners/` package holds the seam types: `executor.py`
+`src/agent_flow/runners/subprocess_exec.py` holds `SubprocessExecutor` (spawn +
+supervise + sidecar read; its `run` is `async def`), and
+`src/agent_flow/runners/supervision.py` holds the anyio machinery it delegates
+to: line framing, the idle deadline, and the shielded process-group kill. The
+Tier-1 entry point stays in `src/agent_flow/core/agent_runtime.py` — the async
+`arun_agent` and its sync `run_agent` `anyio.run` wrapper, which build a neutral
+`AgentInvocation` and hand it to an executor.
+
+The executor lives beside its three siblings rather than under `core/` because
+it implements the `AgentExecutor` ABC defined in `runners/executor.py`; while it
+sat in `core/`, the factory that selects between the four had to import back
+across the package boundary, making `core <-> runners` a cycle.
+
+The `src/agent_flow/runners/` package holds the seam types: `executor.py`
 (`AgentExecutor` ABC, `AgentResult`, the shared `assemble_result` /
 `check_content_status`, and the `AgentTimeoutError` / `AgentContentFailedError` /
 `AgentCrashError` classes), `base.py` (`AgentRunner`, `AgentInvocation`, `Event`,

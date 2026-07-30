@@ -24,28 +24,40 @@ Code / …) are both pluggable.
 - **Tier 1 — engine core**: `run_agent` spawns + liveness-supervises + kills +
   reads the control sidecar. Runtime-agnostic; no Prefect.
 
-The dependency direction is strictly downward: **Tier 3 (`engine.py`) must not
-import Tier 1** (`core.agent_runtime`/`runners`) — they meet only through a
-node's `run` callable. `batteries.py` is the single module allowed to bridge
-both.
+The dependency direction is strictly downward: **Tier 3 (`engine/`) must not
+import Tier 1** (`core`/`runners`) — they meet only through a node's `run`
+callable. `node_builder/` is the single package allowed to bridge both.
+
+This is no longer a convention: `tests/unit/test_layering.py` enforces it. It
+asserts the layer order, a table of forbidden edges (the tier rule among them),
+and total acyclicity INCLUDING function-local imports — the loophole that let
+three package cycles hide from the eager-import guard. Add a top-level package
+and that test fails until you place it in the layer table deliberately.
 
 ## Project Structure
 
 ```
 src/agent_flow/
   __init__.py            # Public API exports (keep in sync with what ships)
-  engine.py              # Node / RunContext / build_flow / plan_groups / interpret / _walk (Tier 3)
-  batteries.py           # agent_node — one-call node (bridges engine + run_agent)
+  const.py utils.py      # pure leaves: no agent_flow imports at all
+  _version.py            # __version__, its own leaf so no submodule imports the root
+  protocol/              # the library <-> agent AGREEMENT, below core AND runners:
+                         #   control.py (sidecar protocol) + schema/coerce (typed output)
+  runners/               # agent-runtime seam (AgentRunner Protocol) + get_runner registry;
+                         #   the four executors incl. subprocess_exec.py + supervision.py
+  core/                  # Tier-1: run_agent / arun_agent, context ingestion, env
+  flow_types.py          # Node / RunContext / NodeOutcome — the DAG vocabulary (leaf)
   gates.py               # Directive (Continue/Restart/GoTo/Stop) + GateContext + ready gates
-  run_config.py          # RunConfig (pydantic-settings) / build_run_config / get_settings lifecycle
-  run_context.py         # RunContextService — open domain params + exports
-  preflight.py           # runtime pre-flight checks (opencode/agent_dir/prefect) -> Check results
-  utils.py               # resolve_run_dir / default_temp_base / require_extra (pure top-level leaf)
-  core/                  # Tier-1 primitives, GUARANTEED backend-free (run_agent,
-                         #   control protocol, result-schema, context ingestion, env)
-  runners/               # agent-runtime seam (AgentRunner Protocol) + get_runner registry
+  run_context.py         # RunContextService — open domain params + exports (ContextVar)
+  preflight.py           # runtime pre-flight checks (opencode/agent_dir/prefect) -> Check
+  run_config/            # RunConfig (models) / --config sources / run params
+  registry.py            # name -> impl for gates, exports, schemas, mocks, renderers
+  node_builder/          # agent_node — the Tier-3 <-> Tier-1 bridge:
+                         #   work_order / resolve (precedence) / executor_choice / builder
   backends/              # execution seam (FlowBackend ABC) + get_backend;
                          #   inprocess default, prefect opt-in (DEFAULT_BACKEND="inprocess")
+  engine/                # Tier 3: planner / interpreter / walker / builder (build_flow)
+  flowdef/               # serializable FlowDef + NodeDef -> compiled flow
   cli/                   # run_cli + display helpers (typer/rich, opt-in [cli] extra)
 examples/
   declarative.py         # Tier-3 demo (a FlowDef of NodeDefs)

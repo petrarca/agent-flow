@@ -17,7 +17,7 @@ agent, hand it a work order, point it at a control file, get the result."*
 It is a convenience, not a new layer: it returns a plain `Node`, so it mixes
 freely with hand-written `run` callables in the same graph. It is the one module
 that depends on BOTH the [engine](engine.md) (`Node`) and the execution seam
-(`AgentInvocation` + `AgentExecutor`), keeping `engine.py` itself decoupled from
+(`AgentInvocation` + `AgentExecutor`), keeping `engine/` itself decoupled from
 the runtime.
 
 ## Signature
@@ -115,5 +115,5 @@ ready gates.
 
 ## Where it lives
 
-`src/agent_flow/node_builder.py` (`agent_node`, `resolve_work_order`,
+`src/agent_flow/node_builder/` (`agent_node`, `resolve_work_order`,
 `build_work_order`, `control_path`).

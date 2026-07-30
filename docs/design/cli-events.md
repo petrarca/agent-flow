@@ -147,8 +147,8 @@ the `cli` package turns those into terminal output.
 `src/agent_flow/runners/base.py` (`Event` with the neutral display fields
 `kind`/`title`/`detail`/`status`/`diff`/`added`/`removed`; each runtime's
 `parse_event` fills them; re-exported as `agent_flow.runners.Event`),
-`core/agent_runtime.py` (the `on_event` callback wiring in `_supervise`, Ctrl-C
-process-group kill), `engine.py` (`RunContext.on_event_factory`,
+`runners/subprocess_exec.py` (the `on_event` callback wiring in `_supervise`, Ctrl-C
+process-group kill), `engine/` (`RunContext.on_event_factory`,
 `build_flow(on_event_factory=, on_node_event=)`, `NodeOutcome.duration_s`), and
 the `src/agent_flow/cli/` package: `events.py` (`event_printer`, `render_event`,
 `render_diff`), `progress.py` (`NodeProgressPrinter`), `tables.py`

@@ -106,11 +106,11 @@ prompt — it exists only to exercise subprocess supervision.)
 
 ## Where it lives
 
-`src/agent_flow/core/control_protocol.py` (`build_control_preamble`, also
+`src/agent_flow/protocol/control.py` (`build_control_preamble`, also
 re-exported as `agent_flow.build_control_preamble`),
 `src/agent_flow/core/report_signals.py` (`rerun_targets`, `produced`), and
 the verdict/status policy shared across executors in
 `src/agent_flow/runners/executor.py` (`AgentExecutor.assemble_result` /
 `check_content_status`), invoked by `SubprocessExecutor`
-(`src/agent_flow/core/agent_runtime.py`) and `MockExecutor`
+(`src/agent_flow/runners/subprocess_exec.py`) and `MockExecutor`
 (`src/agent_flow/runners/mock_exec.py`).

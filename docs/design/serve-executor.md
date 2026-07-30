@@ -261,7 +261,7 @@ The verdict round-trip — HOW the agent is told to report its outcome, and HOW
 that outcome is read back — is runtime- and transport-specific. It must NOT be a
 library-wide assumption.
 
-Today `build_control_preamble` lives in `core/control_protocol.py` and
+Today `build_control_preamble` lives in `protocol/control.py` and
 `SubprocessExecutor` hardcodes "the agent writes a sidecar file; read it off
 disk". That bakes the sidecar mechanism into the whole library. But:
 
@@ -320,7 +320,7 @@ ServeExecutor.run(inv):
 - **`GooseRemoteRunner` / others** — their own preamble + harvest, whatever their
   runtime supports.
 
-`build_control_preamble` in `core/control_protocol.py` does NOT disappear — it
+`build_control_preamble` in `protocol/control.py` does NOT disappear — it
 becomes a shared HELPER the sidecar-style runners choose to call, not a
 library-wide contract. `result_schema` still flows through it (embedded in the
 preamble) the same way.
@@ -412,12 +412,21 @@ deadline.)
 
 These are changes needed beyond the executor itself:
 
-### `get_executor` hardwired to `SubprocessExecutor`
+### `get_executor` transport dispatch — LANDED
 
-`runners/__init__.py:get_executor(name)` always wraps in `SubprocessExecutor`.
-Under the leaning naming decision (Option B, "To be discussed"), the runtime
-name itself selects the executor. `get_executor` gains a second entry that pairs
-the runner with a `ServeExecutor` and threads in `serve_url`:
+This gap is closed. `runners/__init__.py:get_executor(name)` no longer hardwires
+`SubprocessExecutor`: it branches on `spec.transport`, enforces `needs_endpoint`,
+and lazily imports `ServeExecutor` for the `http-sse` path — a module that does
+not exist yet, so reaching that branch raises `ModuleNotFoundError` (pinned by
+`tests/unit/test_options.py`). The remaining work is the executor itself, not
+the factory.
+
+`SubprocessExecutor` has also moved to `runners/subprocess_exec.py`, beside the
+siblings a `serve_executor.py` would join, so the factory is a flat dispatch
+over one package rather than an import back into `core/`.
+
+The original sketch of the change, kept for the shape of the `serve_url`
+threading:
 
 ```python
 # today
@@ -432,7 +441,7 @@ def get_executor(name: str, *, serve_url: str = "") -> AgentExecutor:
     return SubprocessExecutor(get_runner(name))
 ```
 
-`node_builder.py` passes `serve_url` through from `ctx.params`. This keeps
+`node_builder/` passes `serve_url` through from `ctx.params`. This keeps
 executor selection a single-parameter lookup on the runtime name (the executor
 class is decided by the name; `serve_url` is a required companion, not the
 selector). The exact call shape depends on the naming sign-off — see
