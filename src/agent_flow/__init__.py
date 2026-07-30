@@ -59,6 +59,7 @@ docs/design/ for the full design.
 
 from loguru import logger as _loguru_logger
 
+from agent_flow._version import __version__
 from agent_flow.backends import FlowBackend, InProcessBackend, get_backend
 from agent_flow.cli import NodeProgressPrinter, event_printer, get_console, print_preflight_results, print_results_table, run_cli
 from agent_flow.core import AgentResult, arun_agent, load_env, produced, read_context_blocks, rerun_targets, run_agent
@@ -131,24 +132,6 @@ from agent_flow.runners import (
 )
 from agent_flow.runners.executor import AgentContentFailedError, AgentCrashError, AgentTimeoutError
 from agent_flow.utils import DEFAULT_DURATIONS, default_temp_base, duration_table, resolve_run_dir
-
-
-def _resolve_version() -> str:
-    """The installed distribution version (set by setuptools-scm at build time).
-
-    Read from installed package metadata; falls back to "0+unknown" when the
-    package is not installed (e.g. running from a bare source tree with no
-    metadata). Single source for the `version` CLI command and any consumer.
-    """
-    from importlib.metadata import PackageNotFoundError, version
-
-    try:
-        return version("petrarca-agent-flow")
-    except PackageNotFoundError:
-        return "0+unknown"
-
-
-__version__ = _resolve_version()
 
 # A library must not write to stderr unless the application asks it to. loguru
 # ships an ENABLED default stderr sink, so importing agent-flow would otherwise

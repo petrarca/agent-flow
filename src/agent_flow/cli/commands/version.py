@@ -24,7 +24,7 @@ def register(app, ctx: RunCliContext) -> None:
     @app.command("version")
     def version() -> None:
         """Print the pipeline version(s): consumer app + agent-flow."""
-        from agent_flow import __version__
+        from agent_flow._version import __version__
 
         app_version = f" {ctx.version}" if ctx.version else ""
         get_console().print(f"{ctx.name}{app_version} (agent-flow {__version__})")
