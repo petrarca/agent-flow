@@ -5,8 +5,15 @@ __pycache__/
 *.pyc
 *.egg-info/
 .ruff_cache/
+.pytest_cache/
+.mypy_cache/
 dist/
 build/
+
+# coverage.py data file — a binary SQLite DB, never source
+.coverage
+.coverage.*
+htmlcov/
 
 .DS_Store
 
