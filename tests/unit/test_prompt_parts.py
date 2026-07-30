@@ -14,7 +14,7 @@ import pytest
 from agent_flow import agent_node, build_flow
 from agent_flow.node_builder import render_work_order_lines
 from agent_flow.registry import FlowRegistry
-from agent_flow.runners.base import PromptParts, render_prompt
+from agent_flow.runners.prompt import PromptParts, render_prompt
 
 
 def _prompt_for(registry, **flow_kwargs) -> str:
@@ -153,7 +153,7 @@ def test_rendered_invocation_is_not_recomposed():
     compose_prompt must return it unchanged. Prepending the run-wide blocks again
     duplicated the rules and the brief in every SUBPROCESS prompt — invisible to
     the unit suite, which reads `inv.prompt` via in-process impls."""
-    from agent_flow.runners.base import compose_prompt
+    from agent_flow.runners.invocation import compose_prompt
 
     seen = {}
 
@@ -180,7 +180,7 @@ def test_raw_invocation_still_gets_the_run_wide_blocks():
     those must still be prepended."""
     from pathlib import Path
 
-    from agent_flow.runners.base import AgentInvocation, compose_prompt
+    from agent_flow.runners.invocation import AgentInvocation, compose_prompt
 
     raw = AgentInvocation(agent="a", prompt="MY-TASK", run_dir=Path("/tmp"), run_context="RULE-MARKER", run_instructions="BRIEF-MARKER")
     assert raw.parts is None

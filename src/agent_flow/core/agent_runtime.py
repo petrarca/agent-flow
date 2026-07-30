@@ -19,8 +19,8 @@ import anyio
 
 from agent_flow.protocol import ResultSchema
 from agent_flow.runners import AgentInvocation, AgentRunner, Event
-from agent_flow.runners.base import DEFAULT_IDLE_TIMEOUT_S
 from agent_flow.runners.executor import AgentResult
+from agent_flow.runners.invocation import DEFAULT_IDLE_TIMEOUT_S
 from agent_flow.runners.subprocess_exec import SubprocessExecutor
 
 

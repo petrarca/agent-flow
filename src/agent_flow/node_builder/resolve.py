@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from agent_flow.flow_types import RunContext
 from agent_flow.runners import probe_agent_dir
-from agent_flow.runners.base import DEFAULT_IDLE_TIMEOUT_S
+from agent_flow.runners.invocation import DEFAULT_IDLE_TIMEOUT_S
 from agent_flow.utils import resolve_duration, resolve_template
 
 

@@ -22,7 +22,9 @@ import shutil
 from pathlib import Path
 
 from agent_flow.protocol import build_control_preamble
-from agent_flow.runners.base import MODE_PROCESS, TRANSPORT_SUBPROCESS, AgentInvocation, AgentRunnerInfo, Check, Event, LaunchSpec, RunnerSpec
+from agent_flow.runners.events import Event
+from agent_flow.runners.invocation import AgentInvocation, AgentRunnerInfo
+from agent_flow.runners.spec import MODE_PROCESS, TRANSPORT_SUBPROCESS, Check, LaunchSpec, RunnerSpec
 
 # Regex to extract key=value pairs for `error` and `ref` from an opencode
 # stderr ERROR line.  opencode's logfmt formatter (logging.ts) quotes values

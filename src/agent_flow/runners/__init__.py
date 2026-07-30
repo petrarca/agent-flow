@@ -33,28 +33,24 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from agent_flow.runners.base import (
-    DEFAULT_IDLE_TIMEOUT_S,
+from agent_flow.runners.base import AgentRunner, RunnerBase
+from agent_flow.runners.claude_code import ClaudeCodeRunner
+from agent_flow.runners.events import Event
+from agent_flow.runners.executor import AgentExecutor
+from agent_flow.runners.inprocess import AgentImpl, InProcessExecutor
+from agent_flow.runners.invocation import DEFAULT_IDLE_TIMEOUT_S, AgentInvocation, AgentRunnerInfo, compose_prompt
+from agent_flow.runners.mock_exec import MockAgent, MockAgentContext, MockExecutor
+from agent_flow.runners.opencode import OpenCodeRunner
+from agent_flow.runners.prompt import PromptParts, render_prompt
+from agent_flow.runners.spec import (
     MODE_PROCESS,
     MODE_REMOTE,
     TRANSPORT_HTTP_SSE,
     TRANSPORT_SUBPROCESS,
-    AgentInvocation,
-    AgentRunner,
-    AgentRunnerInfo,
-    Event,
+    Check,
     LaunchSpec,
-    PromptParts,
-    RunnerBase,
     RunnerSpec,
-    compose_prompt,
-    render_prompt,
 )
-from agent_flow.runners.claude_code import ClaudeCodeRunner
-from agent_flow.runners.executor import AgentExecutor
-from agent_flow.runners.inprocess import AgentImpl, InProcessExecutor
-from agent_flow.runners.mock_exec import MockAgent, MockAgentContext, MockExecutor
-from agent_flow.runners.opencode import OpenCodeRunner
 from agent_flow.runners.subprocess_exec import SubprocessExecutor
 
 # The runner registry — name/alias -> runner instance. Runners REGISTER THEMSELVES
@@ -173,6 +169,7 @@ __all__ = [
     "RunnerSpec",
     "probe_agent_dir",
     "AgentRunnerInfo",
+    "Check",
     "AgentInvocation",
     "AgentExecutor",
     "InProcessExecutor",

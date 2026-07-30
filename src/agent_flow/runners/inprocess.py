@@ -35,8 +35,8 @@ from typing import Any
 
 import anyio
 
-from agent_flow.runners.base import AgentInvocation
 from agent_flow.runners.executor import AgentExecutor, AgentResult
+from agent_flow.runners.invocation import AgentInvocation
 
 # An in-process agent impl: given the neutral invocation, produce a result in one
 # of the accepted return shapes (see adapt_result).

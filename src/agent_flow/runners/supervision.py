@@ -35,7 +35,8 @@ from anyio.abc import ByteReceiveStream, Process
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from loguru import logger
 
-from agent_flow.runners.base import AgentRunner, Event
+from agent_flow.runners.base import AgentRunner
+from agent_flow.runners.events import Event
 
 _TAIL_LINES = 20
 

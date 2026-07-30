@@ -40,8 +40,9 @@ import anyio
 from loguru import logger
 
 from agent_flow.protocol import build_control_preamble, coerce_schema
-from agent_flow.runners.base import AgentInvocation, AgentRunner, compose_prompt
+from agent_flow.runners.base import AgentRunner
 from agent_flow.runners.executor import AgentCrashError, AgentExecutor, AgentResult, AgentTimeoutError
+from agent_flow.runners.invocation import AgentInvocation, compose_prompt
 from agent_flow.runners.supervision import _no_verdict_reason, _read_sidecar, _supervise, _Supervision
 
 

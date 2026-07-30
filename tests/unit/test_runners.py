@@ -14,7 +14,7 @@ from agent_flow.runners import (
     register,
     runner_specs,
 )
-from agent_flow.runners.base import RunnerSpec
+from agent_flow.runners.spec import RunnerSpec
 
 
 def _inv(**kw) -> AgentInvocation:
@@ -245,7 +245,7 @@ def test_parse_stderr_line_returns_none_for_empty():
 
 
 def test_launch_spec_capture_stderr_default_false():
-    from agent_flow.runners.base import LaunchSpec
+    from agent_flow.runners.spec import LaunchSpec
 
     spec = LaunchSpec(argv=["opencode", "run"], display="opencode run ...")
     assert spec.capture_stderr is False

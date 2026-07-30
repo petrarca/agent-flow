@@ -159,7 +159,8 @@ def test_no_sidecar_clean_exit_is_content_failure(tmp_path, stub_runner):
 async def test_start_failure_binary_missing_is_crash(tmp_path):
     # A runner whose binary does not exist -> open_process raises OSError ->
     # AgentCrashError. Exercises the async executor directly (not the sync shim).
-    from agent_flow.runners.base import AgentInvocation, LaunchSpec
+    from agent_flow.runners.invocation import AgentInvocation
+    from agent_flow.runners.spec import LaunchSpec
 
     class _MissingBinaryRunner:
         name = "missing"
@@ -168,7 +169,7 @@ async def test_start_failure_binary_missing_is_crash(tmp_path):
             return LaunchSpec(argv=["definitely-not-a-real-binary-xyz", "arg"], display="definitely-not-a-real-binary-xyz <prompt>")
 
         def parse_event(self, line):
-            from agent_flow.runners.base import Event
+            from agent_flow.runners.events import Event
 
             return Event.none()
 
@@ -187,7 +188,8 @@ async def test_raising_parse_event_degrades_to_noise_and_run_survives(tmp_path):
     shape, so a parser failure degrades that one line to noise (the line is still
     kept in the diagnostic tail); the sidecar verdict still decides the outcome.
     """
-    from agent_flow.runners.base import AgentInvocation, LaunchSpec
+    from agent_flow.runners.invocation import AgentInvocation
+    from agent_flow.runners.spec import LaunchSpec
 
     control = tmp_path / "n.control.json"
     prog = f"import json,sys; print('noise'); sys.stdout.flush(); open({str(control)!r},'w').write(json.dumps({{'status':'ok','agent':'a'}}))"
@@ -217,7 +219,9 @@ async def test_stdin_is_closed_agent_reading_stdin_does_not_hang(tmp_path):
     on EOF), then writes its ok sidecar; if stdin were an open pipe it would hang
     until the idle timeout. A short idle window keeps the test fast if it regresses.
     """
-    from agent_flow.runners.base import AgentInvocation, Event, LaunchSpec
+    from agent_flow.runners.events import Event
+    from agent_flow.runners.invocation import AgentInvocation
+    from agent_flow.runners.spec import LaunchSpec
 
     control = tmp_path / "n.control.json"
     # read all of stdin (EOF -> ""), then write the sidecar and exit 0.

@@ -38,7 +38,7 @@ import abc
 from dataclasses import dataclass, field
 
 from agent_flow.protocol import coerce_schema
-from agent_flow.runners.base import AgentInvocation
+from agent_flow.runners.invocation import AgentInvocation
 
 # Canonical separator for a runtime-qualified agent label: "<runtime>:<agent>"
 # (e.g. "opencode:my-agent", "inproc:some-agent", "mock:some-agent"). A colon is

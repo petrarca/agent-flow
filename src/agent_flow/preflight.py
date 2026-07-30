@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent_flow.runners.base import Check
+from agent_flow.runners.spec import Check
 
 
 def check_agent_dir_exists(agent_dir: str | Path | None) -> Check:

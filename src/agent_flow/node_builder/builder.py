@@ -20,7 +20,8 @@ from agent_flow.gates import Gate
 from agent_flow.node_builder.executor_choice import select_executor
 from agent_flow.node_builder.resolve import resolve_node_settings
 from agent_flow.node_builder.work_order import DEFAULT_WORK_ORDER_RENDERER, _validate_inputs, resolve_work_order
-from agent_flow.runners.base import AgentInvocation, PromptParts, render_prompt
+from agent_flow.runners.invocation import AgentInvocation
+from agent_flow.runners.prompt import PromptParts, render_prompt
 from agent_flow.utils import resolve_template
 
 

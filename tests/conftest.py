@@ -25,7 +25,9 @@ os.environ.setdefault("PREFECT_LOGGING_TO_API_ENABLED", "false")
 
 import pytest
 
-from agent_flow.runners.base import AgentInvocation, AgentRunnerInfo, Event, LaunchSpec
+from agent_flow.runners.events import Event
+from agent_flow.runners.invocation import AgentInvocation, AgentRunnerInfo
+from agent_flow.runners.spec import LaunchSpec
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
