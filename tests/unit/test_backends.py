@@ -18,7 +18,7 @@ import pytest
 
 from agent_flow.backends import DEFAULT_BACKEND, FlowBackend, InProcessBackend, get_backend
 from agent_flow.backends.base import RunNode
-from agent_flow.engine import NodeBlocked, NodeOutcome
+from agent_flow.flow_types import NodeBlocked, NodeOutcome
 
 # --- factory ----------------------------------------------------------------
 

@@ -132,7 +132,7 @@ def test_registry_get_unknown_mock_agent_raises():
 
 
 async def _run_node(node, tmp_path, **params):
-    from agent_flow.engine import RunContext
+    from agent_flow.flow_types import RunContext
 
     ctx = RunContext(node=node, run_dir=tmp_path, cycles=0, params=params)
     return await node.run(ctx)

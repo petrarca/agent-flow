@@ -14,7 +14,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_flow import agent_node, build_flow
-from agent_flow.engine import Node
+from agent_flow.flow_types import Node
 from agent_flow.flowdef import FlowDef, NodeDef, compile_flow
 from agent_flow.registry import FlowRegistry
 
@@ -135,7 +135,7 @@ def test_bare_str_field_does_NOT_catch_an_unresolved_placeholder():
 
 
 def test_blocking_node_halts_the_run_on_invalid_input():
-    from agent_flow.engine import NodeBlocked
+    from agent_flow.flow_types import NodeBlocked
 
     async def impl(inv):
         return {"status": "ok"}

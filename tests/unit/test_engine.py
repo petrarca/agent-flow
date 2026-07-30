@@ -11,7 +11,8 @@ from pathlib import Path
 import anyio
 import pytest
 
-from agent_flow.engine import Node, NodeBlocked, interpret, plan_groups
+from agent_flow.engine import interpret, plan_groups
+from agent_flow.flow_types import Node, NodeBlocked
 from agent_flow.gates import Continue, GoTo, Restart, Stop
 
 

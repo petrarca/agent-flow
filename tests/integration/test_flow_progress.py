@@ -12,7 +12,7 @@ pytestmark = pytest.mark.integration
 
 # build_flow defaults to the local backend (no Prefect), so no bootstrap needed.
 from agent_flow import agent_node, build_flow  # noqa: E402
-from agent_flow.engine import NodeOutcome  # noqa: E402
+from agent_flow.flow_types import NodeOutcome  # noqa: E402
 
 
 def _stub(inv, ctx):  # a trivial mock_agent behaviour

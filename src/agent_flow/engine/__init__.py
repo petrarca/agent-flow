@@ -32,7 +32,8 @@ logic is unit-testable in-process with no execution backend.
 The DAG VOCABULARY (`Node`, `RunContext`, `NodeOutcome`, `NodeBlocked`) lives in
 `agent_flow.flow_types`, not here: the backends need those types for their
 signatures, and a backend must not depend on the engine it is swappable for.
-They are re-exported below so `from agent_flow.engine import Node` keeps working.
+Import them from there — this package deliberately does NOT re-export them, so
+there is exactly one place each name comes from.
 """
 
 from __future__ import annotations
@@ -47,16 +48,8 @@ from agent_flow.engine.walker import _resolve_entry as _resolve_entry
 from agent_flow.engine.walker import _resolve_only_index as _resolve_only_index
 from agent_flow.engine.walker import _resolve_start_index as _resolve_start_index
 from agent_flow.engine.walker import _walk as _walk
-from agent_flow.flow_types import DEFAULT_MAX_CYCLES, Criticality, Node, NodeBlocked, NodeOutcome, RunContext, RunFn
 
 __all__ = [
-    "DEFAULT_MAX_CYCLES",
-    "Criticality",
-    "Node",
-    "NodeBlocked",
-    "NodeOutcome",
-    "RunContext",
-    "RunFn",
     "build_flow",
     "interpret",
     "maybe_await",

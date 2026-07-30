@@ -3,7 +3,8 @@
 import anyio
 import pytest
 
-from agent_flow.engine import Node, NodeOutcome, _walk, plan_groups
+from agent_flow.engine import _walk, plan_groups
+from agent_flow.flow_types import Node, NodeOutcome
 from agent_flow.gates import Continue, GateContext, GoTo, Restart, require_file, rerun_on_signal
 from agent_flow.node_builder import agent_node, build_work_order, control_path
 

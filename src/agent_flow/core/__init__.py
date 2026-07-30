@@ -25,8 +25,11 @@ core importable in isolation and is guarded by the prefect-isolation test.
 
 Cross-package boundary: other packages import core symbols FROM HERE (the public
 surface below), not from core's submodules. Modules WITHIN core import their
-siblings directly (e.g. agent_runtime imports core.schema) — that is not a
-boundary crossing and avoids import cycles.
+siblings directly — that is not a boundary crossing.
+
+The control protocol and the result-schema types are NOT re-exported here: they
+live in `agent_flow.protocol`, below both core and runners, and are imported
+from there. Each name has exactly one home.
 """
 
 from __future__ import annotations
@@ -35,7 +38,6 @@ from agent_flow.core.agent_runtime import DEFAULT_IDLE_TIMEOUT_S, AgentResult, a
 from agent_flow.core.context import read_context_blocks
 from agent_flow.core.env import load_env
 from agent_flow.core.report_signals import produced, rerun_targets
-from agent_flow.protocol import JsonSchema, PydanticSchema, ResultSchema, ValidationOutcome, build_control_preamble, coerce_schema
 from agent_flow.runners.executor import AgentContentFailedError, AgentCrashError, AgentTimeoutError
 
 __all__ = [
@@ -47,16 +49,8 @@ __all__ = [
     "AgentContentFailedError",
     "AgentCrashError",
     "DEFAULT_IDLE_TIMEOUT_S",
-    # injected control-file protocol
-    "build_control_preamble",
     # context ingestion (files -> prompt content)
     "read_context_blocks",
-    # typed agent output (opt-in)
-    "ResultSchema",
-    "JsonSchema",
-    "PydanticSchema",
-    "ValidationOutcome",
-    "coerce_schema",
     # file-based signals (gate building blocks)
     "produced",
     "rerun_targets",

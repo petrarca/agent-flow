@@ -2,7 +2,8 @@
 
 import pytest
 
-from agent_flow.engine import NodeOutcome, _resolve_start_index, _walk
+from agent_flow.engine import _resolve_start_index, _walk
+from agent_flow.flow_types import NodeOutcome
 
 
 class _Logger:

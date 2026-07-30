@@ -27,7 +27,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_flow import FlowRegistry, agent_node, load_env
-from agent_flow.engine import Node
+from agent_flow.flow_types import Node
 from examples import mock_agents  # the flow-supplied mock behaviours (--mock-agents mode)
 
 load_env()

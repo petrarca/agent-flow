@@ -61,21 +61,7 @@ from loguru import logger as _loguru_logger
 
 from agent_flow.backends import FlowBackend, InProcessBackend, get_backend
 from agent_flow.cli import NodeProgressPrinter, event_printer, get_console, print_preflight_results, print_results_table, run_cli
-from agent_flow.core import (
-    AgentResult,
-    JsonSchema,
-    PydanticSchema,
-    ResultSchema,
-    ValidationOutcome,
-    arun_agent,
-    build_control_preamble,
-    coerce_schema,
-    load_env,
-    produced,
-    read_context_blocks,
-    rerun_targets,
-    run_agent,
-)
+from agent_flow.core import AgentResult, arun_agent, load_env, produced, read_context_blocks, rerun_targets, run_agent
 from agent_flow.engine import build_flow, interpret, plan_groups
 from agent_flow.flow_types import Node, NodeBlocked, NodeOutcome, RunContext
 from agent_flow.flowdef import FlowDef, NodeDef, arun_flow, compile_flow, run_flow
@@ -101,6 +87,14 @@ from agent_flow.node_builder import (
     render_work_order_xml,
 )
 from agent_flow.preflight import Check, check, fatal_failures
+from agent_flow.protocol import (
+    JsonSchema,
+    PydanticSchema,
+    ResultSchema,
+    ValidationOutcome,
+    build_control_preamble,
+    coerce_schema,
+)
 from agent_flow.registry import FlowRegistry
 from agent_flow.run_config import (
     NodeRunConfig,

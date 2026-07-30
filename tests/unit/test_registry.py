@@ -3,7 +3,8 @@
 import anyio
 import pytest
 
-from agent_flow.engine import Node, build_flow, interpret
+from agent_flow.engine import build_flow, interpret
+from agent_flow.flow_types import Node
 from agent_flow.gates import Continue, Stop
 from agent_flow.registry import FlowRegistry
 from agent_flow.run_context import clear_run_context, init_run_context
@@ -127,7 +128,7 @@ def test_interpret_resolves_gate_ref():
         return Stop(reason="halt")
 
     node = Node(name="a", run=lambda ctx: {"ok": True}, gate_ref="stopper")
-    from agent_flow.engine import NodeBlocked
+    from agent_flow.flow_types import NodeBlocked
 
     with pytest.raises(NodeBlocked):
         _run_one(node, r)

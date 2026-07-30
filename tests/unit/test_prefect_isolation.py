@@ -55,7 +55,8 @@ def test_core_and_backend_import_without_prefect(prefect_blocked, monkeypatch):
 async def test_local_backend_runs_a_flow_without_prefect(prefect_blocked, monkeypatch, tmp_path):
     for m in _CORE_MODULES:
         monkeypatch.delitem(sys.modules, m, raising=False)
-    from agent_flow.engine import Node, build_flow
+    from agent_flow.engine import build_flow
+    from agent_flow.flow_types import Node
 
     def mk(nm):
         def run(_ctx):
