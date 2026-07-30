@@ -28,11 +28,21 @@ The dependency direction is strictly downward: **Tier 3 (`engine/`) must not
 import Tier 1** (`core`/`runners`) — they meet only through a node's `run`
 callable. `node_builder/` is the single package allowed to bridge both.
 
-`tests/unit/test_layering.py` enforces this. It asserts the layer order, a table
-of forbidden edges (the tier rule among them), and acyclicity INCLUDING
-function-local imports — a deferred import hides a cycle from the eager-import
-guard, so both are checked. Adding a top-level package fails that test until you
-place it in the layer table deliberately.
+This is enforced, not merely stated. The contracts live in `pyproject.toml`
+under `[tool.importlinter]` — layer order, the tier rule, the leaf packages
+(`gates`, `protocol`), and acyclicity — and `tests/unit/test_layering.py` runs
+them, so a violation fails in `task fct` rather than after a push. They are NOT
+in `task verify`: one place only.
+
+import-linter builds the graph with grimp, which sees FUNCTION-LOCAL imports as
+well as module-level ones. That matters here: `test_prefect_isolation.py`'s
+cycle guard inspects module-level imports only — correct for what it claims,
+since only those deadlock at package init — and cycles broken by a deferred
+import are invisible to it.
+
+Adding a top-level package fails `test_layering.py` until you place it in the
+layers contract deliberately. `lint-imports` also runs standalone for ad-hoc
+checks.
 
 ## Project Structure
 
