@@ -108,7 +108,7 @@ prompt — it exists only to exercise subprocess supervision.)
 
 `src/agent_flow/protocol/control.py` (`build_control_preamble`, also
 re-exported as `agent_flow.build_control_preamble`),
-`src/agent_flow/core/report_signals.py` (`rerun_targets`, `produced`), and
+`src/agent_flow/gates/signals.py` (`rerun_targets`, `produced`), and
 the verdict/status policy shared across executors in
 `src/agent_flow/runners/executor.py` (`AgentExecutor.assemble_result` /
 `check_content_status`), invoked by `SubprocessExecutor`

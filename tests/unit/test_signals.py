@@ -1,4 +1,4 @@
-"""Unit tests for report_signals — produced() (file check) + rerun_targets() (envelope)."""
+"""Unit tests for gates.signals — produced() (file check) + rerun_targets() (envelope)."""
 
 from pathlib import Path
 
