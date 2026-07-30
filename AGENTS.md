@@ -215,8 +215,12 @@ inputs/context/paths. To hand a value TO the agent, put it in `inputs`.
 
 ## Documentation
 
-Docs are OKF bundles (`docs/usage/`, `docs/design/`) — every file
-has a `type` frontmatter field. When you change behavior, update the matching
+Docs are OKF bundles (`docs/usage/`, `docs/design/`, `docs/adr/`) — every file
+has a `type` frontmatter field. `docs/adr/` holds the numbered decision records:
+a design doc says what a thing IS, an ADR says what was decided and what was
+given up for it. Start a new one from the handbook's `templates/adr-template.md`;
+an ADR is immutable once accepted, so change direction with a new record and
+`superseded_by`, not an edit. When you change behavior, update the matching
 concept doc and verify code snippets run. The README covers install + the three
 tiers + running the examples.
 

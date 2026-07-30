@@ -54,7 +54,32 @@ The registry is run-scoped, not node-scoped — one registry serves every node i
 a flow, and no call site in the library or its examples has ever wanted two. It
 arrives on the context so a node cannot consult a different registry than the
 flow was built with; when it was a per-node argument, omitting it silently
-disabled `--mock-agents` for that node and the real agent ran instead.
+disabled `--mock-agents` for that node and the real agent ran instead. See
+[ADR-0003](../adr/0003-run-scoped-registry-on-the-run-context.md).
+
+### Why the signature is wide
+
+Twenty keyword-only parameters is deliberate, not drift. No PEP or major style
+guide sets a maximum, and a configuration-heavy factory with many keyword-only
+options is the accepted Python idiom — several standard-library and widely-used
+third-party APIs have as many or more. Every parameter here maps to a distinct,
+orthogonal concept, and being keyword-only keeps call sites self-documenting.
+
+Grouping some into parameter objects has been considered and rejected. The
+accepted criteria for that refactoring are semantic cohesion, reuse across
+several functions, and cross-field validation — not count — and the candidate
+groups here fail on reuse and validation. Grouping the largest (DAG placement)
+would bury `depends_on`, which nearly every node sets.
+
+The inline/by-name pairs stay separate for the same reason they exist: `gate`
+supplies behaviour, `gate_ref` defers to the registry, and the latter is what
+keeps a `NodeDef` serializable. A `Callable | str` union would say what is
+allowed but not how it is interpreted.
+
+The real cost of change here is not the count but the dispersal: adding a
+per-node setting touches the builder, the resolution chain, and — where the
+setting is also declarable — `NodeDef` and `NodeRunConfig`. That follows from the
+split between what the flow declares and what the run configures.
 
 ## No analyst/verifier concept
 
