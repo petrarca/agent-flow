@@ -61,6 +61,10 @@ reimplement it.
 from agent_flow import AgentInvocation, FlowRegistry
 from agent_flow.runners.mock_exec import MockAgentContext
 
+# Paths template against, in precedence order: the node's work-order INPUTS
+# (uppercase here, the keys `ctx.input` exposes), the run PARAMS, then {run_dir}.
+# Resolution is STRICT — an unknown placeholder raises — so a key you use here
+# must actually be wired on the node (`inputs={"PRODUCT_KEY": "{product_key}", …}`).
 _OUT = "{PRODUCT_REPOS_ROOT}/{PRODUCT_KEY}/output"
 
 
@@ -88,10 +92,17 @@ def verifier(inv: AgentInvocation, ctx: MockAgentContext) -> dict:
 
 
 def register(registry: FlowRegistry) -> FlowRegistry:
-    registry.mock_agent("my-analyst")(analyst)
+    registry.mock_agent("my-analyst")(analyst)     # keyed by AGENT name
     registry.mock_agent("my-verifier")(verifier)
     return registry
 ```
+
+> **Register by AGENT name; assert by NODE name.** A mock is matched to the
+> node's `agent` (`NodeDef(name="analyst", agent="my-analyst", …)`), so you
+> register `"my-analyst"` — but `run_flow` returns outcomes keyed by the **node**
+> name, so you assert `out["analyst"]`. They are often different, and a mock that
+> silently never runs is usually a name mismatch. `registry.mock_agents()` lists
+> what is registered if you need to check.
 
 > **Test-only knobs go through the environment, not `-p`.** A mock reads
 > work-order **inputs** (`ctx.input`) and its file tools — it never sees the run
@@ -179,6 +190,26 @@ def test_verifier_rerun_jumps_back_bounded(tmp_path, monkeypatch):
 directly — no async test machinery. It returns `{node_name: NodeOutcome}`; assert
 on `.status` and on the artifacts the run wrote to `tmp_path`.
 
+Two import assumptions in that file: your project package is importable (a `src/`
+layout installed editable, e.g. `uv pip install -e .`), and `tests.fixtures`
+resolves because pytest puts the rootdir on `sys.path` — so **run these under
+pytest**, not by executing the file directly. If your layout differs, insert the
+paths explicitly at the top of the test instead:
+
+```python
+import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_ROOT / "src"))
+sys.path.insert(0, str(_ROOT / "tests"))   # then: from fixtures import flow_mocks
+```
+
+Mark them so a fast unit run can skip the slower flow tests
+(`@pytest.mark.integration`, or keep them under `tests/integration/` and select by
+path). Run with `pytest tests/integration` — the whole suite is token-free and
+takes well under a second per flow.
+
 ## What to assert
 
 Cover the flow's control paths — these are exactly what a real run's cost makes
@@ -194,6 +225,24 @@ expensive to discover:
 - **Exports publish**: a value a readiness node exports is available to a later
   node's work order (assert the run reaches the end, or read the exporting node's
   sidecar under `run_dir`).
+
+## Watching a run by hand
+
+Tests assert; sometimes you want to *watch*. If your flow ships a `run_cli`
+entry point, the same mocks drive an interactive run — useful while building a
+pipeline up node by node:
+
+```bash
+python flow.py run --mock-agents --show-events      # the whole flow, token-free
+python flow.py run --mock-agents --only analyst     # just one node/group
+python flow.py run --mock-agents --start-from verify  # from a node to the end
+```
+
+That requires the mocks to be registered on the registry `run_cli` uses — which,
+by the rule above, production is not. Either add a tiny test-only entry point that
+registers the fixture and calls `run_cli`, or keep the manual mode for the
+examples and rely on the assert-based tests for the pipeline. The tests are the
+contract; this is a development convenience.
 
 ## Isolate state between tests
 
