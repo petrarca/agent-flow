@@ -66,10 +66,12 @@ def analyst(inv: AgentInvocation, ctx: MockAgentContext) -> dict:
 def verifier(inv: AgentInvocation, ctx: MockAgentContext) -> dict:
     """Read the REPORT, append a verification note if absent; return 'verified'.
 
-    Re-run signal: pass `-p mock_rerun_once=<agent-name>` (or set
-    MOCK_RERUN_ONCE env var) and the first call to the verifier whose subject
-    agent matches will emit `rerun_required` (one-time; a marker file prevents
-    a second signal), exercising the bounded jump-back loop token-free.
+    Re-run signal: set the `MOCK_RERUN_ONCE=<agent-name>` ENV VAR and the first
+    call to the verifier whose subject agent matches emits `rerun_required`
+    (one-time; a marker file prevents a second signal), exercising the bounded
+    jump-back loop token-free. Env, not `-p`: a mock reads work-order INPUTS
+    (`ctx.input`) and its file tools — never the run PARAMS a `-p` flag sets — so
+    a test-only knob rides the env, keeping it out of the real work order.
     """
     import os
 
@@ -80,9 +82,9 @@ def verifier(inv: AgentInvocation, ctx: MockAgentContext) -> dict:
         text = ""
 
     # One-time re-run signal: emit rerun_required on the FIRST call when the
-    # mock_rerun_once param (or MOCK_RERUN_ONCE env var) matches this agent's
-    # subject. A marker file prevents the signal firing again (bounded loop).
-    rerun_target = ctx.input("mock_rerun_once") or os.environ.get("MOCK_RERUN_ONCE", "")
+    # MOCK_RERUN_ONCE env var matches this agent's subject. A marker file prevents
+    # the signal firing again (bounded loop).
+    rerun_target = os.environ.get("MOCK_RERUN_ONCE", "")
     # The verifier's subject is its agent name with "-verifier" stripped, or
     # the RERUN_TARGET input when wired explicitly.
     subject = ctx.input("RERUN_TARGET") or inv.agent.replace("-verifier", "").replace("-verify", "")
