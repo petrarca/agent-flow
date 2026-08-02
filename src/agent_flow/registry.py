@@ -390,6 +390,21 @@ class FlowRegistry:
     def has_mock_agent(self, name: str) -> bool:
         return name in self._mock_agents
 
+    def mock_agents(self) -> tuple[str, ...]:
+        """The names of the registered mock_agent behaviours (registration order)."""
+        return tuple(self._mock_agents)
+
+    def clear_mock_agents(self) -> None:
+        """Remove all registered mock_agent behaviours.
+
+        The public reset for the `--mock-agents` doubles — used by a consumer's
+        integration test to re-seed a shared registry between cases without
+        touching the stable gate/export/schema registrations (or reaching into the
+        private store). Leaves gates, exports, schemas, params, impls, renderers,
+        and hooks untouched.
+        """
+        self._mock_agents.clear()
+
     def fire(self, event: str, /, *args: Any, _node_name: str | None = None, **kwargs: Any) -> list[Any]:
         """Fire the observing hooks registered for `event`; return their results.
 

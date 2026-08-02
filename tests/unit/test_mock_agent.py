@@ -156,6 +156,35 @@ def test_registry_get_unknown_mock_agent_raises():
         FlowRegistry().get_mock_agent("nope")
 
 
+def test_registry_mock_agents_list_and_clear():
+    r = FlowRegistry()
+    r.mock_agent("a")(lambda inv, ctx: None)
+    r.mock_agent("b")(lambda inv, ctx: None)
+    assert r.mock_agents() == ("a", "b")  # registration order
+    r.clear_mock_agents()
+    assert r.mock_agents() == ()
+    assert r.has_mock_agent("a") is False
+
+
+def test_clear_mock_agents_leaves_other_registrations(tmp_path):
+    # clear_mock_agents must NOT touch gates/exports/schemas/impls.
+    r = FlowRegistry()
+
+    @r.gate("g")
+    def _g(ctx):
+        from agent_flow.gates import Continue
+
+        return Continue()
+
+    @r.mock_agent("a")
+    def _a(inv, ctx):
+        return None
+
+    r.clear_mock_agents()
+    assert r.has_mock_agent("a") is False
+    assert r.has_gate("g") is True  # gate survives
+
+
 # --- mode routing: node_builder picks MockExecutor only when mode is on -----
 
 
