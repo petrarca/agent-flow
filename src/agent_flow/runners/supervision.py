@@ -46,7 +46,24 @@ _TAIL_LINES = 20
 _POLL_CAP_S = 1.0
 
 
-# Grace period (seconds) for a signalled process to exit before escalating.
+# Two DIFFERENT waits, deliberately separate constants.
+#
+# 1. How long to let a finished-but-still-talking AGENT complete its turn.
+#
+# The control sidecar appears when the agent's `write` tool RUNS — several
+# seconds before its turn actually ends. It still has to return the tool result,
+# close the step (a final model roundtrip), flush telemetry/session state and
+# shut its MCP children down. So the sidecar means "the verdict is safe to read",
+# NOT "the process is done". Supervision keeps consuming events for this long
+# after the sidecar lands, so the agent can finish and exit on its own; only an
+# agent that outstays it is stopped. An UPPER BOUND, not a fixed wait — a clean
+# turn ends the window early (terminal event or EOF), costing only its real time.
+_FINISH_GRACE_S = 15
+
+# 2. How long to wait for a PROCESS to die: before signalling it at all, and
+#    again between SIGTERM and SIGKILL. Measured: a genuinely finished opencode
+#    exits in ~0.1s (with or without MCP attached), and a SIGTERM'd one in ~20ms,
+#    so this only ever elapses for a process that is truly stuck.
 _KILL_GRACE_S = 5
 
 
@@ -186,15 +203,6 @@ def _sidecar_probe(control_file: Path | None) -> Callable[[], bool]:
     return lambda: control_file is not None and control_file.exists()
 
 
-def _stop_kind(idle: bool, sidecar: bool) -> str | None:
-    """Map the two pre-line stop conditions to a completion kind (or None)."""
-    if sidecar:
-        return "sidecar"  # work done, even if the process lingers
-    if idle:
-        return "stale"  # silent for the whole idle window
-    return None
-
-
 def _finish(st: dict, kind: str) -> _Supervision:
     """Build the _Supervision result (killing, if needed, is the caller's job)."""
     return _Supervision(
@@ -303,31 +311,59 @@ async def _supervise_loop(
     """The liveness loop (see _supervise). Extracted so _supervise stays a thin
     spawn/interrupt wrapper (and both stay under the complexity limit).
 
-    On a stale or sidecar-present stop the lingering process is killed with a
-    shielded `_kill_group`; on EOF the process is reaped (already exiting).
+    Completion has three shapes, and only the first is a failure:
+
+      - STALE — silent for the whole idle window with no verdict. Genuinely hung,
+        so its group is killed immediately (shielded `_kill_group`).
+      - FINISHED — the agent emitted its terminal event (or the stream hit EOF)
+        with its verdict on disk. The clean path: the process is already exiting,
+        so it is simply reaped.
+      - FINISH WINDOW ELAPSED — the verdict landed but the turn never closed
+        within `_FINISH_GRACE_S`; stop it.
+
+    Note the sidecar appearing is NOT by itself a stop: it means the verdict is
+    safe to read, while the agent is typically still closing its step. Treating it
+    as completion is what used to SIGTERM every agent mid-turn.
     """
     st: dict = {"tokens": 0, "cost": 0.0, "events": 0, "saw_terminal": False, "errors": [], "tail": deque(maxlen=_TAIL_LINES)}
     idle_deadline = anyio.current_time() + idle_timeout_s
     sidecar_present = _sidecar_probe(control_file)
+    # Set when the sidecar first appears: from then on the agent is FINISHING
+    # (verdict written, turn not yet closed) and this bounds how long we let it.
+    finish_deadline: float | None = None
 
     while True:
-        # Stop conditions checked before waiting for the next line.
-        stop = _stop_kind(anyio.current_time() >= idle_deadline, sidecar_present())
-        if stop is not None:
-            if stop == "stale":
-                # Already hung — no clean self-exit is coming; kill its group now.
-                logger.debug(f"supervise: STALE — no event/sidecar for {idle_timeout_s}s (events={st['events']}) -> killing")
-                await _kill_group(proc)
-            else:  # "sidecar" — a normal completion: let it exit on its own first.
-                logger.debug(f"supervise: sidecar on disk (events={st['events']}) -> stopping")
+        now = anyio.current_time()
+        if finish_deadline is None and sidecar_present():
+            # The verdict is on disk, but the agent is still mid-turn. Do NOT stop
+            # here — keep consuming its events so it can close the step, flush and
+            # exit on its own. The clean end comes from its terminal event or EOF
+            # below; this deadline is only the backstop.
+            finish_deadline = now + _FINISH_GRACE_S
+            logger.debug(f"supervise: sidecar on disk (events={st['events']}) -> letting the agent finish (<= {_FINISH_GRACE_S}s)")
+
+        if finish_deadline is not None:
+            if now >= finish_deadline:
+                # Wrote its verdict but never closed the turn — stop it.
+                logger.debug(f"supervise: finish window elapsed (events={st['events']}) -> stopping")
                 await _stop_process(proc)
+                _drain_stderr(stderr_rx, runner, st["errors"])
+                return _finish(st, "sidecar")
+        elif now >= idle_deadline:
+            # Silent for the whole idle window with no verdict: genuinely hung.
+            # No clean self-exit is coming, so kill its group now.
+            logger.debug(f"supervise: STALE — no event/sidecar for {idle_timeout_s}s (events={st['events']}) -> killing")
+            await _kill_group(proc)
             _drain_stderr(stderr_rx, runner, st["errors"])
-            return _finish(st, stop)
+            return _finish(st, "stale")
 
         # Wait for the next line, but never longer than the poll cap, so the
         # sidecar/deadline checks above keep firing even during silence. A fresh
-        # window each iteration = "deadline resets on activity".
-        wait = max(min(idle_deadline - anyio.current_time(), _POLL_CAP_S), 0.05)
+        # window each iteration = "deadline resets on activity". While finishing,
+        # bound by THAT deadline instead — the idle one no longer applies (the
+        # agent has already delivered its verdict).
+        active_deadline = finish_deadline if finish_deadline is not None else idle_deadline
+        wait = max(min(active_deadline - anyio.current_time(), _POLL_CAP_S), 0.05)
         line: str | None = None
         got_line = False
         with anyio.move_on_after(wait):
@@ -361,12 +397,11 @@ async def _stop_process(proc: Process) -> None:
     """Wind a FINISHED agent down gracefully: give it a grace window to exit on
     its own, and only kill its group if it overstays.
 
-    The happy path: the agent has signalled completion (its control sidecar is on
-    disk, and/or it emitted its terminal event) and is milliseconds from a clean
-    self-exit — flushing stdout, closing the model session, letting its MCP
-    children shut down. So we WAIT (up to _KILL_GRACE_S) for that clean exit
-    instead of SIGTERM-ing the instant the sidecar appears. Only if it lingers
-    past the grace do we escalate via `_kill_group` (SIGTERM -> grace -> SIGKILL).
+    By the time this is called the agent has CLOSED its turn (terminal event or
+    EOF), or has overrun `_FINISH_GRACE_S` — so on the happy path the process is
+    already exiting and `proc.wait()` returns in milliseconds. We still wait up to
+    `_KILL_GRACE_S` rather than signalling blind, and only escalate via
+    `_kill_group` (SIGTERM -> grace -> SIGKILL) if it truly overstays.
 
     This is the runtime-AGNOSTIC teardown policy; deciding WHAT counts as a
     completion/terminal signal is the runner's job (parse_event -> saw_terminal).
