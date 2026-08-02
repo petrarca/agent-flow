@@ -58,7 +58,15 @@ _POLL_CAP_S = 1.0
 # after the sidecar lands, so the agent can finish and exit on its own; only an
 # agent that outstays it is stopped. An UPPER BOUND, not a fixed wait — a clean
 # turn ends the window early (terminal event or EOF), costing only its real time.
-_FINISH_GRACE_S = 15
+#
+# Deliberately generous. Observed close times scale with the size of the turn:
+# ~5s for a 21-event readiness check, ~9s at 39 events, ~11s at 303 events and
+# 13M tokens. 30s is ~3x the largest measured close, and the headroom is close to
+# free: it is spent ONLY by an agent that writes its verdict and then never closes
+# its turn at all — never observed — and even then costs one bounded wait on one
+# node. Erring long is the cheap direction; erring short kills healthy agents
+# mid-turn, which is the bug this window exists to fix.
+_FINISH_GRACE_S = 30
 
 # 2. How long to wait for a PROCESS to die: before signalling it at all, and
 #    again between SIGTERM and SIGKILL. Measured: a genuinely finished opencode

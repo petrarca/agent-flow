@@ -43,8 +43,10 @@ not a working directory in the OS sense.
   the step (a final model roundtrip), flush telemetry/session state and shut its
   MCP children down. Supervision therefore keeps consuming events after the
   sidecar lands, for up to `_FINISH_GRACE_S`, so the agent finishes and exits on
-  its own. (Measured: a genuinely finished opencode exits in ~0.1s, with or
-  without MCP attached — the wait is for the *turn*, not the process.)
+  its own. It is an upper bound: a clean turn ends it early, so a healthy agent
+  costs only its real close time. (Measured: a genuinely finished opencode exits
+  in ~0.1s, with or without MCP attached — the wait is for the *turn*, not the
+  process. Close times scale with turn size: ~5s at 21 events, ~11s at 303.)
 - On a stop the process is given a short window to exit by itself and only then
   is its group killed (SIGTERM → SIGKILL → `proc.kill()`), so helper children
   never linger. A *stale* agent is killed at once — no clean exit is coming. The
