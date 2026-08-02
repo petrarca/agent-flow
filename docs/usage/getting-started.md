@@ -27,9 +27,10 @@ uv add "petrarca-agent-flow"
 uv add "petrarca-agent-flow[cli,prefect]"
 ```
 
-The core install is small (pydantic, pyyaml, jsonschema, python-dotenv). `[cli]`
-adds typer + rich, `[prefect]` adds the opt-in backend, `[all]` adds both. Using
-a feature without its extra raises a message naming the extra to install.
+The core install is small (anyio, loguru, pydantic, pydantic-settings, pyyaml,
+jsonschema, python-dotenv, universal-pathlib). `[cli]` adds typer + rich,
+`[prefect]` adds the opt-in backend, `[all]` adds both. Using a feature without
+its extra raises a message naming the extra to install.
 
 ## 1. Write an agent
 

@@ -64,8 +64,9 @@ emits is opaque. See [control-file](control-file.md).
 2. **Agents are unchanged.** Existing opencode `.md` agents keep their identity
    and are invoked as-is.
 3. **Lean core, optional extras.** The default install carries only what a
-   programmatic `build_flow` run on the default in-process backend needs (pydantic,
-   pydantic-settings, pyyaml, jsonschema, python-dotenv). The heavy pieces are
+   programmatic `build_flow` run on the default in-process backend needs (anyio,
+   loguru, pydantic, pydantic-settings, pyyaml, jsonschema, python-dotenv,
+   universal-pathlib). The heavy pieces are
    opt-in extras matching the runtime seams: `[cli]` (typer + rich, the display
    layer) and `[prefect]` (the opt-in Prefect backend). Both are lazy-imported
    at their entry points, and using a feature without its extra raises a clear

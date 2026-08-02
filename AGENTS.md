@@ -187,7 +187,8 @@ inputs/context/paths. To hand a value TO the agent, put it in `inputs`.
 - No bare `except Exception`; catch concrete types. `except A, B:` (no `as`) is
   valid Python 3.14 (PEP 758) — do not flag it.
 - Dependencies are a lean core plus opt-in extras. Core (always installed):
-  pydantic, pydantic-settings, pyyaml, jsonschema, python-dotenv — enough to
+  anyio, loguru, pydantic, pydantic-settings, pyyaml, jsonschema, python-dotenv,
+  universal-pathlib — enough to
   declare a pipeline and run it on the default InProcessBackend. The heavy pieces are
   extras matching the runtime seams: `[prefect]` (the opt-in PrefectBackend) and
   `[cli]` (typer + rich for `run_cli` / display); `[all]` is both, `[dev]` adds

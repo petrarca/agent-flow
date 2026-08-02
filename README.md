@@ -236,8 +236,9 @@ configured with model access.
 
 **Lean core, optional extras.** The default install is small — enough to declare
 a pipeline and run it on the default in-process backend, with typed
-params/results and config (pydantic, pydantic-settings, pyyaml, jsonschema,
-python-dotenv). The heavy pieces are opt-in extras that match the runtime seams.
+params/results and config (anyio, loguru, pydantic, pydantic-settings, pyyaml,
+jsonschema, python-dotenv, universal-pathlib). The heavy pieces are opt-in extras
+that match the runtime seams.
 
 Installed from PyPI as `petrarca-agent-flow` (the import name is `agent_flow`):
 

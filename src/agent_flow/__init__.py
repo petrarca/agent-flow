@@ -50,9 +50,9 @@ Public API (the authoritative list is `__all__` below):
         load_env,
     )
 
-The default install is lean (pydantic, pydantic-settings, pyyaml, jsonschema,
-python-dotenv) — enough to declare a pipeline and run it on the default local
-backend. The opt-in extras add the heavy pieces: `petrarca-agent-flow[prefect]`
+The default install is lean (anyio, loguru, pydantic, pydantic-settings, pyyaml,
+jsonschema, python-dotenv, universal-pathlib) — enough to declare a pipeline and
+run it on the default local backend. The opt-in extras add the heavy pieces: `petrarca-agent-flow[prefect]`
 (the Prefect backend) and `petrarca-agent-flow[cli]` (typer + rich for run_cli /
 display). See
 examples/ for how to build a pipeline on this library, and
