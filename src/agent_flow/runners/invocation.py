@@ -11,13 +11,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
 from agent_flow.const import DEFAULT_IDLE_TIMEOUT_S as DEFAULT_IDLE_TIMEOUT_S
 from agent_flow.runners.events import Event
 from agent_flow.runners.prompt import PromptParts
+
+if TYPE_CHECKING:
+    from upath import UPath
 
 
 class AgentRunnerInfo(BaseModel):
@@ -78,7 +81,7 @@ class AgentInvocation:
 
     agent: str  # logical agent name / ref
     prompt: str  # fully-composed per-node prompt (context+instructions+one-time+work order)
-    run_dir: Path  # the run's directory (artifact/sidecar root; base for relative paths)
+    run_dir: Path | UPath  # the run's directory (artifact/sidecar root; base for relative paths). UPath for an in-memory mock run.
     node: str = ""  # the NODE this invocation runs (neutral identity; unique per run).
     # Used e.g. by SubprocessExecutor to key its per-node control sidecar
     # ("<node>.control.json"). Falls back to `agent` when empty.

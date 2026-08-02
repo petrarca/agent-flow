@@ -20,9 +20,12 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from agent_flow.gates import Gate
+
+if TYPE_CHECKING:
+    from upath import UPath
 
 Criticality = Literal["blocking", "degrade"]
 
@@ -59,7 +62,7 @@ class RunContext:
     """
 
     node: Node
-    run_dir: Path
+    run_dir: Path | UPath
     cycles: int
     params: dict[str, Any]
     on_event_factory: Callable[[str], Any] | None = None

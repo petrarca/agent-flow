@@ -118,7 +118,7 @@ class MockExecutor(AgentExecutor):
         self._work_order = work_order or {}
         self._tmpl = tmpl or {}
 
-    async def run(self, inv: AgentInvocation, *, control_file: Path | None = None) -> AgentResult:
+    async def run(self, inv: AgentInvocation, *, control_file: Path | UPath | None = None) -> AgentResult:
         ctx = MockAgentContext(inv, self._work_order, self._tmpl)
         behaviour = self._behaviour
 
@@ -133,8 +133,9 @@ class MockExecutor(AgentExecutor):
 
         control = self._coerce_envelope(raw, inv.agent)
 
-        # Materialise the sidecar on disk, like a real runner (the MockRuntime's
-        # surrounding). Same default path SubprocessExecutor derives.
+        # Materialise the sidecar like a real runner (the MockRuntime's
+        # surrounding) — on disk for a local run, in the in-memory FS for a
+        # memory:// run. Same default path SubprocessExecutor derives.
         run_dir = inv.run_dir
         run_dir.mkdir(parents=True, exist_ok=True)
         if control_file is None:

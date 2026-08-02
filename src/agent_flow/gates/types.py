@@ -10,7 +10,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from upath import UPath
 
 
 class Continue:
@@ -85,8 +88,9 @@ class GateContext:
     node      the node that just ran (its name, and whatever the consumer's node
               type carries). Typed Any so the library does not couple to any one
               pipeline's node/stage shape.
-    run_dir   the run's directory — a gate stats files under here to
-              check what the agent wrote.
+    run_dir   the run's directory — a gate stats files under here to check what
+              the agent wrote. A local `Path`, or a `UPath` over an in-memory FS
+              for a mock run; the same pathlib API either way.
     agent_dir the directory the agent definitions came from (opencode --dir),
               for the just-run node — mirrors RunContext.agent_dir. Usually
               unneeded by a gate (it decides from what the agent produced), but
@@ -101,7 +105,7 @@ class GateContext:
 
     result: Any
     node: Any
-    run_dir: Path
+    run_dir: Path | UPath
     cycles: int
     obj: Any = None
     params: dict[str, Any] = field(default_factory=dict)

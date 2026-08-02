@@ -22,14 +22,17 @@ from __future__ import annotations
 import glob
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from upath import UPath
 
 
 def read_context_blocks(
     sources: Iterable[str] | None,
     *,
     params: dict[str, Any],
-    run_dir: Path,
+    run_dir: Path | UPath,
     warn: Callable[[str], None] = lambda _m: None,
 ) -> str:
     """Read each source (path or glob) and return one delimited content block.
@@ -73,7 +76,7 @@ def _template(src: str, tmpl: dict[str, Any]) -> str:
         return src
 
 
-def _expand(resolved: str, run_dir: Path) -> list[Path]:
+def _expand(resolved: str, run_dir: Path | UPath) -> list[Path]:
     """Expand a (possibly relative, possibly glob) source to concrete files.
 
     Relative sources resolve against run_dir. Globs are supported; a plain path

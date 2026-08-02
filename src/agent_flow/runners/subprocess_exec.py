@@ -35,9 +35,13 @@ import os
 from dataclasses import replace
 from pathlib import Path
 from subprocess import DEVNULL, PIPE, STDOUT
+from typing import TYPE_CHECKING
 
 import anyio
 from loguru import logger
+
+if TYPE_CHECKING:
+    from upath import UPath
 
 from agent_flow.protocol import build_control_preamble, coerce_schema
 from agent_flow.runners.base import AgentRunner
@@ -76,7 +80,7 @@ class SubprocessExecutor(AgentExecutor):
         self.name = getattr(runner, "name", "subprocess")
         self._env_extra = env_extra
 
-    async def run(self, inv: AgentInvocation, *, control_file: Path | None = None) -> AgentResult:
+    async def run(self, inv: AgentInvocation, *, control_file: Path | UPath | None = None) -> AgentResult:
         """Run one invocation as a supervised subprocess -> AgentResult.
 
         `control_file` overrides the per-node sidecar path; by default it is
@@ -147,15 +151,21 @@ class SubprocessExecutor(AgentExecutor):
 
         return self._finalize(inv, control_file, spec, sup, returncode, agent_dir, duration)
 
-    def _resolve_control_file(self, inv: AgentInvocation, control_file: Path | None) -> Path:
+    def _resolve_control_file(self, inv: AgentInvocation, control_file: Path | UPath | None) -> Path:
         """Per-node control sidecar path (node name is unique per run; falls back
         to the agent name). Cleared defensively so completion keys only on THIS
-        run's write. The sidecar is this executor's own mechanism."""
+        run's write. The sidecar is this executor's own mechanism.
+
+        A subprocess run_dir is always a LOCAL path — mock mode diverts a memory://
+        run to the MockExecutor before it reaches here — so the result is narrowed
+        to `Path` (a real subprocess writes real disk); a stray non-local path is
+        coerced to its string form rather than silently misbehaving."""
         if control_file is None:
             base = inv.node or inv.agent
             control_file = inv.run_dir / f"{base}.control.json"
-        control_file.unlink(missing_ok=True)
-        return control_file
+        cf = control_file if isinstance(control_file, Path) else Path(str(control_file))
+        cf.unlink(missing_ok=True)
+        return cf
 
     def _compose_full_prompt(self, inv: AgentInvocation, control_file: Path) -> str:
         """Compose the final prompt: [verdict preamble] + [compose_prompt].
