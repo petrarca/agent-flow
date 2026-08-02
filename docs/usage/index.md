@@ -19,6 +19,7 @@ How to build a pipeline on agent-flow. For why it is built this way, see the
 | [writing-agents.md](writing-agents.md) | Writing the opencode agent `.md` files agent-flow supervises. |
 | [recipes.md](recipes.md) | You need something specific: a re-run loop, parallel steps, typed output, custom logic. |
 | [advanced-recipes.md](advanced-recipes.md) | Parallel steps, exports, partial runs, prompt rendering, backends, or dropping below the declarative surface. |
+| [testing.md](testing.md) | You want to test your pipeline's wiring token-free — as an integration test, with the mocks kept out of production code. |
 
 ## What you write
 

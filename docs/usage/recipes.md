@@ -123,7 +123,7 @@ what keeps a `FlowDef` serializable.
 | `@registry.export("name")` | `(payload) -> Mapping` published to downstream params | `export_ref="name"` |
 | `@registry.run("name")` | `(ctx) -> dict` — a node that runs your code, not an agent | `run_ref="name"` |
 | `@registry.agent_impl("name")` | `(inv) -> AgentResult / model / dict` — an in-process agent | `impl_ref="name"` |
-| `@registry.mock_agent("agent")` | `(inv, ctx) -> envelope` — a token-free stand-in | *(matched by AGENT name under `--mock-agents`)* |
+| `@registry.mock_agent("agent")` | `(inv, ctx) -> envelope` — a token-free stand-in ([testing.md](testing.md)) | *(matched by AGENT name under `--mock-agents`)* |
 | `@registry.on("event", node=…)` | an observing hook; never steers flow | *(fires automatically; `node=` scopes it)* |
 | `registry.work_order(fn)` | `(resolved: dict[str, str]) -> str` — restyle the work order ([advanced](advanced-recipes.md#change-how-the-prompt-is-rendered)) | *(flow-wide; no reference)* |
 | `registry.prompt(fn)` | `(parts: PromptParts) -> str` — assemble the whole prompt body ([advanced](advanced-recipes.md#change-how-the-prompt-is-rendered)) | *(flow-wide; no reference)* |
