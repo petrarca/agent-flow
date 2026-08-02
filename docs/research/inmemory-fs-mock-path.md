@@ -135,3 +135,15 @@ same in-memory subtree.
 but it is a test-time monkeypatch, not a runtime capability a consumer can select,
 and the stated goal ("swap, optionally, with an in-memory FS") is a runtime seam.
 UPath gives the runtime seam with nearly the same small footprint.
+
+## Outcome (implemented)
+
+The recommendation shipped: `universal-pathlib` is a core dep; `resolve_run_dir`
+returns a `UPath` for `memory://` (and defaults a no-run_dir mock run to a unique
+`memory://run-<id>/` root); `MockAgentContext._resolve` builds a `UPath`; and
+`require_file` joins `run_dir` only for bare-relative paths (an absolute or
+`memory://` path is used verbatim, since a plain `run_dir / "memory://…"` would
+concatenate into nonsense). The seam is "`run_dir` is a `Path`-like object," so
+the mock ctx, executor sidecar, and gates are otherwise unchanged. See the
+[mock-agent concept](../design/mock-agent.md#in-memory-filesystem-the-default-for-a-mock-run)
+and the [testing guide](../usage/testing.md#in-memory-runs-integration-test-to-unit-test).
