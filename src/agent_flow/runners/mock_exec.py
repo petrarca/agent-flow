@@ -46,8 +46,13 @@ class MockAgentContext:
 
     - `input(key, default)` reads a STRUCTURED work-order input (the resolved
       `inputs={...}` value the flow author wired).
-    - `write_file(path, content)` / `read_file(path)` are the file tools; paths
-      accept the same `{run_dir}`/`{param}` templating the flow's inputs use.
+    - `write_file(path, content)` / `read_file(path)` are the file tools. Paths
+      are templated against, in precedence order, the node's work-order INPUTS
+      (the same keys `input()` exposes — e.g. `{PRODUCT_KEY}`), then the run
+      PARAMS (`{product_key}`), then `{run_dir}`. Resolution is STRICT: an
+      unknown `{placeholder}` in a path RAISES (a half-resolved path — a file
+      literally named `{PRODUCT_KEY}` — is never intended), so a typo'd key fails
+      loudly instead of silently writing to the wrong place.
 
     Deliberately no `write_report`/domain helpers (that would bake policy), no
     `edit` (compose from read+write), no `exists`/`list` (unused). The `result`
@@ -69,17 +74,23 @@ class MockAgentContext:
         return self._work_order.get(key, default)
 
     def _resolve(self, path: str) -> Path:
-        return Path(resolve_template(path, self._tmpl))
+        # Precedence (highest first): work-order INPUTS (the keys input() exposes,
+        # e.g. PRODUCT_KEY) > run PARAMS (product_key) > run_dir. Mirrors the
+        # gate's path templating so a mock reaches the same values a gate/agent
+        # does. strict=True: a path MUST fully resolve — an unknown {placeholder}
+        # raises rather than silently yielding a literal "{PRODUCT_KEY}/..." path.
+        tmpl = {**self._tmpl, **self._work_order}
+        return Path(resolve_template(path, tmpl, strict=True))
 
     def write_file(self, path: str, content: str) -> Path:
-        """Write `content` to `path` ({run_dir}/{param} templated). Returns the path."""
+        """Write `content` to `path` (inputs/params/run_dir templated, strict). Returns the path."""
         p = self._resolve(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content)
         return p
 
     def read_file(self, path: str) -> str:
-        """Read `path` ({run_dir}/{param} templated) as text."""
+        """Read `path` (inputs/params/run_dir templated, strict) as text."""
         return self._resolve(path).read_text()
 
 

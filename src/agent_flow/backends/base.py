@@ -17,7 +17,7 @@ code), backends DO share logic: the solo-vs-parallel branch and the
 failure->degraded mapping are identical across backends — only the concurrency
 PRIMITIVE differs (a threadpool vs Prefect task submission). So this seam is an
 `abc.ABC` with a concrete template-method `run_group` and one abstract primitive
-`_execute_parallel`, mirroring cypher-graphdb-core's CypherBackend.
+`_execute_parallel`.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ class FlowBackend(abc.ABC):
 
     # --- template method (shared; do not override) -------------------------
 
-    async def run_group(self, group: list[Node], run_node: RunNode) -> dict[str, NodeOutcome]:
+    async def run_group(self, group: list[Node], run_node: RunNode, only_nodes: set[str] | None = None) -> dict[str, NodeOutcome]:
         """Execute one planned group and return per-node outcomes.
 
         Solo group -> run the single node inline. Parallel group (2+ nodes
@@ -57,12 +57,20 @@ class FlowBackend(abc.ABC):
         `_execute_parallel`, mapping any node that failed to produce an outcome
         to NodeOutcome(status="degraded"). This branch + mapping is identical
         for every backend, so it lives here; only `_execute_parallel` varies.
+
+        `only_nodes` RESTRICTS execution to that subset of the group's members
+        (used by a node-level jump-back: re-run only the flagged node(s), not
+        their siblings). None = run every member (the normal forward pass).
+        Filtering to a single member takes the inline solo path; a 2+ subset
+        still runs concurrently. Members not in `only_nodes` are simply not run
+        this pass — their prior outcomes stand (the walker keeps them).
         """
-        if len(group) == 1:
-            n = group[0]
+        members = [n for n in group if only_nodes is None or n.name in only_nodes]
+        if len(members) == 1:
+            n = members[0]
             return {n.name: await run_node(n.name)}
-        self.get_logger().info(f"PARALLEL group: {[n.name for n in group]}")
-        names = [n.name for n in group]
+        self.get_logger().info(f"PARALLEL group: {[n.name for n in members]}")
+        names = [n.name for n in members]
         outcomes = await self._execute_parallel(names, run_node)
         # Defensive: any name the backend didn't return -> degraded (never drop a node).
         return {name: outcomes.get(name, NodeOutcome(status="degraded")) for name in names}

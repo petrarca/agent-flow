@@ -60,9 +60,10 @@ def test_resolve_only_accepts_group_name_and_member_node():
 
 
 def _run_recording(ran):
-    async def run_group(group):
-        ran.append(group[0])
-        return {group[0]: NodeOutcome(status="ok")}
+    async def run_group(group, only_nodes=None):
+        members = [n for n in group if only_nodes is None or n in only_nodes]
+        ran.extend(members)
+        return {n: NodeOutcome(status="ok") for n in members}
 
     return run_group
 
@@ -88,14 +89,14 @@ async def test_walk_single_group_ignores_jump_back():
     # Even if the only group's gate asks to jump back, `only` mode stops after it.
     planned, gi, ng, bn = _linear(["a", "b", "c"])
 
-    async def run_group(group):
+    async def run_group(group, only_nodes=None):
         return {group[0]: NodeOutcome(status="ok", goto="a")}  # would rewind normally
 
     ran_calls = {"n": 0}
 
-    async def counting(group):
+    async def counting(group, only_nodes=None):
         ran_calls["n"] += 1
-        return await run_group(group)
+        return await run_group(group, only_nodes)
 
     await _walk(planned, run_group=counting, group_index=gi, node_group=ng, by_name=bn, logger=_Logger(), start_index=1, single_group=True)
     assert ran_calls["n"] == 1  # ran the one group once; goto ignored
@@ -110,9 +111,10 @@ async def test_walk_parallel_group_runs_all_members_once():
     by_name = {"a": 1, "b1": 1, "b2": 1, "c": 1}
     ran: list = []
 
-    async def run_group(group):
-        ran.extend(n for n in group)
-        return {n: NodeOutcome(status="ok") for n in group}
+    async def run_group(group, only_nodes=None):
+        members = [n for n in group if only_nodes is None or n in only_nodes]
+        ran.extend(members)
+        return {n: NodeOutcome(status="ok") for n in members}
 
     await _walk(
         planned,

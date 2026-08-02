@@ -42,6 +42,34 @@ def test_context_write_and_read_file_templated(tmp_path):
     assert ctx.read_file("{run_dir}/out.md") == "# hi"
 
 
+def test_context_path_templates_work_order_inputs(tmp_path):
+    # A path may template the WORK-ORDER inputs (the same keys input() exposes,
+    # e.g. PRODUCT_KEY) — not only {run_dir}/params. Regression: these used to
+    # be absent from the path namespace, so a path built from {PRODUCT_KEY}
+    # silently resolved to a literal "{PRODUCT_KEY}/..." file.
+    work_order = {"PRODUCT_REPOS_ROOT": str(tmp_path), "PRODUCT_KEY": "acme"}
+    ctx = MockAgentContext(_inv(tmp_path), work_order, {"run_dir": str(tmp_path)})
+    p = ctx.write_file("{PRODUCT_REPOS_ROOT}/{PRODUCT_KEY}/output/report.md", "# r")
+    assert p == tmp_path / "acme" / "output" / "report.md"
+    assert ctx.read_file("{PRODUCT_REPOS_ROOT}/{PRODUCT_KEY}/output/report.md") == "# r"
+
+
+def test_context_path_templates_params(tmp_path):
+    # Lowercase run params resolve too (precedence: inputs > params > run_dir).
+    ctx = MockAgentContext(_inv(tmp_path), {}, {"run_dir": str(tmp_path), "product_key": "acme"})
+    p = ctx.write_file("{run_dir}/{product_key}.md", "x")
+    assert p == tmp_path / "acme.md"
+
+
+def test_context_path_strict_raises_on_unknown_key(tmp_path):
+    # A path MUST fully resolve: an unknown {placeholder} raises rather than
+    # silently writing to a literal "{missing}/..." path (a half-resolved path is
+    # never intended). Turns a typo'd key into a loud error at write time.
+    ctx = MockAgentContext(_inv(tmp_path), {}, {"run_dir": str(tmp_path)})
+    with pytest.raises(KeyError):
+        ctx.write_file("{run_dir}/{missing_key}.md", "x")
+
+
 # --- MockExecutor: envelope handling + sidecar + assembly -------------------
 
 

@@ -41,9 +41,9 @@ async def _fire_group_hook(registry: Any, event: str, group: list[Node], warn: C
 def _make_group_runner(backend_impl: Any, registry: Any, run_node: Any, logger: Any):
     """Wrap the backend's group execution with before_group/after_group hooks."""
 
-    async def run_group(group: list[Node]) -> dict[str, NodeOutcome]:
+    async def run_group(group: list[Node], only_nodes: set[str] | None = None) -> dict[str, NodeOutcome]:
         await _fire_group_hook(registry, "before_group", group, logger.warning)
-        outcomes = await backend_impl.run_group(group, run_node)
+        outcomes = await backend_impl.run_group(group, run_node, only_nodes=only_nodes)
         await _fire_group_hook(registry, "after_group", group, logger.warning, outcomes)
         return outcomes
 

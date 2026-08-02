@@ -315,10 +315,12 @@ async def _supervise_loop(
         stop = _stop_kind(anyio.current_time() >= idle_deadline, sidecar_present())
         if stop is not None:
             if stop == "stale":
+                # Already hung — no clean self-exit is coming; kill its group now.
                 logger.debug(f"supervise: STALE — no event/sidecar for {idle_timeout_s}s (events={st['events']}) -> killing")
-            else:  # "sidecar"
+                await _kill_group(proc)
+            else:  # "sidecar" — a normal completion: let it exit on its own first.
                 logger.debug(f"supervise: sidecar on disk (events={st['events']}) -> stopping")
-            await _kill_group(proc)  # idempotent; ensures no lingering process
+                await _stop_process(proc)
             _drain_stderr(stderr_rx, runner, st["errors"])
             return _finish(st, stop)
 
@@ -336,7 +338,7 @@ async def _supervise_loop(
 
         if line is None:  # reader EOF — process finished
             logger.debug(f"supervise: stdout EOF (events={st['events']}) -> reaping")
-            await _reap(proc)
+            await _stop_process(proc)
             _drain_stderr(stderr_rx, runner, st["errors"])
             return _finish(st, "completed")
 
@@ -346,14 +348,31 @@ async def _supervise_loop(
         if _consume_line(line, st, runner, on_event):
             idle_deadline = anyio.current_time() + idle_timeout_s
         if st["saw_terminal"] and sidecar_present():
+            # The agent said it is done (its terminal event) AND wrote its verdict:
+            # the cleanest completion signal there is — give it the grace window to
+            # exit on its own before escalating to a kill.
             logger.debug(f"supervise: terminal event + sidecar (events={st['events']}) -> stopping")
-            await _kill_group(proc)
+            await _stop_process(proc)
             _drain_stderr(stderr_rx, runner, st["errors"])
             return _finish(st, "sidecar")
 
 
-async def _reap(proc: Process) -> None:
-    """Wait briefly for a finished process; kill its group if it lingers."""
+async def _stop_process(proc: Process) -> None:
+    """Wind a FINISHED agent down gracefully: give it a grace window to exit on
+    its own, and only kill its group if it overstays.
+
+    The happy path: the agent has signalled completion (its control sidecar is on
+    disk, and/or it emitted its terminal event) and is milliseconds from a clean
+    self-exit — flushing stdout, closing the model session, letting its MCP
+    children shut down. So we WAIT (up to _KILL_GRACE_S) for that clean exit
+    instead of SIGTERM-ing the instant the sidecar appears. Only if it lingers
+    past the grace do we escalate via `_kill_group` (SIGTERM -> grace -> SIGKILL).
+
+    This is the runtime-AGNOSTIC teardown policy; deciding WHAT counts as a
+    completion/terminal signal is the runner's job (parse_event -> saw_terminal).
+    Also used to reap an EOF-exited process (already gone -> proc.wait returns at
+    once, no kill).
+    """
     with anyio.move_on_after(_KILL_GRACE_S) as scope:
         await proc.wait()
     if scope.cancelled_caught:

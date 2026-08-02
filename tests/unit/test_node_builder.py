@@ -185,7 +185,7 @@ async def test_walk_cross_node_jump_back_bounded():
     calls: list[str] = []
     state = {"jumped": False}
 
-    async def run_group(group):
+    async def run_group(group, only_nodes=None):
         out = {}
         for n in group:
             calls.append(n.name)
@@ -207,7 +207,7 @@ async def test_walk_jump_back_respects_max_cycles():
     planned, gi, ng = _plan([a, b])
     calls: list[str] = []
 
-    async def run_group(group):  # B ALWAYS asks to jump back to A
+    async def run_group(group, only_nodes=None):  # B ALWAYS asks to jump back to A
         out = {}
         for n in group:
             calls.append(n.name)
@@ -226,7 +226,7 @@ async def test_walk_ignores_forward_goto():
     planned, gi, ng = _plan([a, b])
     calls: list[str] = []
 
-    async def run_group(group):
+    async def run_group(group, only_nodes=None):
         out = {}
         for n in group:
             calls.append(n.name)
@@ -247,7 +247,7 @@ async def test_walk_delivers_goto_instruction_to_target():
     pending: dict[str, str] = {}
     state = {"jumped": False}
 
-    async def run_group(group):
+    async def run_group(group, only_nodes=None):
         out = {}
         for n in group:
             if n.name == "B" and not state["jumped"]:
@@ -270,6 +270,133 @@ async def test_walk_delivers_goto_instruction_to_target():
     # least assert the instruction was routed to the target key during the jump.
     # Since this run_group does not drain `pending`, it remains recorded for A.
     assert pending.get("A") == "redo A"
+
+
+# --- node-level jump-back into a parallel group -----------------------------
+# A jump-back re-runs ONLY the flagged node(s), not their parallel siblings; the
+# forward re-flow past the target runs later groups in full. `run_group` honours
+# `only_nodes` (the walker's per-group restriction), so these record exactly what
+# each pass ran.
+
+
+@pytest.mark.anyio
+async def test_jump_back_into_parallel_group_reruns_only_flagged_node():
+    # analysis fan-out {S,D,C} -> verify V. V flags D once. The jump-back must
+    # re-run ONLY D (not S/C), then re-flow forward re-runs V.
+    s = Node("S", run=lambda c: None, parallel_group="analysis")
+    d = Node("D", run=lambda c: None, parallel_group="analysis")
+    c = Node("C", run=lambda c: None, parallel_group="analysis")
+    v = Node("V", run=lambda c: None, depends_on=("S", "D", "C"), max_cycles=1)
+    planned, gi, ng = _plan([s, d, c, v])
+    calls: list[tuple] = []
+    state = {"flagged": False}
+
+    async def run_group(group, only_nodes=None):
+        members = [n for n in group if only_nodes is None or n.name in only_nodes]
+        calls.append(tuple(n.name for n in members))
+        out = {}
+        for n in members:
+            if n.name == "V" and not state["flagged"]:
+                state["flagged"] = True
+                out[n.name] = NodeOutcome(status="ok", goto="D")
+            else:
+                out[n.name] = NodeOutcome(status="ok")
+        return out
+
+    await _walk(planned, run_group=run_group, group_index=gi, node_group=ng, by_name={"S": s, "D": d, "C": c, "V": v}, logger=_L())
+    # analysis(all) -> V(flags D) -> D ONLY -> V again. Siblings S,C not re-run.
+    assert calls == [("S", "D", "C"), ("V",), ("D",), ("V",)]
+
+
+@pytest.mark.anyio
+async def test_jump_back_multiple_flags_reruns_subset_of_group():
+    # Two verifiers in one fan-out flag two different analysts in the SAME earlier
+    # group -> re-run exactly that subset (D and C, not S).
+    s = Node("S", run=lambda c: None, parallel_group="analysis")
+    d = Node("D", run=lambda c: None, parallel_group="analysis")
+    c = Node("C", run=lambda c: None, parallel_group="analysis")
+    vd = Node("VD", run=lambda c: None, depends_on=("D",), parallel_group="verify", max_cycles=1)
+    vc = Node("VC", run=lambda c: None, depends_on=("C",), parallel_group="verify", max_cycles=1)
+    planned, gi, ng = _plan([s, d, c, vd, vc])
+    calls: list[tuple] = []
+    state = {"flagged": False}
+
+    async def run_group(group, only_nodes=None):
+        members = [n for n in group if only_nodes is None or n.name in only_nodes]
+        calls.append(tuple(sorted(n.name for n in members)))
+        out = {}
+        for n in members:
+            if n.name == "VD" and not state["flagged"]:
+                out[n.name] = NodeOutcome(status="ok", goto="D")
+            elif n.name == "VC" and not state["flagged"]:
+                out[n.name] = NodeOutcome(status="ok", goto="C")
+            else:
+                out[n.name] = NodeOutcome(status="ok")
+        # Flag consumed only once the verify group has run (its members present).
+        if any(n.name in ("VD", "VC") for n in members):
+            state["flagged"] = True
+        return out
+
+    by_name = {"S": s, "D": d, "C": c, "VD": vd, "VC": vc}
+    await _walk(planned, run_group=run_group, group_index=gi, node_group=ng, by_name=by_name, logger=_L())
+    # analysis(all) -> verify(both flag) -> {C,D} ONLY (not S) -> verify again.
+    assert calls == [("C", "D", "S"), ("VC", "VD"), ("C", "D"), ("VC", "VD")]
+
+
+@pytest.mark.anyio
+async def test_jump_back_earliest_group_wins_across_groups():
+    # One flag targets an EARLIER group (A), another a LATER group (B); the walk
+    # rewinds to the EARLIEST (A) and re-flows forward — B re-runs on the way.
+    a = Node("A", run=lambda c: None, max_cycles=1)
+    b = Node("B", run=lambda c: None, depends_on=("A",), max_cycles=1)
+    g = Node("G", run=lambda c: None, depends_on=("B",), max_cycles=1)  # gate node
+    planned, gi, ng = _plan([a, b, g])
+    calls: list[str] = []
+    state = {"flagged": False}
+
+    async def run_group(group, only_nodes=None):
+        members = [n for n in group if only_nodes is None or n.name in only_nodes]
+        out = {}
+        for n in members:
+            calls.append(n.name)
+            # G flags A (earliest) — B is re-run by the forward re-flow, not by a jump.
+            out[n.name] = NodeOutcome(status="ok", goto="A") if (n.name == "G" and not state["flagged"]) else NodeOutcome(status="ok")
+        state["flagged"] = state["flagged"] or any(n.name == "G" for n in members)
+        return out
+
+    await _walk(planned, run_group=run_group, group_index=gi, node_group=ng, by_name={"A": a, "B": b, "G": g}, logger=_L())
+    # A,B,G -> jump to A -> A,B,G again (B re-flowed forward, not jumped to).
+    assert calls == ["A", "B", "G", "A", "B", "G"]
+
+
+@pytest.mark.anyio
+async def test_jump_back_restriction_is_one_shot():
+    # After a node-level re-run of D, a LATER forward pass over the analysis group
+    # would run it in full again — the restriction is consumed, not sticky. Here
+    # the group is only reached once post-jump, so we assert the re-entry ran ONLY
+    # D and no stale restriction leaked to any later group.
+    s = Node("S", run=lambda c: None, parallel_group="analysis")
+    d = Node("D", run=lambda c: None, parallel_group="analysis")
+    v = Node("V", run=lambda c: None, depends_on=("S", "D"), max_cycles=1)
+    planned, gi, ng = _plan([s, d, v])
+    calls: list[tuple] = []
+    state = {"flagged": False}
+
+    async def run_group(group, only_nodes=None):
+        members = [n for n in group if only_nodes is None or n.name in only_nodes]
+        calls.append(tuple(sorted(n.name for n in members)))
+        out = {}
+        for n in members:
+            if n.name == "V" and not state["flagged"]:
+                state["flagged"] = True
+                out[n.name] = NodeOutcome(status="ok", goto="D")
+            else:
+                out[n.name] = NodeOutcome(status="ok")
+        return out
+
+    await _walk(planned, run_group=run_group, group_index=gi, node_group=ng, by_name={"S": s, "D": d, "V": v}, logger=_L())
+    # V re-runs in full (no restriction leaked): its own group is ("V",) both times.
+    assert calls == [("D", "S"), ("V",), ("D",), ("V",)]
 
 
 # --- node-local inputs available to gates -----------------------------------

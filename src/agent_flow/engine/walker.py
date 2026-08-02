@@ -117,24 +117,37 @@ async def _walk(
     """
     results: dict[str, NodeOutcome] = {}
     jumps: dict[str, int] = {}
+    # One-shot per-group RESTRICTION: {group_index: {node names to run}}. Set by a
+    # node-level jump-back so the re-entered group re-runs ONLY the flagged
+    # node(s), not their parallel siblings (the gate is the authority on what
+    # re-runs). Consumed (popped) as the forward walk reaches each group, so a
+    # later unrelated pass runs the group in full again.
+    restrict: dict[int, set[str]] = {}
     i = start_index
     while i < len(planned):
         _key, group = planned[i]
         logger.debug(f"walk: group[{i}] {_key!r} -> nodes {[getattr(n, 'name', n) for n in group]}")
-        outcomes = await run_group(group)
+        outcomes = await run_group(group, restrict.pop(i, None))
         for n_name, oc in outcomes.items():
             results[n_name] = oc
         if single_group:
             break  # `only` mode: run one group, ignore jump-backs and forward advance
-        target = _pick_jump_back(outcomes, node_group, group_index, i, jumps, by_name, logger)
-        if target is not None:
-            jumps[target] = jumps.get(target, 0) + 1
-            # Deliver the jumping node's one-time instruction to the target's re-run.
-            if pending_instructions is not None:
-                instr = _instruction_for_target(outcomes, target)
-                if instr:
-                    pending_instructions[target] = instr
-            i = group_index[node_group[target]]  # rewind to the target's group
+        jump = _pick_jump_back(outcomes, node_group, group_index, i, jumps, by_name, logger)
+        if jump is not None:
+            target_i, targets = jump
+            for t in targets:
+                jumps[t] = jumps.get(t, 0) + 1
+                # Deliver each jumping node's one-time instruction to its target's re-run.
+                if pending_instructions is not None:
+                    instr = _instruction_for_target(outcomes, t)
+                    if instr:
+                        pending_instructions[t] = instr
+            # Restrict the target group to EXACTLY the flagged node(s) on re-entry
+            # — a node-level jump-back (re-run only what the gate named, not their
+            # siblings; the gate is the authority). The forward re-flow past it
+            # runs later groups in full (they carry no restriction).
+            restrict[target_i] = set(targets)
+            i = target_i  # rewind to the target group
             continue
         i += 1
     return results
@@ -148,13 +161,22 @@ def _instruction_for_target(outcomes: dict[str, NodeOutcome], target: str) -> st
     return ""
 
 
-def _pick_jump_back(outcomes, node_group, group_index, current_i, jumps, by_name, logger) -> str | None:
-    """From a group's outcomes, pick a valid bounded backward GoTo target (or None).
+def _pick_jump_back(outcomes, node_group, group_index, current_i, jumps, by_name, logger) -> tuple[int, set[str]] | None:
+    """Pick the backward jump-back as (target_group_index, {target node names}).
 
     Only backward jumps (to an earlier group) are honored, bounded per target by
     the target node's max_cycles. Forward/unknown/exhausted targets are ignored
     with a log so a gate mistake fails visibly rather than looping.
+
+    When outcomes name valid backward targets in DIFFERENT groups (e.g. a
+    consistency-check flags nodes across stages), the EARLIEST group wins — the
+    flow rewinds furthest back and re-flows forward through the rest, matching
+    "re-run the earliest affected stage, cascade forward". ALL valid targets that
+    land in that earliest group are returned together, so several verifiers in one
+    fan-out each re-run their own analyst (a subset of the group), not just one.
+    Returns None when no valid backward target exists.
     """
+    by_group: dict[int, set[str]] = {}
     for oc in outcomes.values():
         target = oc.goto
         if target is None:
@@ -169,6 +191,10 @@ def _pick_jump_back(outcomes, node_group, group_index, current_i, jumps, by_name
         if jumps.get(target, 0) >= by_name[target].max_cycles:
             logger.warning(f"GoTo {target!r} exhausted (max_cycles) — proceeding")
             continue
-        logger.info(f"jump-back to {target!r} (re-running from its group)")
-        return target
-    return None
+        by_group.setdefault(target_i, set()).add(target)
+    if not by_group:
+        return None
+    earliest = min(by_group)  # earliest affected group; re-flow handles later ones
+    targets = by_group[earliest]
+    logger.info(f"jump-back to {sorted(targets)} (re-running only those node(s), then re-flowing forward)")
+    return earliest, targets

@@ -60,9 +60,10 @@ def test_resolve_accepts_group_name_and_member_node():
 
 
 def _run_recording(ran):
-    async def run_group(group):
-        ran.append(group[0])
-        return {group[0]: NodeOutcome(status="ok")}
+    async def run_group(group, only_nodes=None):
+        members = [n for n in group if only_nodes is None or n in only_nodes]
+        ran.extend(members)
+        return {n: NodeOutcome(status="ok") for n in members}
 
     return run_group
 
