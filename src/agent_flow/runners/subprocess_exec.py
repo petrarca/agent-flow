@@ -40,14 +40,14 @@ from typing import TYPE_CHECKING
 import anyio
 from loguru import logger
 
-if TYPE_CHECKING:
-    from upath import UPath
-
 from agent_flow.protocol import build_control_preamble, coerce_schema
 from agent_flow.runners.base import AgentRunner
 from agent_flow.runners.executor import AgentCrashError, AgentExecutor, AgentResult, AgentTimeoutError
 from agent_flow.runners.invocation import AgentInvocation, compose_prompt
 from agent_flow.runners.supervision import _no_verdict_reason, _read_sidecar, _supervise, _Supervision
+
+if TYPE_CHECKING:
+    from upath import UPath
 
 
 class SubprocessExecutor(AgentExecutor):
@@ -156,16 +156,24 @@ class SubprocessExecutor(AgentExecutor):
         to the agent name). Cleared defensively so completion keys only on THIS
         run's write. The sidecar is this executor's own mechanism.
 
-        A subprocess run_dir is always a LOCAL path — mock mode diverts a memory://
-        run to the MockExecutor before it reaches here — so the result is narrowed
-        to `Path` (a real subprocess writes real disk); a stray non-local path is
-        coerced to its string form rather than silently misbehaving."""
+        A subprocess writes REAL disk, so the sidecar must be a real local path.
+        A non-local run_dir (e.g. `memory://…`) cannot work here — the spawned
+        process has no view of an in-memory filesystem — so it is rejected with an
+        actionable error rather than silently degraded into a bogus local path
+        (`Path("memory://x")` is the relative directory `memory:/x`). The
+        in-memory filesystem is for the mock/in-process path, which never reaches
+        this executor."""
         if control_file is None:
             base = inv.node or inv.agent
             control_file = inv.run_dir / f"{base}.control.json"
-        cf = control_file if isinstance(control_file, Path) else Path(str(control_file))
-        cf.unlink(missing_ok=True)
-        return cf
+        if not isinstance(control_file, Path):
+            raise ValueError(
+                f"{self.name}: run_dir {str(inv.run_dir)!r} is not a local path, but a subprocess writes real files. "
+                "An in-memory run_dir (memory://…) is only supported for mock runs (mock_agents=True); "
+                "pass a local run_dir for a real run."
+            )
+        control_file.unlink(missing_ok=True)
+        return control_file
 
     def _compose_full_prompt(self, inv: AgentInvocation, control_file: Path) -> str:
         """Compose the final prompt: [verdict preamble] + [compose_prompt].

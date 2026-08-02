@@ -133,27 +133,26 @@ def resolve_run_dir(run_dir: str | None, *, name: str = "run", in_memory: bool =
         human-readable, e.g. /tmp/agent-flow/tech-assessment-20260723T131500Z-a1b2.
     """
     import tempfile
+    import uuid
     from datetime import datetime, timezone
+
+    # Local import: `utils` is a leaf every module pulls in, so importing upath
+    # (and fsspec behind it) is deferred to the one function that needs it.
+    from upath import UPath
 
     slug = "".join(c if (c.isalnum() or c in "-_") else "-" for c in name) or "run"
 
     if run_dir:
-        from upath import UPath
-
         u = UPath(run_dir)
-        # A scheme other than local `file` (notably memory://) stays a UPath; a
-        # bare/local path resolves to an absolute Path like before.
-        if getattr(u, "protocol", "") and u.protocol != "file":
+        # A non-local scheme (notably memory://) stays a UPath; a bare/local path
+        # resolves to an absolute Path like before.
+        if u.protocol and u.protocol != "file":
             return u
         return Path(run_dir).resolve()
 
     if in_memory:
         # A unique netloc per run IS the isolation boundary: the fsspec memory
         # store is process-global, so distinct netlocs are distinct subtrees.
-        import uuid
-
-        from upath import UPath
-
         return UPath(f"memory://{slug}-{uuid.uuid4().hex[:8]}")
 
     base = default_temp_base() / "agent-flow"

@@ -7,7 +7,10 @@ consumer's own gate is written the same way.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+from upath import UPath
 
 from agent_flow.gates.signals import produced, read_field, rerun_targets
 from agent_flow.gates.types import Continue, Directive, GateContext, GoTo, Restart, Stop
@@ -113,23 +116,21 @@ def rerun_on_named(ctx: GateContext) -> Directive:
     return Continue()
 
 
-def _join_run_dir(run_dir: Any, resolved: str) -> Any:
-    """Turn a resolved gate path into a run_dir-aware path object.
+def _join_run_dir(run_dir: Path | UPath, resolved: str) -> Path | UPath:
+    """Turn a resolved gate path into a path object, relative to run_dir if bare.
 
-    A resolved path that is ALREADY absolute or scheme-qualified — a leading `/`
-    or a `scheme://` (e.g. an anchored `{product_repos_root}/…` artifact, or a
-    `memory://…` path in an in-memory run) — is used verbatim. Only a BARE
-    relative name is joined onto `run_dir`.
+    An ABSOLUTE resolved path — `/…`, or a scheme-qualified `memory://…` (an
+    anchored `{product_repos_root}/…` artifact, or an in-memory run) — stands on
+    its own. Only a BARE relative name is joined onto `run_dir`.
 
-    This must NOT be a plain `run_dir / resolved`: pathlib discards `run_dir` when
-    the right side is absolute, but a `UPath` over `memory://` does not — it would
-    concatenate `run_dir` and the memory URL into a nonsense path. Resolving the
-    absolute/schemed case as its own path (via `run_dir`'s own type) makes local
-    `Path` and in-memory `UPath` behave identically.
+    This must NOT be a plain `run_dir / resolved`: pathlib discards the left side
+    when the right is absolute, but a `UPath` over `memory://` does not — it would
+    concatenate run_dir and the memory URL into a nonsense path. `UPath` decides
+    both questions (is it absolute, and which filesystem), and returns an ordinary
+    `Path` subclass for a local path — so local and in-memory behave identically.
     """
-    if "://" in resolved or resolved.startswith("/"):
-        return type(run_dir)(resolved)
-    return run_dir / resolved
+    target = UPath(resolved)
+    return target if target.is_absolute() else run_dir / resolved
 
 
 def _resolve_path(path: str, ctx: GateContext) -> str:

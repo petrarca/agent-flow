@@ -330,6 +330,28 @@ def test_explicit_local_run_dir_under_mock_writes_disk(tmp_path):
     assert (tmp_path / "report.md").exists()  # really on disk
 
 
+def test_memory_run_dir_is_rejected_by_the_subprocess_executor(tmp_path):
+    # The in-memory FS is for the mock/in-process path only: a real subprocess
+    # writes real disk and has no view of it. A memory:// run_dir on a REAL run is
+    # an actionable error, not a silently bogus local path ("memory:/…").
+    from upath import UPath
+
+    from agent_flow.runners import AgentInvocation
+    from agent_flow.runners.subprocess_exec import SubprocessExecutor
+
+    class _Runner:
+        name = "stub"
+
+    ex = SubprocessExecutor(_Runner())
+    inv = AgentInvocation(agent="a", prompt="p", run_dir=UPath("memory://real-run/out"), node="n")
+    with pytest.raises(ValueError, match="not a local path"):
+        ex._resolve_control_file(inv, None)
+
+    # a local run_dir resolves normally
+    local = AgentInvocation(agent="a", prompt="p", run_dir=tmp_path, node="n")
+    assert ex._resolve_control_file(local, None) == tmp_path / "n.control.json"
+
+
 def test_two_memory_mock_runs_are_isolated():
     # Distinct memory:// netloc per run -> distinct subtrees, no cross-run bleed.
     from upath import UPath
