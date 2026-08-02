@@ -49,8 +49,10 @@ jobs:
       - name: Lint + format + type check (read-only)
         run: task verify
 
-      - name: Unit + integration tests (mock; opencode e2e is skipped)
-        run: task test:all
+      # Unit suite only — the integration suite drives a real opencode runtime
+      # (a LOCAL gate), which is not present in CI. See ci.yml.
+      - name: Unit tests
+        run: task test:unit
 
   publish:
     name: Build + Publish to PyPI

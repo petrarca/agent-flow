@@ -55,8 +55,12 @@ jobs:
       - name: Lint + format + type check (read-only)
         run: task verify
 
-      - name: Unit + integration tests (mock; opencode e2e is skipped)
-        run: task test:all
+      # CI runs the UNIT suite only (house standard). The integration suite
+      # supervises a real agent runtime (opencode) and is a LOCAL gate —
+      # `task test:integration` / `task test:opencode`, run on a machine that
+      # has opencode installed. CI has no opencode, so it must not run them.
+      - name: Unit tests
+        run: task test:unit
 
   build:
     name: Build package

@@ -35,6 +35,7 @@ async def test_on_node_event_and_durations(tmp_path):
         nodes,
         name="progress-probe",
         on_node_event=lambda n, p, s, a: events.append((n, p, s, a)),
+        registry=registry,  # so mock_agents=True actually routes to the mock
     )
     result = await flow(run_dir=str(tmp_path), mock_agents=True)
 
