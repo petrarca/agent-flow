@@ -37,6 +37,7 @@ from __future__ import annotations
 import abc
 from dataclasses import dataclass, field
 
+from agent_flow.errors import PermanentAgentError, TransientAgentError
 from agent_flow.protocol import coerce_schema
 from agent_flow.runners.invocation import AgentInvocation
 
@@ -61,15 +62,19 @@ def qualified_agent(runtime: str, agent: str) -> str:
     return f"{runtime}{RUNTIME_AGENT_SEP}{agent}"
 
 
-class AgentTimeoutError(RuntimeError):
+class AgentTimeoutError(TransientAgentError):
     """Raised when an agent goes STALE: no event and no sidecar for
     `idle_timeout_s`. This is a liveness timeout, not a wall-clock one — an
     actively-emitting agent is never killed regardless of elapsed time.
     Liveness supervision is SubprocessExecutor-only (nothing else is a process to
-    supervise), so only it raises this."""
+    supervise), so only it raises this.
+
+    TRANSIENT: a hung agent usually succeeds on a fresh attempt, so the engine
+    retries the node (bounded by its `max_retries`) before criticality decides.
+    """
 
 
-class AgentContentFailedError(RuntimeError):
+class AgentContentFailedError(PermanentAgentError):
     """Raised when an agent (or a mock_agent) reports a content failure via its
     control status.
 
@@ -77,15 +82,20 @@ class AgentContentFailedError(RuntimeError):
     the report, missing required input). Retrying the same prompt will not help,
     so the retry policy must NOT retry this class. Raised by the shared
     `AgentExecutor.check_content_status` — see that method.
+
+    PERMANENT: the engine never retries it; the failure goes straight to the
+    node's criticality.
     """
 
 
-class AgentCrashError(RuntimeError):
+class AgentCrashError(TransientAgentError):
     """Raised when an agent process exits non-zero with no error control signal.
 
     This represents a process-level crash (CLI error, OOM, rate-limit 429, …).
     It is transient and the retry policy SHOULD retry it. Subprocess-only (there
     is no process to crash for an in-process/mock executor).
+
+    TRANSIENT: retried by the engine, bounded by the node's `max_retries`.
     """
 
 

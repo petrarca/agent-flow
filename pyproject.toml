@@ -142,7 +142,7 @@ layers = [
     "agent_flow.core | agent_flow.preflight",
     "agent_flow.runners | agent_flow.backends",
     "agent_flow.flow_types | agent_flow.run_config | agent_flow.utils",
-    "agent_flow.protocol | agent_flow.gates | agent_flow.const | agent_flow.run_context",
+    "agent_flow.protocol | agent_flow.gates | agent_flow.const | agent_flow.run_context | agent_flow.errors",
 ]
 
 # The tier rule, which layer rank cannot express: engine -> core is a DOWNWARD

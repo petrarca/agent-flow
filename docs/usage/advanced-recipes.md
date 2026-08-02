@@ -54,6 +54,8 @@ instructions: |
   Follow the team's coding standards and cite a source for every finding.
 # map a node's portable duration NAME to seconds
 durations: {long: 900}
+# re-runs after a TRANSIENT agent failure (hung / crashed); per node, isolated
+max_retries: 1
 
 # runtime-specific settings, an open bag
 options: {serve_url: "http://localhost:4096"}
@@ -63,6 +65,7 @@ nodes:                          # per-node run config (the shadow of a NodeDef)
     instructions: "Weight the security assessment heavily."
     duration: long
     model: azure-claude/Claude-Opus-5
+    max_retries: 3              # this one is flaky
 ```
 
 **Generic settings** resolve via `RunConfig` (a pydantic-settings model) with
@@ -220,6 +223,47 @@ verdict continues to a weaker downstream result. `stop_if` reads the field from
 the validated `ctx.obj` when a `result_schema` is set and from the raw envelope
 otherwise, so it works either way. It replaces the hand-rolled "block if not
 ready" closure a pipeline used to write and register.
+
+## Survive a hung or crashed agent (`max_retries`)
+
+An agent that goes silent is killed on the liveness deadline, and one whose
+process dies (OOM, a provider 429) fails the same way. Both are **transient** —
+nothing was wrong with the request — so the engine **re-runs the node**, bounded
+by `max_retries` (default 1):
+
+```yaml
+# run.yml
+idle_timeout_s: 600        # kill after 10min with no event/sidecar
+max_retries: 2             # then give the node up to 2 fresh attempts
+nodes:
+  architecture-verify:
+    max_retries: 3         # this one is flaky; allow more (overrides the run-wide value)
+```
+
+```python
+run_flow(flow, run_config={"max_retries": 2,
+                          "nodes": {"architecture-verify": {"max_retries": 3}}})
+```
+
+Three properties worth knowing:
+
+- **Isolated per node.** In a parallel group, only the failing node retries — its
+  siblings already produced outcomes and are never re-run.
+- **A self-diagnosed failure is never retried.** If the agent completed and
+  reported a problem itself (bad input, unparseable source), the same prompt
+  would fail identically, so it goes straight to criticality.
+- **`criticality` still decides the end.** When the retries are spent:
+  `degrade` → the node is recorded degraded and the flow continues; `blocking` →
+  the run stops. Retrying happens *before* that decision, not instead of it.
+
+`max_retries` is separate from `max_cycles`: `max_cycles` bounds **gate**
+re-runs (the report is incomplete, do it again), `max_retries` bounds
+**infrastructure** re-runs (the agent hung). Spending one never consumes the
+other. Set `max_retries: 0` to disable retrying.
+
+Writing your own `run` callable? Raise `TransientAgentError` to opt into
+retrying, `PermanentAgentError` to opt out — anything else is treated as
+permanent.
 
 ## Run independent steps in parallel
 

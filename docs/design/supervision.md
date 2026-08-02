@@ -57,13 +57,38 @@ artifacts to guess success — that is a flow decision for a [gate](gates.md), o
 layer up. Telemetry (tokens/cost) is harvested from the event stream into the
 returned `AgentResult`.
 
-Failure classification:
+Failure classification. The type IS the retry policy — the engine keys on it (see
+[the retry taxonomy](#the-retry-taxonomy)):
 
-- `AgentTimeoutError` — went stale (idle) with no valid sidecar. Transient;
-  the outer backend retry may re-run it.
-- `AgentContentFailedError` — sidecar reports a non-ok status. A content
-  failure; not retried by the runtime's classification.
-- `AgentCrashError` — process-level crash. Transient; retryable.
+- `AgentTimeoutError` — went stale (idle) with no valid sidecar. **Transient**;
+  the engine re-runs the node, bounded by `max_retries`.
+- `AgentContentFailedError` — sidecar reports a non-ok status. A content failure
+  the agent diagnosed itself: **permanent**, never retried.
+- `AgentCrashError` — process-level crash (OOM, a 429, a CLI error).
+  **Transient**; retried.
+
+### The retry taxonomy
+
+The three live in `agent_flow.errors` as a two-way split, so the engine can
+classify a failure without importing the runners (the layering contract forbids
+`engine -> runners`):
+
+```
+AgentError
+├── TransientAgentError   engine RETRIES (AgentTimeoutError, AgentCrashError)
+└── PermanentAgentError   engine does NOT retry (AgentContentFailedError)
+```
+
+A hung or crashed agent is re-run **per node**, bounded by `max_retries` (run
+config; `nodes.<n>.max_retries` overrides the run-wide value). The retry lives in
+`interpret`, which runs inside that node's own task, so it is **isolated**: a
+retried node's parallel siblings keep their outcomes and are never re-run. When
+the budget is spent, the node's `criticality` makes the final call — `degrade`
+records it degraded and the flow continues, `blocking` halts the run.
+
+Anything else a consumer's `run` raises is treated as permanent: the engine
+cannot know whether repeating its side effects is safe. A custom `run` opts in by
+raising `TransientAgentError` (or out with `PermanentAgentError`).
 
 ## Two complementary layers of timeout/retry
 

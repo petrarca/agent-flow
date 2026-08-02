@@ -12,6 +12,8 @@ Public API (the authoritative list is `__all__` below):
         # Tier 1: one supervised agent (the primitive; arun_agent = async native)
         run_agent, arun_agent, AgentResult,
         AgentTimeoutError, AgentContentFailedError, AgentCrashError,
+        # the retry taxonomy: raise these from your own `run` to opt in/out
+        AgentError, TransientAgentError, PermanentAgentError,
         # runners (subprocess wire adapters) + the execution seam
         AgentRunner, AgentInvocation, Event,
         AgentExecutor, InProcessExecutor, AgentImpl, get_executor, compose_prompt,
@@ -74,6 +76,7 @@ if TYPE_CHECKING:  # the static view: type checkers and IDEs see the real names
     from agent_flow.cli import NodeProgressPrinter, event_printer, get_console, print_preflight_results, print_results_table, run_cli
     from agent_flow.core import AgentResult, arun_agent, load_env, read_context_blocks, run_agent
     from agent_flow.engine import build_flow, interpret, plan_groups
+    from agent_flow.errors import AgentError, PermanentAgentError, TransientAgentError
     from agent_flow.flow_types import Node, NodeBlocked, NodeOutcome, RunContext
     from agent_flow.flowdef import FlowDef, NodeDef, arun_flow, compile_flow, run_flow
     from agent_flow.gates import (
@@ -133,6 +136,7 @@ if TYPE_CHECKING:  # the static view: type checkers and IDEs see the real names
 _EXPORTS: dict[str, str] = {
     "AgentContentFailedError": "agent_flow.runners.executor",
     "AgentCrashError": "agent_flow.runners.executor",
+    "AgentError": "agent_flow.errors",
     "AgentExecutor": "agent_flow.runners",
     "AgentImpl": "agent_flow.runners",
     "AgentInvocation": "agent_flow.runners",
@@ -166,6 +170,7 @@ _EXPORTS: dict[str, str] = {
     "NodeProgressPrinter": "agent_flow.cli",
     "NodeRunConfig": "agent_flow.run_config",
     "OpenCodeRunner": "agent_flow.runners",
+    "PermanentAgentError": "agent_flow.errors",
     "PromptParts": "agent_flow.runners",
     "PydanticSchema": "agent_flow.protocol",
     "Restart": "agent_flow.gates",
@@ -174,6 +179,7 @@ _EXPORTS: dict[str, str] = {
     "RunContext": "agent_flow.flow_types",
     "RunContextService": "agent_flow.run_context",
     "Stop": "agent_flow.gates",
+    "TransientAgentError": "agent_flow.errors",
     "ValidationOutcome": "agent_flow.protocol",
     "agent_node": "agent_flow.node_builder",
     "arun_agent": "agent_flow.core",
@@ -263,6 +269,10 @@ __all__ = [
     "AgentTimeoutError",
     "AgentContentFailedError",
     "AgentCrashError",
+    # retry taxonomy (a custom `run` raises these to opt into / out of retrying)
+    "AgentError",
+    "TransientAgentError",
+    "PermanentAgentError",
     # runners + execution seam
     "AgentRunner",
     "AgentRunnerInfo",

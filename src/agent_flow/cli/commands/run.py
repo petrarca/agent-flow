@@ -328,6 +328,7 @@ def _build_and_run(
         options=cfg.options,
         backend=cfg.backend,
         registry=registry,
+        max_retries=cfg.max_retries,
     )
     # start_from / stop_after / only are per-INVOCATION walk-range knobs (not
     # persisted). Framework knobs travel alongside runtime/run_dir, not in params.

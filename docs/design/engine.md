@@ -97,8 +97,24 @@ otherwise unchanged — only the consumer callables are awaited-if-awaitable:
   act on (see jump-back below). `interpret` does not handle cross-node jumps
   itself — that requires the group sequence, which only the walker owns.
 
-Errors raised by `run` are mapped to the node's criticality by an `on_error`
-callback: `blocking` → `NodeBlocked`; `degrade` → status `degraded`.
+Errors raised by `run` are classified before criticality decides:
+
+- A **transient** failure (`TransientAgentError` — the agent hung and was
+  stale-killed, or its process crashed) re-runs the node in place, bounded by
+  `max_retries` (run config, `nodes.<n>.max_retries` overriding the run-wide
+  value). Because `interpret` runs inside the node's own task, the retry is
+  **isolated per node**: a parallel sibling keeps its outcome and never re-runs.
+- Everything else is **permanent** (a failure the agent diagnosed itself, or an
+  unclassified error from consumer code) and is never retried.
+
+Only when the retry budget is spent does the failure reach the node's criticality
+via the `on_error` callback: `blocking` → `NodeBlocked`; `degrade` → status
+`degraded`. See [supervision](supervision.md#the-retry-taxonomy).
+
+Note the two budgets are independent and answer different questions:
+`max_cycles` bounds **gate-driven** re-runs (a quality loop), `max_retries`
+bounds **infrastructure** re-runs (a hung/crashed agent). A node that spent its
+gate budget can still survive a crash, and a retry never consumes a gate cycle.
 
 ## `build_flow` — compile to a runnable flow callable
 

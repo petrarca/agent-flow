@@ -12,7 +12,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agent_flow.const import DEFAULT_MAX_RETRIES
 from agent_flow.engine.dispatch import maybe_await
+from agent_flow.errors import TransientAgentError
 from agent_flow.flow_types import Node, NodeBlocked, NodeOutcome, RunContext
 from agent_flow.gates import Continue, GateContext, GoTo, Restart, Stop
 
@@ -49,6 +51,7 @@ async def interpret(
     options: dict[str, Any] | None = None,
     registry: Any = None,
     one_time_instruction: str = "",
+    max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> NodeOutcome:
     """Run one node to completion, interpreting its gate's directives.
 
@@ -78,6 +81,15 @@ async def interpret(
     gate = _resolve_gate(node, registry)
 
     cycles = 0
+    # Two INDEPENDENT budgets, because they answer different questions:
+    #   cycles  — how many times a GATE may bounce this node (a quality loop:
+    #             "the report is incomplete, do it again").
+    #   retries — how many times the INFRASTRUCTURE may re-run it after a
+    #             transient agent failure (hung/crashed). Not the gate's concern,
+    #             and a node that spent its gate budget must still survive a crash.
+    # Per-node run config wins over the run-wide value (the standard precedence).
+    retries = 0
+    max_retries = _resolve_max_retries(node.name, node_overrides, max_retries)
     # One-time-instruction carrier: seeded from the walker (cross-node GoTo
     # delivery), then re-set from each self Restart/GoTo directive. Consumed into
     # an attempt's prompt and cleared immediately after, so it applies to exactly
@@ -116,7 +128,24 @@ async def interpret(
                     )
                 )
             )
+        except TransientAgentError as exc:
+            # The agent hung (stale-killed) or its process crashed — nothing was
+            # wrong with the REQUEST, so a fresh attempt may well succeed. Retry
+            # in place, bounded by this node's max_retries. Isolated by
+            # construction: interpret() runs inside THIS node's own task, so a
+            # parallel sibling keeps its outcome and is never re-run.
+            if retries < max_retries:
+                retries += 1
+                log(f"node {node.name}: transient failure ({type(exc).__name__}) — retry {retries}/{max_retries}: {str(exc).splitlines()[0]}")
+                continue
+            # Exhausted: hand it to criticality (degrade -> continue, blocking -> stop).
+            log(f"node {node.name}: transient failure after {max_retries} retr{'y' if max_retries == 1 else 'ies'} — giving up")
+            await _fire_hook(registry, "on_error", node, log, node, exc)
+            return NodeOutcome(status=on_error(node, exc))
         except Exception as exc:  # noqa: BLE001 - deliberately broad: the run callable is caller code
+            # Everything else is PERMANENT: a failure the agent diagnosed itself,
+            # or an unknown error from consumer code whose side effects we must
+            # not blindly repeat. Straight to criticality, no retry.
             await _fire_hook(registry, "on_error", node, log, node, exc)
             return NodeOutcome(status=on_error(node, exc))
 
@@ -163,6 +192,17 @@ async def interpret(
         outcome = NodeOutcome(status="ok", runtime=runtime)
         await _fire_hook(registry, "after_node", node, log, node, outcome)
         return outcome
+
+
+def _resolve_max_retries(node_name: str, node_overrides: dict[str, dict[str, Any]] | None, run_wide: int) -> int:
+    """The node's transient-failure retry budget: per-node run config, else run-wide.
+
+    Mirrors how every other per-node run setting resolves (`nodes.<n>` beats the
+    run-wide value). A `None` entry means "not set for this node" — inherit.
+    Negative is clamped to 0 (no retries) so a typo cannot loop.
+    """
+    override = (node_overrides or {}).get(node_name, {}).get("max_retries")
+    return max(0, int(override if override is not None else run_wide))
 
 
 _MISSING = object()

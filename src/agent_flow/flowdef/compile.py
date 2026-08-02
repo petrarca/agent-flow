@@ -85,6 +85,7 @@ def _build_pipeline_and_call(
         node_overrides=cfg.node_overrides(),
         options=cfg.options,
         registry=registry,
+        max_retries=cfg.max_retries,
     )
     # Run-wide model / idle_timeout_s ride `params` (the node builder reads them
     # from ctx.params, per node) — seeded by the SAME helper the CLI uses, so the

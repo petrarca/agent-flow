@@ -58,6 +58,7 @@ LAYERED_UNITS = {
     "gates",
     "const",
     "run_context",
+    "errors",
 }
 # Deliberately outside the layer graph: the facade sits above everything, and
 # these two are leaves that no contract needs to constrain.

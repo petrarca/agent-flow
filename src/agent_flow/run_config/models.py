@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from pydantic_settings.sources import InitSettingsSource
 
-from agent_flow.const import DEFAULT_IDLE_TIMEOUT_S
+from agent_flow.const import DEFAULT_IDLE_TIMEOUT_S, DEFAULT_MAX_RETRIES
 from agent_flow.run_config.sources import _assemble_config, _validate_config_keys
 
 # The json_schema_extra KEY that marks a params_model field as runtime-populated
@@ -43,6 +43,10 @@ class NodeRunConfig(BaseModel):
     instructions: str = Field(default="", description="Per-node brief, appended LAST to this node's prompt (from config or CLI --instruct).")
     duration: str | None = Field(default=None, description="Duration NAME for this node (overrides the flow-declared duration).")
     idle_timeout_s: int | None = Field(default=None, description="Liveness timeout (s) for this node, bypassing the duration vocabulary.")
+    max_retries: int | None = Field(
+        default=None,
+        description="Retries for this node after a TRANSIENT agent failure (stale/hung or crashed); overrides the run-wide max_retries.",
+    )
     model: str | None = Field(default=None, description="Model for this node (overrides the run-wide and flow-declared model).")
     agent_dir: str | None = Field(default=None, description="agent_dir for this node (overrides the run-wide and flow-declared agent_dir).")
     options: dict[str, Any] = Field(
@@ -143,6 +147,15 @@ class RunConfig(BaseSettings):
     idle_timeout_s: int = Field(
         default=DEFAULT_IDLE_TIMEOUT_S,
         description="Liveness timeout (s): kill an agent only after this long with no event/sidecar. Used by nodes that declare no `duration`.",
+    )
+    max_retries: int = Field(
+        default=DEFAULT_MAX_RETRIES,
+        description=(
+            "Retries after a TRANSIENT agent failure — the agent hung (stale-killed) or its process crashed. "
+            "Applied PER NODE and isolated: a retried node's parallel siblings keep their outcomes. "
+            "A failure the agent DIAGNOSED itself is never retried. When retries are exhausted the node's "
+            "`criticality` decides: degrade -> continue, blocking -> stop the run. 0 disables retrying."
+        ),
     )
     durations: dict[str, int] = Field(
         default_factory=dict,

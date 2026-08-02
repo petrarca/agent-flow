@@ -34,3 +34,13 @@ DEFAULT_IDLE_TIMEOUT_S = 120
 # shipped name and add its own. An unknown name is a hard error, never a silent
 # fallback. "normal" IS the run-wide default, reached by name instead of number.
 DEFAULT_DURATIONS: dict[str, int] = {"short": 60, "normal": DEFAULT_IDLE_TIMEOUT_S, "long": 600}
+
+# Retries after a TRANSIENT agent failure — the agent hung (stale-killed on the
+# liveness deadline above) or its process crashed. Applied PER NODE, so a retried
+# node's parallel siblings are unaffected. One retry by default: a hung agent
+# usually succeeds on a fresh attempt, and a second failure is evidence of a real
+# problem rather than a blip — at which point the node's `criticality` decides
+# whether the run continues (degrade) or stops (blocking). Tune per run via
+# AGENT_FLOW_MAX_RETRIES / the run config, or per node via `nodes.<n>.max_retries`.
+# A failure the agent DIAGNOSED itself is never retried, whatever this says.
+DEFAULT_MAX_RETRIES = 1

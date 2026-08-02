@@ -18,6 +18,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agent_flow.const import DEFAULT_MAX_RETRIES
 from agent_flow.engine.dispatch import maybe_await
 from agent_flow.engine.interpreter import _make_node_emitter, interpret
 from agent_flow.engine.planner import plan_groups
@@ -97,6 +98,7 @@ def build_flow(
     options: dict[str, Any] | None = None,
     backend: str = "inprocess",
     registry: Any = None,
+    max_retries: int = DEFAULT_MAX_RETRIES,
 ):
     """Compile a Node graph into a runnable flow callable.
 
@@ -148,6 +150,13 @@ def build_flow(
             (opencode `--dir`); a node may override via agent_node(agent_dir=...).
             Reaches each node via RunContext.agent_dir. Templated at run time.
             Independent of run_dir (agents-here vs artifacts-there).
+        max_retries: run-wide budget for re-running a node after a TRANSIENT
+            agent failure (the agent hung and was stale-killed, or its process
+            crashed). Applied PER NODE and isolated — a retried node's parallel
+            siblings keep their outcomes and are never re-run. A failure the agent
+            DIAGNOSED itself is never retried. When the budget is spent the node's
+            `criticality` decides (degrade -> continue, blocking -> stop).
+            Overridden per node by the run config's `nodes.<n>.max_retries`.
     """
     from agent_flow.backends import get_backend
 
@@ -226,6 +235,7 @@ def build_flow(
                 options=options_d,
                 registry=registry,
                 one_time_instruction=attempt_instruction,
+                max_retries=max_retries,
             )
             # Stamp the node's wall-clock duration (timed here, where it runs).
             outcome = replace(outcome, duration_s=time.monotonic() - started)
