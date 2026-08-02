@@ -78,3 +78,43 @@ def test_default_temp_base_is_a_dir_parent():
     base = default_temp_base()
     assert isinstance(base, Path)
     assert base.is_absolute()
+
+
+# --- run_dir on an in-memory FS (UPath) ---------------------------------------
+
+
+def test_explicit_memory_run_dir_stays_a_upath():
+    # A memory:// run_dir is kept as a UPath (not flattened to a local Path).
+    from upath import UPath
+
+    d = resolve_run_dir("memory://some-run/output")
+    assert isinstance(d, UPath)
+    assert d.protocol == "memory"
+    assert str(d) == "memory://some-run/output"
+
+
+def test_in_memory_default_mints_unique_memory_root():
+    # No run_dir + in_memory=True -> a unique memory:// netloc per call (the
+    # isolation boundary), carrying the name slug.
+    from upath import UPath
+
+    a = resolve_run_dir("", name="my-flow", in_memory=True)
+    b = resolve_run_dir("", name="my-flow", in_memory=True)
+    assert isinstance(a, UPath) and a.protocol == "memory"
+    assert "my-flow-" in str(a)
+    assert str(a) != str(b)  # distinct netloc per run -> isolated subtrees
+
+
+def test_in_memory_false_still_local(tmp_path):
+    # The default (in_memory=False) is unchanged: a local temp dir.
+    d = resolve_run_dir("", name="x", in_memory=False)
+    assert isinstance(d, Path)
+    assert d.is_dir()
+
+
+def test_explicit_local_run_dir_wins_over_in_memory(tmp_path):
+    # An explicit local run_dir is honoured even when in_memory=True is requested.
+    given = tmp_path / "out"
+    d = resolve_run_dir(str(given), in_memory=True)
+    assert isinstance(d, Path)
+    assert d == given.resolve()

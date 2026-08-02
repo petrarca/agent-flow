@@ -12,9 +12,12 @@ NUMBERS live in `const`; the LOOKUP behaviour lives here.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_flow.const import DEFAULT_DURATIONS
+
+if TYPE_CHECKING:
+    from upath import UPath
 
 
 def duration_table(durations: dict[str, int] | None) -> dict[str, int]:
@@ -111,24 +114,50 @@ def default_temp_base() -> Path:
     return Path("/tmp")  # POSIX: shallow, always present (macOS: symlink to /private/tmp)
 
 
-def resolve_run_dir(run_dir: str | None, *, name: str = "run") -> Path:
-    """Resolve a run_dir to an absolute Path, defaulting to a temp subdirectory.
+def resolve_run_dir(run_dir: str | None, *, name: str = "run", in_memory: bool = False) -> Path | UPath:
+    """Resolve a run_dir to an absolute path, defaulting to a temp subdirectory.
 
-    When run_dir is empty/None the caller specified nothing, so a unique
-    directory is created under `<temp-base>/agent-flow/` (grouped and findable —
-    never littering the cwd or a fixed 'work/'), where <temp-base> is
-    `default_temp_base()`. The name + a UTC timestamp make it human-readable,
-    e.g. /tmp/agent-flow/tech-assessment-20260723T131500Z-a1b2. Otherwise the
-    given path is resolved.
+    Returns a `Path` for a local run_dir and a `UPath` for anything carrying a
+    non-local scheme (`memory://…`, and any other fsspec protocol) — the two are
+    interchangeable for the operations the library performs (`/`, `mkdir`,
+    `write_text`/`read_text`, `exists`, `stat`), so callers need not branch.
+
+    Resolution:
+      - An EXPLICIT run_dir always wins. A `memory://…` (or other scheme) is kept
+        as a UPath; a bare/local path is resolved to an absolute `Path`.
+      - No run_dir + `in_memory=True` -> a unique `memory://run-<slug>-<uuid>/`
+        root (hermetic, no disk). The mock path defaults here so a mock run is a
+        unit test with no `tmp_path`.
+      - No run_dir + `in_memory=False` -> a unique dir under `<temp>/agent-flow/`
+        (grouped and findable, never the cwd), `name` + a UTC timestamp making it
+        human-readable, e.g. /tmp/agent-flow/tech-assessment-20260723T131500Z-a1b2.
     """
     import tempfile
     from datetime import datetime, timezone
 
+    slug = "".join(c if (c.isalnum() or c in "-_") else "-" for c in name) or "run"
+
     if run_dir:
+        from upath import UPath
+
+        u = UPath(run_dir)
+        # A scheme other than local `file` (notably memory://) stays a UPath; a
+        # bare/local path resolves to an absolute Path like before.
+        if getattr(u, "protocol", "") and u.protocol != "file":
+            return u
         return Path(run_dir).resolve()
+
+    if in_memory:
+        # A unique netloc per run IS the isolation boundary: the fsspec memory
+        # store is process-global, so distinct netlocs are distinct subtrees.
+        import uuid
+
+        from upath import UPath
+
+        return UPath(f"memory://{slug}-{uuid.uuid4().hex[:8]}")
+
     base = default_temp_base() / "agent-flow"
     base.mkdir(parents=True, exist_ok=True)
-    slug = "".join(c if (c.isalnum() or c in "-_") else "-" for c in name) or "run"
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return Path(tempfile.mkdtemp(prefix=f"{slug}-{stamp}-", dir=base))
 

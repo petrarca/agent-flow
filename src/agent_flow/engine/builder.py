@@ -247,8 +247,11 @@ def build_flow(
             resolved_run_dir = resolve_template(run_dir, params, strict=True)
         except KeyError as exc:
             raise ValueError(f"run_dir template references unknown param {exc}; available params: {sorted(params)}") from exc
-        # Empty run_dir -> a fresh dir under <temp>/agent-flow/ (never cwd).
-        wd = resolve_run_dir(resolved_run_dir, name=name)
+        # Empty run_dir -> a fresh dir under <temp>/agent-flow/ (never cwd), OR a
+        # hermetic memory:// root when this is a mock run (mock_agents=True) with
+        # no explicit run_dir — so a mock run needs no tmp_path (a unit test). An
+        # explicit run_dir (local or memory://) always wins.
+        wd = resolve_run_dir(resolved_run_dir, name=name, in_memory=bool(params.get("mock_agents")))
         wd.mkdir(parents=True, exist_ok=True)
 
         async def _walk_session() -> dict[str, NodeOutcome]:

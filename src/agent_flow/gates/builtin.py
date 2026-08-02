@@ -39,7 +39,7 @@ def require_file(ctx: GateContext, *, path: str, on_missing: Directive | None = 
     Referenced from a node as gate="require_file", gate_args={"path": "..."}.
     """
     resolved = _resolve_path(path, ctx)
-    if produced(ctx.run_dir / resolved):
+    if produced(_join_run_dir(ctx.run_dir, resolved)):
         return Continue()
     return on_missing if on_missing is not None else Restart(instruction=f"The required file is missing: {resolved}. Produce it.")
 
@@ -111,6 +111,25 @@ def rerun_on_named(ctx: GateContext) -> Directive:
         target = named[0]
         return GoTo(node=target, instruction=f"{node_name} signalled a re-run of {target}.")
     return Continue()
+
+
+def _join_run_dir(run_dir: Any, resolved: str) -> Any:
+    """Turn a resolved gate path into a run_dir-aware path object.
+
+    A resolved path that is ALREADY absolute or scheme-qualified — a leading `/`
+    or a `scheme://` (e.g. an anchored `{product_repos_root}/…` artifact, or a
+    `memory://…` path in an in-memory run) — is used verbatim. Only a BARE
+    relative name is joined onto `run_dir`.
+
+    This must NOT be a plain `run_dir / resolved`: pathlib discards `run_dir` when
+    the right side is absolute, but a `UPath` over `memory://` does not — it would
+    concatenate `run_dir` and the memory URL into a nonsense path. Resolving the
+    absolute/schemed case as its own path (via `run_dir`'s own type) makes local
+    `Path` and in-memory `UPath` behave identically.
+    """
+    if "://" in resolved or resolved.startswith("/"):
+        return type(run_dir)(resolved)
+    return run_dir / resolved
 
 
 def _resolve_path(path: str, ctx: GateContext) -> str:

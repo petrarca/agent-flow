@@ -1,8 +1,8 @@
 ---
 type: Guide
 title: Testing your flow
-description: Validate a pipeline's WIRING token-free with mock agents — as an integration test, with the mocks kept out of production code.
-tags: [agent-flow, testing, mock-agents, integration-test, how-to]
+description: Validate a pipeline's WIRING token-free with mock agents — a fast in-memory unit test by default (on-disk when you want inspectable artifacts), with the mocks kept out of production code.
+tags: [agent-flow, testing, mock-agents, unit-test, in-memory, how-to]
 timestamp: 2026-08-02T14:00:00Z
 ---
 
@@ -43,10 +43,13 @@ tests/fixtures/flow_mocks.py       # the mock agent behaviours (the doubles)
 tests/integration/test_flow.py     # drives run_flow(mock_agents=True), asserts the wiring
 ```
 
-Running the whole flow through the real engine while it writes real files to disk
-is an **integration test**, not a unit test — the only thing "mock" about it is
-the runtime leaf. (Test one gate's `(ctx) -> Directive` logic in isolation and
-*that* is a unit test.)
+By default a mock run writes to an **in-memory filesystem** (see [In-memory
+runs](#in-memory-runs-integration-test-to-unit-test) below), so the whole flow
+through the real engine is a fast, hermetic **unit test** — no disk, no
+`tmp_path`. Point the flow's paths at a real directory instead and the same test
+becomes an integration test that leaves inspectable artifacts. Either way the only
+thing "mock" about it is the runtime leaf. (Testing one gate's `(ctx) -> Directive`
+logic in isolation is a smaller unit test still.)
 
 ## Write the mock behaviours (the fixture)
 
@@ -110,15 +113,15 @@ def register(registry: FlowRegistry) -> FlowRegistry:
 > (force a re-run, force a not-ready verdict) rides an env var, which keeps the
 > knob out of the real work order the agent would otherwise receive.
 
-## Write the integration test
+## Write the test
 
 Import the **production** `FlowDef` and its `REGISTRY` (which already carries the
 flow's gates/exports/schemas), add the mocks from your fixture, and drive
-`run_flow(..., mock_agents=True)` into a temp product tree. Then assert the
-outcomes — do not eyeball a table.
+`run_flow(..., mock_agents=True)`. Then assert the outcomes — do not eyeball a
+table.
 
 ```python
-# tests/integration/test_flow.py
+# tests/unit/test_flow.py  (in-memory -> a unit test; see below)
 import pytest
 from agent_flow import run_flow
 from myproject.flow import FLOW, REGISTRY
@@ -135,27 +138,26 @@ def mocks():
     REGISTRY.clear_mock_agents()
 
 
-def _run(tmp_path, **kw):
-    products = tmp_path / "products"
-    (products / "prod" / "output").mkdir(parents=True, exist_ok=True)
+def _run(**kw):
+    # No run_dir + mock_agents=True -> a hermetic memory:// run (no disk). Point
+    # the pipeline's OWN path anchors at the same memory root so the artifacts a
+    # mock writes and the require_file gate checks resolve in memory too.
     return run_flow(
         FLOW,
         registry=REGISTRY,
-        run_dir=str(tmp_path / "rundir"),
         product_key="prod",
-        product_repos_root=str(products),
+        product_repos_root="memory://run/products",
         mock_agents=True,
         **kw,
     )
 
 
-def test_full_flow_all_nodes_ok(tmp_path):
-    out = _run(tmp_path)                       # {node_name: NodeOutcome}
+def test_full_flow_all_nodes_ok():
+    out = _run()                               # {node_name: NodeOutcome}
     assert all(o.status in ("ok", "verified") for o in out.values())
-    assert (tmp_path / "products" / "prod" / "output" / "report.md").exists()
 
 
-def test_require_file_retries_when_report_missing(tmp_path):
+def test_require_file_retries_when_report_missing():
     # analyst reports ok but writes NO file on the first attempt -> the gate retries.
     calls = {"n": 0}
 
@@ -166,12 +168,12 @@ def test_require_file_retries_when_report_missing(tmp_path):
         return flow_mocks.analyst(inv, ctx)
 
     REGISTRY.mock_agent("my-analyst")(flaky)
-    out = _run(tmp_path)
+    out = _run()
     assert out["analyst"].status == "ok"
     assert calls["n"] >= 2                      # first attempt + the retry that wrote it
 
 
-def test_verifier_rerun_jumps_back_bounded(tmp_path, monkeypatch):
+def test_verifier_rerun_jumps_back_bounded(monkeypatch):
     # verifier signals a re-run -> jump back to `analyst`, bounded by max_cycles.
     monkeypatch.setenv("MOCK_RERUN_ONCE", "analyst")
     runs = {"n": 0}
@@ -181,14 +183,15 @@ def test_verifier_rerun_jumps_back_bounded(tmp_path, monkeypatch):
         return flow_mocks.analyst(inv, ctx)
 
     REGISTRY.mock_agent("my-analyst")(counted)
-    out = _run(tmp_path)
+    out = _run()
     assert out["analyst-verify"].status in ("ok", "verified")
     assert runs["n"] == 2                       # initial + one re-run, then it settles
 ```
 
 `run_flow` is the blocking entry (it wraps `anyio.run`), so the test calls it
 directly — no async test machinery. It returns `{node_name: NodeOutcome}`; assert
-on `.status` and on the artifacts the run wrote to `tmp_path`.
+on `.status`. To assert on a written artifact in a memory run, read it back with a
+`UPath`: `from upath import UPath; UPath("memory://run/products/prod/report.md").read_text()`.
 
 Two import assumptions in that file: your project package is importable (a `src/`
 layout installed editable, e.g. `uv pip install -e .`), and `tests.fixtures`
@@ -205,10 +208,55 @@ sys.path.insert(0, str(_ROOT / "src"))
 sys.path.insert(0, str(_ROOT / "tests"))   # then: from fixtures import flow_mocks
 ```
 
-Mark them so a fast unit run can skip the slower flow tests
-(`@pytest.mark.integration`, or keep them under `tests/integration/` and select by
-path). Run with `pytest tests/integration` — the whole suite is token-free and
-takes well under a second per flow.
+A default (in-memory) mock flow test is a **unit test** — token-free, disk-free,
+milliseconds — so it can live under `tests/unit/`. Keep the on-disk variant (next
+section) under `tests/integration/` if you use one, or mark it
+`@pytest.mark.integration`.
+
+## In-memory runs: integration test to unit test
+
+By default a mock run (`mock_agents=True`) with **no explicit `run_dir`** uses an
+**in-memory filesystem**: the `run_dir` is a unique `memory://run-<id>/` root, and
+the mock's writes, its control sidecar, and the `require_file` gate's reads all
+resolve there — nothing touches disk. That is what turns a mock flow test from an
+integration test into a **unit test**. It works because a `run_dir` is a
+`pathlib`-compatible path either way (a local `Path` or a `UPath` over the
+in-memory FS), so no gate, mock, or executor code changes.
+
+One thing you control: a pipeline usually writes artifacts to paths **anchored
+outside `run_dir`** — e.g. `{product_repos_root}/{product_key}/report.md`. The
+library never rewrites your params, so for a fully in-memory run you point those
+anchors at the same memory FS yourself:
+
+```python
+run_flow(FLOW, registry=REGISTRY, mock_agents=True,
+         product_key="prod",
+         product_repos_root="memory://run/products")   # anchor in memory too
+```
+
+Now the mock's `ctx.write_file("{product_repos_root}/{product_key}/report.md", …)`
+and the node's `gate_args={"path": "{product_repos_root}/…/report.md"}` both land
+in the in-memory tree. Isolation is per **netloc**: give each run its own
+`memory://<name>/…` and their trees never collide (the underlying memory store is
+process-global, so the netloc *is* the boundary — don't share one across tests
+that must stay independent).
+
+**The on-disk escape hatch.** Pass an explicit local `run_dir=` (and local
+anchors) and the mock run writes real files you can inspect afterwards — the
+former default. Use it when you *want* the artifacts on disk:
+
+```python
+def _run(tmp_path, **kw):
+    products = tmp_path / "products"
+    (products / "prod").mkdir(parents=True, exist_ok=True)
+    return run_flow(FLOW, registry=REGISTRY, mock_agents=True,
+                    run_dir=str(tmp_path / "rundir"),
+                    product_key="prod", product_repos_root=str(products), **kw)
+```
+
+This is a real behavior note: a default mock run no longer leaves files in a temp
+dir — they live in memory and vanish when the process ends. Pass an explicit
+`run_dir=` to keep them.
 
 ## What to assert
 
