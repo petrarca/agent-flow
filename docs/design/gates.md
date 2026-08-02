@@ -62,7 +62,7 @@ time).
 
 ## Ready-made gates (optional conveniences)
 
-The three checks almost every pipeline writes, shipped and pre-seeded into every
+The checks almost every pipeline writes, shipped and pre-seeded into every
 `FlowRegistry` so you don't hand-roll a closure. They are `(ctx, **config)` gates
 referenced BY NAME + `gate_args` (or `gate_ref`/`gate_args` on `agent_node`), not
 factories you call:
@@ -73,6 +73,11 @@ factories you call:
 NodeDef(name="tech-stack", agent="tech-stack-analyst",
         gate="require_file", gate_args={"path": "{run_dir}/tech-stack.md"})
 
+# "did a precondition fail?" -> Stop the whole run. Reads the result field and
+# aborts when it hits the sentinel (a readiness node stopping on ready == "no").
+NodeDef(name="readiness", agent="readiness-check", result_schema="ReadinessResult",
+        gate="stop_if", gate_args={"field": "ready", "equals": "no", "label": "tech-assessment"})
+
 # "did this (verifier) node signal a re-run of an earlier node?" -> GoTo(target).
 NodeDef(name="verify", agent="tech-stack-verifier", depends_on=["tech-stack"],
         gate="rerun_on_signal", gate_args={"target": "tech-stack"})
@@ -82,7 +87,18 @@ NodeDef(name="coherence", agent="coherence-check", gate="rerun_on_named")
 ```
 
 Their signatures are `require_file(ctx, *, path, on_missing=None)`,
+`stop_if(ctx, *, field, equals, reason_field="reason", label="")`,
 `rerun_on_signal(ctx, *, target)`, and `rerun_on_named(ctx)`.
+
+`stop_if` is the deterministic "precondition failed, abort" gate: it stops the run
+when a result field equals a sentinel value (`ready == "no"`), otherwise it
+continues — so `partial`/`yes` proceed. It reads the field via `read_field`
+(below), so it works whether or not the node typed its result: with a
+`result_schema` it reads `ctx.obj.<field>`; without one it reads the raw
+envelope's `<field>` or its `result` payload. `reason_field` (default `"reason"`)
+supplies the Stop detail, and `label` prefixes it so the operator sees which stage
+stopped. It replaces the per-pipeline `readiness_ok` closure that consumers used
+to hand-roll and register.
 
 `require_file`: `path` is resolved via `{param}` templating against `ctx.params`
 (same values the node's `run` saw); `{run_dir}` is always available. A bare
@@ -122,7 +138,11 @@ built-in pairing (see [engine](engine.md) jump-back).
 
 ## Where it lives
 
-`src/agent_flow/gates.py` (`Directive`, `Continue`/`Restart`/`GoTo`/`Stop`,
-`GateContext`, `Gate`, `require_file`, `rerun_on_signal`, `rerun_on_named`).
-The `produced` / `rerun_targets` helpers the gates read live in
-`agent_flow.gates.signals`.
+`src/agent_flow/gates/` — `types.py` (`Directive`, `Continue`/`Restart`/`GoTo`/
+`Stop`, `GateContext`, `Gate`) and `builtin.py` (`require_file`, `stop_if`,
+`rerun_on_signal`, `rerun_on_named`). The `produced` / `read_field` /
+`rerun_targets` helpers the gates read live in `agent_flow.gates.signals`:
+`produced` is a filesystem check, `rerun_targets` extracts the re-run node names
+from the envelope, and `read_field` reads a result field the same way a gate
+should — `ctx.obj` (typed) first, then the raw envelope, then its `result`
+payload — so a consumer's own gate need not care whether the result was typed.

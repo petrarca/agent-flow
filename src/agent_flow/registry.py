@@ -6,7 +6,7 @@ the code is centralized and reusable. Two kinds, kept distinct on purpose:
 
   - DECIDING gates: a `(GateContext) -> Directive` built by a named factory
     `(**gate_args) -> Gate`. A node references one via `gate_ref` + `gate_args`.
-    The three built-ins (require_file / rerun_on_signal / rerun_on_named) are
+    The built-ins (require_file / stop_if / rerun_on_signal / rerun_on_named) are
     pre-seeded, so the common cases need NO user code.
 
   - OBSERVING hooks: `on(event)` callbacks the engine fires at lifecycle points
@@ -29,7 +29,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from agent_flow.gates import Gate, require_file, rerun_on_named, rerun_on_signal
+from agent_flow.gates import Gate, require_file, rerun_on_named, rerun_on_signal, stop_if
 
 # An export impl: maps a node's result payload to params for downstream nodes.
 ExportImpl = Callable[[Any], Mapping[str, Any]]
@@ -86,6 +86,7 @@ class FlowRegistry:
         # The shipped gates are `(ctx, **config) -> Directive`; a node's gate_args
         # supply the config (e.g. rerun_on_signal(ctx, target=…)).
         self._gates["require_file"] = require_file
+        self._gates["stop_if"] = stop_if
         self._gates["rerun_on_signal"] = rerun_on_signal
         self._gates["rerun_on_named"] = rerun_on_named
 

@@ -57,18 +57,20 @@ shown.
 ## Built-in gates
 
 A gate runs after a node's agent and returns a directive that steers the flow
-(`Continue` / `Restart` / `GoTo` / `Stop`). Three are pre-seeded into every
+(`Continue` / `Restart` / `GoTo` / `Stop`). Four are pre-seeded into every
 `FlowRegistry`, so you reference them by name with `gate_args`:
 
 | Gate | `gate_args` | What it does |
 |------|-------------|--------------|
 | `require_file` | `path` (required, templatable), `on_missing` (optional `Directive`) | The agent reported ok but didn't write its artifact -> `Restart` the node (bounded by `max_cycles`). `path` supports `{param}` templates (e.g. `"{run_dir}/report.md"`). A bare filename without a leading `/` or `{run_dir}` is treated as relative to `run_dir` — use `"{run_dir}/..."` to keep it consistent with the node's `inputs=` value. |
+| `stop_if` | `field`, `equals` (required); `reason_field` (default `"reason"`), `label` (optional) | A precondition failed -> `Stop` the whole run. Aborts when the result's `field` equals the sentinel `equals` (e.g. `field="ready", equals="no"`), else `Continue`. Reads the field from `ctx.obj` (typed) or the raw envelope, so it works with or without a `result_schema`. `label` prefixes the Stop reason to name the stage. The deterministic readiness/precondition check. |
 | `rerun_on_signal` | `target` (required) | The agent's control verdict set `rerun_required` -> `GoTo(target)`, a **fixed** earlier node (then the flow re-flows forward). The classic "verifier re-runs its analyst". Reads the verdict from the harvested envelope (`ctx.result`) — no file, no path. |
 | `rerun_on_named` | *(none)* | Same `rerun_required` signal, but routes to **whichever** node the verdict names (first valid backward target). For a coherence check that may bounce to any upstream stage. Reads the same `ctx.result` envelope. |
 
 Signatures: `require_file(ctx, *, path, on_missing=None)`,
+`stop_if(ctx, *, field, equals, reason_field="reason", label="")`,
 `rerun_on_signal(ctx, *, target)`,
-`rerun_on_named(ctx)`. All three auto-populate the
+`rerun_on_named(ctx)`. The `require_file`/`rerun_*` gates auto-populate the
 directive's one-time `instruction`. A node with **no** gate behaves as
 `Continue()`. To write your own gate, see [Hook your own logic](#hook-your-own-logic-flowregistry)
 below; for the full directive/`GateContext` reference see the

@@ -19,16 +19,56 @@ Signals:
      already harvested the verdict however it came back (sidecar / structured
      output / file API). So the gate reads the dict it was handed, never a file.
      See gates.rerun_on_signal / rerun_on_named.
+
+  3. read_field(ctx, name) -> the value of a result FIELD, read the same robust
+     way regardless of how the pipeline shaped its result: the validated typed
+     object (`ctx.obj`) when a `result_schema` was set, else the raw envelope
+     dict (`ctx.result`), else that envelope's `result` payload. A building block
+     for any gate that decides from a structured field (see gates.stop_if).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 
 def produced(path: Path) -> bool:
     """True if the agent wrote a non-empty file at `path`."""
     return path.exists() and path.stat().st_size > 0
+
+
+# Sentinel distinguishing "field absent" from a field whose value is None.
+_MISSING = object()
+
+
+def read_field(ctx: Any, name: str, default: Any = None) -> Any:
+    """Read result FIELD `name` from a GateContext, typed-object-or-dict agnostic.
+
+    Resolution order — the first place the field is present wins:
+      1. `ctx.obj`     the VALIDATED typed result object (a pydantic instance)
+                       when the node declared a `result_schema` — attribute lookup.
+      2. `ctx.result`  the raw control envelope dict — top-level key lookup
+                       (status/reason/… and any field the agent put at top level).
+      3. `ctx.result["result"]` the free-form `result` payload dict — key lookup,
+                       where an untyped pipeline usually puts its structured data.
+
+    A gate should not care whether the consumer typed its result; this reads the
+    same field either way. Returns `default` (None) when the field is nowhere.
+    """
+    obj = getattr(ctx, "obj", None)
+    if obj is not None:
+        val = getattr(obj, name, _MISSING)
+        if val is not _MISSING:
+            return val
+    result = getattr(ctx, "result", None)
+    if isinstance(result, dict):
+        if name in result:
+            return result[name]
+        payload = result.get("result")
+        if isinstance(payload, dict) and name in payload:
+            return payload[name]
+    return default
 
 
 def rerun_targets(control: dict | None) -> list[str]:

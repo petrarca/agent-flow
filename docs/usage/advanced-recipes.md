@@ -195,6 +195,32 @@ The agent's own `.md` must say when to set `rerun_required` — see
 [writing-agents.md](writing-agents.md#requesting-a-re-run). The re-run is bounded
 by `hello`'s `max_cycles`, so it cannot loop forever.
 
+## Stop the run when a precondition fails (`stop_if`)
+
+A readiness/precondition node returns a typed verdict; the shipped `stop_if` gate
+aborts the whole run when that verdict trips, with no consumer code:
+
+```python
+class ReadinessResult(BaseModel):
+    ready: Literal["yes", "no", "partial"]
+    reason: str = ""
+
+registry.schema("ReadinessResult")(ReadinessResult)
+
+NodeDef(name="readiness", agent="readiness-check", result_schema="ReadinessResult",
+        # abort when ready == "no"; "partial"/"yes" proceed
+        gate="stop_if",
+        gate_args={"field": "ready", "equals": "no", "label": "tech-assessment"})
+```
+
+On a match the run stops with reason `"tech-assessment: <reason>"` (the `label`
+prefix names the stage; the detail comes from the result's `reason` field, or set
+`reason_field=` to name another). Only the exact sentinel trips, so a `"partial"`
+verdict continues to a weaker downstream result. `stop_if` reads the field from
+the validated `ctx.obj` when a `result_schema` is set and from the raw envelope
+otherwise, so it works either way. It replaces the hand-rolled "block if not
+ready" closure a pipeline used to write and register.
+
 ## Run independent steps in parallel
 
 Nodes sharing a `parallel_group` are dispatched concurrently once their
@@ -213,6 +239,41 @@ FlowDef(name="p", nodes=[
 
 `domain` and `coupling` both depend only on `tech-stack`, so they run
 concurrently. Cap total concurrency with `run_config={"llm_concurrency": 2}`.
+
+## A final check that re-runs whichever stage is at fault (`rerun_on_named`)
+
+`rerun_on_signal` bounces to a FIXED target (the verifier's own subject).
+`rerun_on_named` instead re-runs **whichever node the verdict names** — the idiom
+for a final coherence/consistency check that may find the root cause anywhere
+upstream. The check writes the root-cause NODE name(s) into `rerun_required` and
+nothing else; the engine re-flows forward from the earliest one named:
+
+```python
+FlowDef(name="p", nodes=[
+    # … analysts (a parallel_group) → verifiers → synthesizer → extractor …
+    NodeDef(name="consistency-check", agent="consistency-check",
+            depends_on=["extractor"], criticality="degrade",
+            gate="rerun_on_named"),        # no gate_args — the target is the verdict
+])
+```
+
+The agent names the STAGE to fix, e.g. its sidecar returns
+`{"status": "ok", "rerun_required": ["crypto"]}` when the `crypto` analyst's
+findings are inconsistent. Two properties make this precise:
+
+- **Cascade forward, not sideways.** The flow resumes at `crypto` and re-runs it
+  *plus everything downstream that depends on it* (its verifier, the synthesizer,
+  the extractor, this check) — the transitive forward slice, so the fix
+  propagates. It does NOT re-run unrelated upstream stages.
+- **Into a parallel group, only the named node re-runs.** If `crypto` is one of
+  six sibling analysts in a `parallel_group`, the jump-back re-runs `crypto`
+  alone, not its five siblings. Bounded per target by `max_cycles`, so a
+  persistent inconsistency cannot loop forever.
+
+Keep the check's job narrow: it decides *which node* is the root cause and names
+it — it does not fix content itself. The agent's `.md` must be told to populate
+`rerun_required` with node names (see
+[writing-agents.md](writing-agents.md#requesting-a-re-run)).
 
 ## Pass a run-wide brief to every agent
 

@@ -85,10 +85,12 @@ if TYPE_CHECKING:  # the static view: type checkers and IDEs see the real names
         Restart,
         Stop,
         produced,
+        read_field,
         require_file,
         rerun_on_named,
         rerun_on_signal,
         rerun_targets,
+        stop_if,
     )
     from agent_flow.logging_setup import LIBRARY_LOGGER, setup_logging
     from agent_flow.node_builder import (
@@ -205,6 +207,7 @@ _EXPORTS: dict[str, str] = {
     "probe_agent_dir": "agent_flow.runners",
     "produced": "agent_flow.gates",
     "read_context_blocks": "agent_flow.core",
+    "read_field": "agent_flow.gates",
     "render_prompt": "agent_flow.runners",
     "render_work_order_lines": "agent_flow.node_builder",
     "render_work_order_xml": "agent_flow.node_builder",
@@ -219,6 +222,7 @@ _EXPORTS: dict[str, str] = {
     "runtime_param": "agent_flow.run_config",
     "runtime_param_fields": "agent_flow.run_config",
     "setup_logging": "agent_flow.logging_setup",
+    "stop_if": "agent_flow.gates",
 }
 
 
@@ -345,10 +349,12 @@ __all__ = [
     "Stop",
     # ready-made gates (optional conveniences)
     "require_file",
+    "stop_if",
     "rerun_on_signal",
     "rerun_on_named",
     # signals
     "produced",
+    "read_field",
     "rerun_targets",
     # pre-flight checks
     "Check",

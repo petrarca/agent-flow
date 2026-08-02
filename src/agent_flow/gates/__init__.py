@@ -30,15 +30,16 @@ abort message for the operator/log). See each directive's docstring.
 Module map:
   types.py    the Directive vocabulary (Continue / Restart / GoTo / Stop) and
               GateContext — what a gate is handed and what it may return
-  signals.py  building blocks: did the agent write the file, does its envelope
-              name nodes to re-run
-  builtin.py  the gates that ship: require_file, rerun_on_signal, rerun_on_named
+  signals.py  building blocks: did the agent write the file, read a result
+              field, does its envelope name nodes to re-run
+  builtin.py  the gates that ship: require_file, stop_if, rerun_on_signal,
+              rerun_on_named
 """
 
 from __future__ import annotations
 
-from agent_flow.gates.builtin import require_file, rerun_on_named, rerun_on_signal
-from agent_flow.gates.signals import produced, rerun_targets
+from agent_flow.gates.builtin import require_file, rerun_on_named, rerun_on_signal, stop_if
+from agent_flow.gates.signals import produced, read_field, rerun_targets
 from agent_flow.gates.types import Continue, Directive, Gate, GateContext, GoTo, Restart, Stop
 
 __all__ = [
@@ -50,8 +51,10 @@ __all__ = [
     "Restart",
     "Stop",
     "produced",
+    "read_field",
     "require_file",
     "rerun_on_named",
     "rerun_on_signal",
     "rerun_targets",
+    "stop_if",
 ]

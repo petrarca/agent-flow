@@ -7,11 +7,13 @@ consumer's own gate is written the same way.
 
 from __future__ import annotations
 
-from agent_flow.gates.signals import produced, rerun_targets
-from agent_flow.gates.types import Continue, Directive, GateContext, GoTo, Restart
+from typing import Any
 
-# Ready-made gates — the two checks almost every pipeline writes, shipped so the
-# consumer doesn't hand-roll a closure. Both are fully OPTIONAL and composable;
+from agent_flow.gates.signals import produced, read_field, rerun_targets
+from agent_flow.gates.types import Continue, Directive, GateContext, GoTo, Restart, Stop
+
+# Ready-made gates — the checks almost every pipeline writes, shipped so the
+# consumer doesn't hand-roll a closure. All are fully OPTIONAL and composable;
 # they are ordinary gates a consumer may use, wrap, or ignore.
 
 
@@ -40,6 +42,33 @@ def require_file(ctx: GateContext, *, path: str, on_missing: Directive | None = 
     if produced(ctx.run_dir / resolved):
         return Continue()
     return on_missing if on_missing is not None else Restart(instruction=f"The required file is missing: {resolved}. Produce it.")
+
+
+def stop_if(ctx: GateContext, *, field: str, equals: Any, reason_field: str = "reason", label: str = "") -> Directive:
+    """Gate: STOP the run when the agent's result `field` equals a sentinel value.
+
+    The deterministic "precondition failed, abort" check — e.g. a readiness node
+    whose result carries `ready: 'yes'|'no'|'partial'`, stopping the run on 'no'.
+    Config:
+      field         the result field to test (required).
+      equals        the sentinel value that TRIPS the stop (required); the run
+                    aborts when `field == equals`, otherwise it continues.
+      reason_field  a result field whose value becomes the Stop reason detail
+                    (default "reason"); ignored when absent/empty.
+      label         optional prefix for the Stop reason, naming the pipeline/stage
+                    (e.g. "tech-assessment") so the operator sees where it stopped.
+
+    Reads the VALIDATED typed object (`ctx.obj`) when the node set a
+    `result_schema`, else the raw envelope (`ctx.result`) — so a field lookup
+    works whether the pipeline typed its result or not. Match -> Stop; else
+    Continue.
+
+    Referenced as gate="stop_if", gate_args={"field": "ready", "equals": "no"}.
+    """
+    if read_field(ctx, field) == equals:
+        detail = read_field(ctx, reason_field) or f"{field} == {equals!r}"
+        return Stop(reason=f"{label}: {detail}" if label else str(detail))
+    return Continue()
 
 
 def rerun_on_signal(ctx: GateContext, *, target: str) -> Directive:

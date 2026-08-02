@@ -75,8 +75,13 @@ include `"rerun_required": ["hello"]` in your control JSON instead of a bare
 ```
 
 Use the node's name (`NodeDef(name=...)`). The pipeline side needs a matching
-gate: `gate="rerun_on_signal", gate_args={"target": "hello"}` — see
-[advanced-recipes.md](advanced-recipes.md#a-verifier-that-can-trigger-a-re-run).
+gate: a verifier with one fixed subject pairs with
+`gate="rerun_on_signal", gate_args={"target": "hello"}`
+([verifier recipe](advanced-recipes.md#a-verifier-that-can-trigger-a-re-run)); a
+final coherence check that may flag ANY upstream stage names the root-cause
+node(s) in `rerun_required` and pairs with `gate="rerun_on_named"`
+([cascade recipe](advanced-recipes.md#a-final-check-that-re-runs-whichever-stage-is-at-fault-rerun_on_named)),
+which re-flows forward from the earliest named node.
 
 ## Always use the paths you are given
 
