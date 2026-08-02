@@ -10,11 +10,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_flow.engine.dispatch import maybe_await
 from agent_flow.flow_types import Node, NodeBlocked, NodeOutcome, RunContext
 from agent_flow.gates import Continue, GateContext, GoTo, Restart, Stop
+
+if TYPE_CHECKING:
+    from upath import UPath
 
 
 def _make_node_emitter(on_node_event: Callable[[str, str, str | None, str], None] | None) -> Callable[[str, str, str | None, str], None]:
@@ -32,7 +35,7 @@ def _make_node_emitter(on_node_event: Callable[[str, str, str | None, str], None
 async def interpret(
     node: Node,
     *,
-    run_dir: Path,
+    run_dir: Path | UPath,
     params: dict[str, Any],
     on_error: Callable[[Node, Exception], str],
     log: Callable[[str], None] = lambda _msg: None,

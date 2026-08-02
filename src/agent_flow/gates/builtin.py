@@ -7,7 +7,10 @@ consumer's own gate is written the same way.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+from upath import UPath
 
 from agent_flow.gates.signals import produced, read_field, rerun_targets
 from agent_flow.gates.types import Continue, Directive, GateContext, GoTo, Restart, Stop
@@ -39,7 +42,7 @@ def require_file(ctx: GateContext, *, path: str, on_missing: Directive | None = 
     Referenced from a node as gate="require_file", gate_args={"path": "..."}.
     """
     resolved = _resolve_path(path, ctx)
-    if produced(ctx.run_dir / resolved):
+    if produced(_join_run_dir(ctx.run_dir, resolved)):
         return Continue()
     return on_missing if on_missing is not None else Restart(instruction=f"The required file is missing: {resolved}. Produce it.")
 
@@ -111,6 +114,23 @@ def rerun_on_named(ctx: GateContext) -> Directive:
         target = named[0]
         return GoTo(node=target, instruction=f"{node_name} signalled a re-run of {target}.")
     return Continue()
+
+
+def _join_run_dir(run_dir: Path | UPath, resolved: str) -> Path | UPath:
+    """Turn a resolved gate path into a path object, relative to run_dir if bare.
+
+    An ABSOLUTE resolved path — `/…`, or a scheme-qualified `memory://…` (an
+    anchored `{product_repos_root}/…` artifact, or an in-memory run) — stands on
+    its own. Only a BARE relative name is joined onto `run_dir`.
+
+    This must NOT be a plain `run_dir / resolved`: pathlib discards the left side
+    when the right is absolute, but a `UPath` over `memory://` does not — it would
+    concatenate run_dir and the memory URL into a nonsense path. `UPath` decides
+    both questions (is it absolute, and which filesystem), and returns an ordinary
+    `Path` subclass for a local path — so local and in-memory behave identically.
+    """
+    target = UPath(resolved)
+    return target if target.is_absolute() else run_dir / resolved
 
 
 def _resolve_path(path: str, ctx: GateContext) -> str:

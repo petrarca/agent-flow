@@ -35,6 +35,7 @@ import os
 from dataclasses import replace
 from pathlib import Path
 from subprocess import DEVNULL, PIPE, STDOUT
+from typing import TYPE_CHECKING
 
 import anyio
 from loguru import logger
@@ -44,6 +45,9 @@ from agent_flow.runners.base import AgentRunner
 from agent_flow.runners.executor import AgentCrashError, AgentExecutor, AgentResult, AgentTimeoutError
 from agent_flow.runners.invocation import AgentInvocation, compose_prompt
 from agent_flow.runners.supervision import _no_verdict_reason, _read_sidecar, _supervise, _Supervision
+
+if TYPE_CHECKING:
+    from upath import UPath
 
 
 class SubprocessExecutor(AgentExecutor):
@@ -76,7 +80,7 @@ class SubprocessExecutor(AgentExecutor):
         self.name = getattr(runner, "name", "subprocess")
         self._env_extra = env_extra
 
-    async def run(self, inv: AgentInvocation, *, control_file: Path | None = None) -> AgentResult:
+    async def run(self, inv: AgentInvocation, *, control_file: Path | UPath | None = None) -> AgentResult:
         """Run one invocation as a supervised subprocess -> AgentResult.
 
         `control_file` overrides the per-node sidecar path; by default it is
@@ -147,13 +151,27 @@ class SubprocessExecutor(AgentExecutor):
 
         return self._finalize(inv, control_file, spec, sup, returncode, agent_dir, duration)
 
-    def _resolve_control_file(self, inv: AgentInvocation, control_file: Path | None) -> Path:
+    def _resolve_control_file(self, inv: AgentInvocation, control_file: Path | UPath | None) -> Path:
         """Per-node control sidecar path (node name is unique per run; falls back
         to the agent name). Cleared defensively so completion keys only on THIS
-        run's write. The sidecar is this executor's own mechanism."""
+        run's write. The sidecar is this executor's own mechanism.
+
+        A subprocess writes REAL disk, so the sidecar must be a real local path.
+        A non-local run_dir (e.g. `memory://…`) cannot work here — the spawned
+        process has no view of an in-memory filesystem — so it is rejected with an
+        actionable error rather than silently degraded into a bogus local path
+        (`Path("memory://x")` is the relative directory `memory:/x`). The
+        in-memory filesystem is for the mock/in-process path, which never reaches
+        this executor."""
         if control_file is None:
             base = inv.node or inv.agent
             control_file = inv.run_dir / f"{base}.control.json"
+        if not isinstance(control_file, Path):
+            raise ValueError(
+                f"{self.name}: run_dir {str(inv.run_dir)!r} is not a local path, but a subprocess writes real files. "
+                "An in-memory run_dir (memory://…) is only supported for mock runs (mock_agents=True); "
+                "pass a local run_dir for a real run."
+            )
         control_file.unlink(missing_ok=True)
         return control_file
 

@@ -30,11 +30,19 @@ Signals:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from upath import UPath
 
 
-def produced(path: Path) -> bool:
-    """True if the agent wrote a non-empty file at `path`."""
+def produced(path: Path | UPath) -> bool:
+    """True if the agent wrote a non-empty file at `path`.
+
+    Accepts any pathlib-compatible path — a local `Path` or a `UPath` over an
+    in-memory FS (a mock run's run_dir) — since both answer `exists()`/`stat()`
+    identically; no coercion, so a `memory://…` path is never flattened to disk.
+    """
     return path.exists() and path.stat().st_size > 0
 
 

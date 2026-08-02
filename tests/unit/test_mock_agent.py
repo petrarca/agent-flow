@@ -255,3 +255,111 @@ def test_declarative_compile_resolves_mock_agent(tmp_path):
     flow = FlowDef(name="t", nodes=[NodeDef(name="n", agent="analyst")])
     res = run_flow(flow, registry=r, run_dir=str(tmp_path), mock_agents=True)
     assert res["n"].status == "ok"
+
+
+# --- in-memory filesystem (UPath) for the mock path -------------------------
+
+
+def test_context_resolves_memory_url_to_upath(tmp_path):
+    # A memory:// run_dir makes ctx.write_file land in the in-memory FS, not disk.
+    from upath import UPath
+
+    ctx = MockAgentContext(_inv(tmp_path), {}, {"run_dir": "memory://ctx-run/output"})
+    p = ctx.write_file("{run_dir}/out.md", "# hi")
+    assert isinstance(p, UPath) and p.protocol == "memory"
+    assert p.read_text() == "# hi"
+    assert ctx.read_file("{run_dir}/out.md") == "# hi"
+    # nothing landed on the real disk
+    assert not (tmp_path / "out.md").exists()
+
+
+def _mem_flow():
+    from agent_flow import FlowDef, NodeDef
+
+    r = FlowRegistry()
+
+    @r.mock_agent("analyst")
+    def analyst(inv, ctx):
+        # write an artifact ANCHORED outside run_dir (a memory:// anchor param)
+        ctx.write_file("{root}/report.md", "# report\n\nbody")
+        return {"status": "ok", "result": {"ok": True}}
+
+    flow = FlowDef(
+        name="mem",
+        nodes=[
+            NodeDef(
+                name="analyst",
+                agent="analyst",
+                inputs={"root": "{root}"},
+                gate="require_file",
+                gate_args={"path": "{root}/report.md"},
+            )
+        ],
+    )
+    return flow, r
+
+
+def test_auto_memory_run_dir_for_mock_run_no_disk(tmp_path):
+    # mock_agents=True + no run_dir -> a hermetic memory:// run; the artifact,
+    # its sidecar, and the require_file check all resolve in memory. This is the
+    # unit-test form of a mock flow: no tmp_path, no disk.
+    from agent_flow import run_flow
+
+    flow, r = _mem_flow()
+    out = run_flow(flow, registry=r, mock_agents=True, root="memory://auto-run/products")
+    assert out["analyst"].status == "ok"
+
+
+def test_explicit_local_run_dir_under_mock_writes_disk(tmp_path):
+    # The escape hatch: an explicit LOCAL run_dir keeps a mock run on disk.
+    from agent_flow import FlowDef, NodeDef, run_flow
+
+    r = FlowRegistry()
+
+    @r.mock_agent("analyst")
+    def analyst(inv, ctx):
+        ctx.write_file("{run_dir}/report.md", "# report")
+        return {"status": "ok", "result": {"ok": True}}
+
+    flow = FlowDef(
+        name="disk",
+        nodes=[NodeDef(name="analyst", agent="analyst", gate="require_file", gate_args={"path": "{run_dir}/report.md"})],
+    )
+    out = run_flow(flow, registry=r, mock_agents=True, run_dir=str(tmp_path))
+    assert out["analyst"].status == "ok"
+    assert (tmp_path / "report.md").exists()  # really on disk
+
+
+def test_memory_run_dir_is_rejected_by_the_subprocess_executor(tmp_path):
+    # The in-memory FS is for the mock/in-process path only: a real subprocess
+    # writes real disk and has no view of it. A memory:// run_dir on a REAL run is
+    # an actionable error, not a silently bogus local path ("memory:/…").
+    from upath import UPath
+
+    from agent_flow.runners import AgentInvocation
+    from agent_flow.runners.subprocess_exec import SubprocessExecutor
+
+    class _Runner:
+        name = "stub"
+
+    ex = SubprocessExecutor(_Runner())
+    inv = AgentInvocation(agent="a", prompt="p", run_dir=UPath("memory://real-run/out"), node="n")
+    with pytest.raises(ValueError, match="not a local path"):
+        ex._resolve_control_file(inv, None)
+
+    # a local run_dir resolves normally
+    local = AgentInvocation(agent="a", prompt="p", run_dir=tmp_path, node="n")
+    assert ex._resolve_control_file(local, None) == tmp_path / "n.control.json"
+
+
+def test_two_memory_mock_runs_are_isolated():
+    # Distinct memory:// netloc per run -> distinct subtrees, no cross-run bleed.
+    from upath import UPath
+
+    from agent_flow import run_flow
+
+    flow, r = _mem_flow()
+    run_flow(flow, registry=r, mock_agents=True, root="memory://iso-1/products")
+    # run-1 wrote its artifact; a DIFFERENT netloc must not see it.
+    assert (UPath("memory://iso-1/products/report.md")).exists()
+    assert not (UPath("memory://iso-2/products/report.md")).exists()  # untouched netloc is empty

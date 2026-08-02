@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+from upath import UPath
 
 from agent_flow.runners.executor import AgentExecutor, AgentResult
 from agent_flow.runners.invocation import AgentInvocation
@@ -73,16 +74,21 @@ class MockAgentContext:
         """Read a structured work-order input by key."""
         return self._work_order.get(key, default)
 
-    def _resolve(self, path: str) -> Path:
+    def _resolve(self, path: str) -> Path | UPath:
         # Precedence (highest first): work-order INPUTS (the keys input() exposes,
         # e.g. PRODUCT_KEY) > run PARAMS (product_key) > run_dir. Mirrors the
         # gate's path templating so a mock reaches the same values a gate/agent
         # does. strict=True: a path MUST fully resolve — an unknown {placeholder}
         # raises rather than silently yielding a literal "{PRODUCT_KEY}/..." path.
+        #
+        # UPath (not Path): a resolved path may carry a scheme (memory://…) when
+        # the run is in-memory — run_dir and the pipeline's anchors are then
+        # memory URLs. UPath keeps the scheme and dispatches to the in-memory FS;
+        # for a plain/local path it is an ordinary Path. One call, both worlds.
         tmpl = {**self._tmpl, **self._work_order}
-        return Path(resolve_template(path, tmpl, strict=True))
+        return UPath(resolve_template(path, tmpl, strict=True))
 
-    def write_file(self, path: str, content: str) -> Path:
+    def write_file(self, path: str, content: str) -> Path | UPath:
         """Write `content` to `path` (inputs/params/run_dir templated, strict). Returns the path."""
         p = self._resolve(path)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -112,7 +118,7 @@ class MockExecutor(AgentExecutor):
         self._work_order = work_order or {}
         self._tmpl = tmpl or {}
 
-    async def run(self, inv: AgentInvocation, *, control_file: Path | None = None) -> AgentResult:
+    async def run(self, inv: AgentInvocation, *, control_file: Path | UPath | None = None) -> AgentResult:
         ctx = MockAgentContext(inv, self._work_order, self._tmpl)
         behaviour = self._behaviour
 
@@ -127,8 +133,9 @@ class MockExecutor(AgentExecutor):
 
         control = self._coerce_envelope(raw, inv.agent)
 
-        # Materialise the sidecar on disk, like a real runner (the MockRuntime's
-        # surrounding). Same default path SubprocessExecutor derives.
+        # Materialise the sidecar like a real runner (the MockRuntime's
+        # surrounding) — on disk for a local run, in the in-memory FS for a
+        # memory:// run. Same default path SubprocessExecutor derives.
         run_dir = inv.run_dir
         run_dir.mkdir(parents=True, exist_ok=True)
         if control_file is None:

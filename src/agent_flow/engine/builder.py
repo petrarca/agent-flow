@@ -16,7 +16,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_flow.engine.dispatch import maybe_await
 from agent_flow.engine.interpreter import _make_node_emitter, interpret
@@ -24,6 +24,9 @@ from agent_flow.engine.planner import plan_groups
 from agent_flow.engine.walker import _resolve_entry, _walk
 from agent_flow.flow_types import Node, NodeBlocked, NodeOutcome
 from agent_flow.utils import resolve_duration
+
+if TYPE_CHECKING:
+    from upath import UPath
 
 
 async def _fire_group_hook(registry: Any, event: str, group: list[Node], warn: Callable[[str], None], *extra: Any) -> None:
@@ -166,7 +169,7 @@ def build_flow(
     node_group = {n.name: (n.parallel_group or n.name) for n in nodes}
     _emit = _make_node_emitter(on_node_event)
 
-    def _make_run_node(wd: Path, params: dict, logger, pending: dict[str, str]) -> Callable[[str], Awaitable[NodeOutcome]]:
+    def _make_run_node(wd: Path | UPath, params: dict, logger, pending: dict[str, str]) -> Callable[[str], Awaitable[NodeOutcome]]:
         """Build the backend-agnostic 'run ONE node' closure for this run.
 
         The returned closure is a COROUTINE function (the backend awaits it) —
@@ -247,8 +250,11 @@ def build_flow(
             resolved_run_dir = resolve_template(run_dir, params, strict=True)
         except KeyError as exc:
             raise ValueError(f"run_dir template references unknown param {exc}; available params: {sorted(params)}") from exc
-        # Empty run_dir -> a fresh dir under <temp>/agent-flow/ (never cwd).
-        wd = resolve_run_dir(resolved_run_dir, name=name)
+        # Empty run_dir -> a fresh dir under <temp>/agent-flow/ (never cwd), OR a
+        # hermetic memory:// root when this is a mock run (mock_agents=True) with
+        # no explicit run_dir — so a mock run needs no tmp_path (a unit test). An
+        # explicit run_dir (local or memory://) always wins.
+        wd = resolve_run_dir(resolved_run_dir, name=name, in_memory=bool(params.get("mock_agents")))
         wd.mkdir(parents=True, exist_ok=True)
 
         async def _walk_session() -> dict[str, NodeOutcome]:

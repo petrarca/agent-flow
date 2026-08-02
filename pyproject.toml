@@ -35,6 +35,10 @@ dynamic = ["version"]
 #   - pyyaml: parse a --config / build_run_config(config_file=...) YAML file — a
 #     public (non-CLI) capability, so it stays core.
 #   - python-dotenv: .env loading. jsonschema: plain-dict result-schema validation.
+#   - universal-pathlib: a pathlib-compatible UPath over fsspec, so a run_dir can
+#     be an in-memory `memory://` path (mock runs default to it — hermetic, no
+#     disk) with the SAME Path API a local run_dir uses. Small, pure-python; the
+#     drop-in compatibility is what keeps the FS seam to ~one call site.
 #
 # The heavy/optional pieces are EXTRAS, matching the runtime seams:
 #   - [prefect]: the opt-in PrefectBackend (the default InProcessBackend needs none).
@@ -48,6 +52,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "pyyaml>=6.0",
     "jsonschema>=4.0",
+    "universal-pathlib>=0.2",
 ]
 
 [project.optional-dependencies]

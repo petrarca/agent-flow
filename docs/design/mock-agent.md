@@ -13,7 +13,7 @@ enabled by the substitution mode `--mock-agents` (`mock_agents=True`). With the
 mode on, any node whose `agent` has a registered `mock_agent` runs via
 `MockExecutor` instead of its normal executor: no tokens, no model, but the same
 observable contract the engine depends on — structured inputs in, a control
-envelope out, and optionally a file on disk a gate can check.
+envelope out, and optionally a file (in-memory by default, or on disk) a gate can check.
 
 It does not re-implement an LLM. A real agent reasons over prose; a mock cannot.
 A mock simulates only the structured interface around that reasoning: the work
@@ -80,6 +80,24 @@ no `exists`/`list_dir` until a concrete example needs them.
 
 `result` and `rerun_required` are not tools — they are fields of the returned
 envelope, mirroring how a real agent puts them in its sidecar.
+
+### In-memory filesystem (the default for a mock run)
+
+`write_file`/`read_file` resolve a path with the same strict `{param}` templating
+a gate uses, then act on it — but a resolved path is a **`UPath`**, not a
+`pathlib.Path`. When the run's `run_dir` (and the pipeline's own anchors) carry a
+`memory://` scheme, the write lands in an **in-memory filesystem**; when they are
+plain/local, it is an ordinary on-disk `Path`. One resolution serves both.
+
+A `mock_agents=True` run with **no explicit `run_dir`** defaults its `run_dir` to a
+unique `memory://run-<id>/` root, so the mock's artifacts, the control sidecar, and
+the `require_file` gate's reads all resolve in memory — the run touches no disk and
+a flow test is a **unit test**. This works precisely because every disk-touching
+site in the mock path (`MockAgentContext`, the `MockExecutor` sidecar write, and
+`gates.produced`) uses the `pathlib` API, which a `UPath` satisfies unchanged. The
+seam is bounded to this path: a real subprocess writes real disk (you cannot fake a
+filesystem out from under an external process), so the in-memory FS is for the
+mock/in-process world only. See the [testing guide](../usage/testing.md#in-memory-runs-integration-test-to-unit-test).
 
 ## Two layers
 
