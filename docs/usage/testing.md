@@ -234,8 +234,10 @@ pipeline up node by node:
 
 ```bash
 python flow.py run --mock-agents --show-events      # the whole flow, token-free
-python flow.py run --mock-agents --only analyst     # just one node/group
-python flow.py run --mock-agents --start-from verify  # from a node to the end
+python flow.py run --mock-agents --only analyst        # just one node/group
+python flow.py run --mock-agents --start-from verify   # from a node to the end
+python flow.py run --mock-agents --stop-after synth     # up to and including a node
+python flow.py run --mock-agents --start-from a --stop-after b  # the a..b segment
 ```
 
 That requires the mocks to be registered on the registry `run_cli` uses — which,

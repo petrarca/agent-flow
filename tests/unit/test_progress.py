@@ -5,6 +5,8 @@ calls and prints one line per transition. The build_flow -> on_node_event
 emission itself is covered in integration (it needs the Prefect task).
 """
 
+import pytest
+
 from agent_flow.cli import NodeProgressPrinter, print_results_table
 from agent_flow.flow_types import NodeOutcome
 from agent_flow.runners.executor import qualified_agent
@@ -78,6 +80,41 @@ def test_results_table_renders_runtime_qualified_agent():
     results = {"a": NodeOutcome(status="ok", duration_s=1.0, runtime="opencode")}
     print_results_table(results, agents={"a": "analyst"}, console=con)
     assert "opencode:analyst" in con.export_text()
+
+
+def test_results_table_total_row_shows_wall_clock():
+    # `elapsed_s` renders a separated Total row with the RUN's wall clock — which
+    # is deliberately NOT the sum of node durations (parallel nodes overlap).
+    from rich.console import Console
+
+    con = Console(record=True, width=120)
+    results = {
+        "a": NodeOutcome(status="ok", duration_s=100.0, runtime="opencode"),
+        "b": NodeOutcome(status="ok", duration_s=200.0, runtime="opencode"),
+    }
+    print_results_table(results, agents={"a": "x", "b": "y"}, console=con, elapsed_s=180.0)
+    text = con.export_text()
+    assert "Total (2 nodes)" in text
+    assert "3m 00s" in text  # the wall clock, not 300s (the sum)
+
+
+def test_results_table_without_elapsed_has_no_total_row():
+    # Back-compat: omit elapsed_s -> no Total row at all.
+    from rich.console import Console
+
+    con = Console(record=True, width=120)
+    print_results_table({"a": NodeOutcome(status="ok", duration_s=1.0)}, console=con)
+    assert "Total" not in con.export_text()
+
+
+@pytest.mark.parametrize(
+    "seconds,expected",
+    [(0.0, "0.0s"), (42.34, "42.3s"), (59.9, "59.9s"), (60, "1m 00s"), (723, "12m 03s"), (3852, "1h 04m 12s")],
+)
+def test_human_duration_formats(seconds, expected):
+    from agent_flow.cli.tables import _human
+
+    assert _human(seconds) == expected
 
 
 def test_qualified_agent_formats():

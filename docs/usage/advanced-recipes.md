@@ -293,10 +293,39 @@ runtime-populated params fall back to their defaults. A gate can still jump back
 into a skipped node, and it will run then. CLI and programmatic only, never
 persisted in config.
 
+## Stop after a node (`--stop-after`)
+
+The upper-bound complement of `--start-from`: run **up to and including** a node
+(or parallel-group), then stop — the named node is the last one executed.
+
+```bash
+# run the flow only as far as the extractor, then stop:
+python my_flow.py run -p product_key=acme --stop-after extractor
+```
+
+```python
+run_flow(flow, product_key="acme", stop_after="extractor")
+```
+
+Combine the two to run an arbitrary **segment** — everything from `A` through `B`,
+both inclusive:
+
+```bash
+# run the analyst -> verify -> extractor slice, nothing before or after:
+python my_flow.py run -p product_key=acme --start-from analyst --stop-after extractor
+```
+
+Same group granularity as `--start-from` (a group is indivisible: if the stop
+node is in a fan-out, the whole group is the last thing that runs). Jump-backs
+still work *within* the range — a verifier inside it can bounce to an analyst
+inside it and re-flow forward, bounded by the stop. A `--stop-after` that lands
+*before* `--start-from` is an empty range and errors. `--stop-after` is exclusive
+with `--only` (which is already a single group).
+
 ## Run a single node and stop (`--only`)
 
-`--start-from` runs from a group to the end; `--only` runs just that group and
-stops.
+`--start-from` runs from a group to the end, `--start-from` + `--stop-after` runs
+a segment, and `--only` runs just that one group and stops.
 
 ```bash
 # re-run ONLY the extractor, nothing before or after it:
@@ -312,7 +341,8 @@ run_flow(flow, product_key="acme", only="extractor")
 Same group granularity as `start_from`. Gate jump-backs are ignored in `--only`
 mode, since there is nothing downstream to resume into. The upstream caveat above
 applies in both directions: everything else is skipped, so whatever the node
-reads must already exist. `--only` and `--start-from` are mutually exclusive.
+reads must already exist. `--only` is mutually exclusive with `--start-from` and
+`--stop-after` (use those two together for a range).
 
 ## Change how the prompt is rendered
 

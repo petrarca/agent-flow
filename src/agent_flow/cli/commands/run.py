@@ -1,7 +1,7 @@
 """The `run` command — execute the pipeline.
 
 Registered onto the shared Typer app by run_cli via `register(app, ctx)`. Owns
-all the generic run flags (--runtime/--backend/--start-from/--only/…), resolves
+all the generic run flags (--runtime/--backend/--start-from/--stop-after/--only/…), resolves
 RunConfig + domain params, runs pre-flight, and executes the flow under the
 chosen view.
 """
@@ -9,6 +9,7 @@ chosen view.
 from __future__ import annotations
 
 import sys
+import time
 
 from agent_flow.cli.console import get_console
 from agent_flow.cli.context import RunCliContext
@@ -52,10 +53,15 @@ def register(app, ctx: RunCliContext) -> None:
         start_from: str | None = typer.Option(
             None, "--start-from", help="begin at this node or parallel-group, skipping upstream (assumes their outputs already exist)"
         ),
+        stop_after: str | None = typer.Option(
+            None,
+            "--stop-after",
+            help="run UP TO AND INCLUDING this node/group, then stop (it is the last run); combine with --start-from for a segment. Excludes --only",
+        ),
         only: str | None = typer.Option(
             None,
             "--only",
-            help="run ONLY this node/parallel-group and stop (skips everything else; assumes other outputs exist). Excludes --start-from",
+            help="run ONLY this node/group and stop (assumes other outputs exist). Excludes --start-from / --stop-after",
         ),
         llm_concurrency: int | None = typer.Option(None, "--llm-concurrency"),
         show_events: bool = typer.Option(False, "--show-events", "-v", help="raw per-event firehose (instead of the live table)"),
@@ -122,10 +128,8 @@ def register(app, ctx: RunCliContext) -> None:
         # here which nodes are mocked, so mock mode relaxes the check — see #11).
         if not cfg.mock_agents:
             _run_preflight(cfg.runtime, cfg.agent_dir, cfg.backend, console)
-        if start_from and only:
-            console.print(
-                "[red]--only and --start-from are mutually exclusive[/red] (--only runs a single group; --start-from runs from a group to the end)."
-            )
+        if only and (start_from or stop_after):
+            console.print("[red]--only is exclusive with --start-from / --stop-after[/red] (--only runs a single group; the others bound a range).")
             raise typer.Exit(2)
         _run_with_view(
             ctx.build_nodes(),
@@ -136,6 +140,7 @@ def register(app, ctx: RunCliContext) -> None:
             llm_tag=ctx.llm_tag,
             start_from=start_from or "",
             only=only or "",
+            stop_after=stop_after or "",
             registry=ctx.registry,
             run_context=ctx.run_context,
             run_instructions=ctx.run_instructions,
@@ -226,6 +231,7 @@ def _run_with_view(
     llm_tag: str,
     start_from: str = "",
     only: str = "",
+    stop_after: str = "",
     registry=None,
     run_context: tuple[str, ...] = (),
     run_instructions: str = "",
@@ -267,6 +273,7 @@ def _run_with_view(
             render_results=True,
             start_from=start_from,
             only=only,
+            stop_after=stop_after,
             registry=registry,
             run_context=run_context,
             run_instructions=run_instructions,
@@ -295,6 +302,7 @@ def _build_and_run(
     render_results,
     start_from="",
     only="",
+    stop_after="",
     registry=None,
     run_context: tuple[str, ...] = (),
     run_instructions: str = "",
@@ -321,15 +329,22 @@ def _build_and_run(
         backend=cfg.backend,
         registry=registry,
     )
-    # start_from / only are per-INVOCATION forward-entry knobs (not persisted).
-    # Framework knobs travel alongside runtime/run_dir, not in domain params.
+    # start_from / stop_after / only are per-INVOCATION walk-range knobs (not
+    # persisted). Framework knobs travel alongside runtime/run_dir, not in params.
     call_kwargs = {"run_dir": cfg.run_dir, "runtime": cfg.runtime, "mock_agents": cfg.mock_agents, **params}
     if start_from:
         call_kwargs["start_from"] = start_from
     if only:
         call_kwargs["only"] = only
+    if stop_after:
+        call_kwargs["stop_after"] = stop_after
     # The CLI stays sync; the engine pipeline is async. Single anyio.run bridge.
+    # Timed on a MONOTONIC clock (immune to wall-clock adjustments) so the results
+    # table can report the run's real elapsed time — what the user waited — rather
+    # than the sum of node durations, which double-counts parallel work.
+    started = time.monotonic()
     result = anyio.run(lambda: pipeline(**call_kwargs))
+    elapsed_s = time.monotonic() - started
     if render_results:
         agents = {n.name: n.agent for n in nodes}
-        print_results_table(result, title=name, agents=agents, console=console)
+        print_results_table(result, title=name, agents=agents, console=console, elapsed_s=elapsed_s)

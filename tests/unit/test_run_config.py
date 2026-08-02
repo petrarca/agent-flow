@@ -147,7 +147,7 @@ def test_a_runconfig_instance_is_already_resolved(monkeypatch):
     from agent_flow.flowdef.compile import _build_pipeline_and_call
 
     flow = FlowDef(name="t", nodes=[NodeDef(name="n", agent="a")])
-    _, call = _build_pipeline_and_call(flow, FlowRegistry(), "", "", "", {}, cfg)
+    _, call = _build_pipeline_and_call(flow, FlowRegistry(), run_dir="", start_from="", only="", stop_after="", params={}, run_config=cfg)
     assert call["model"] == "from-my-cli", "a passed RunConfig must not be re-resolved"
 
 

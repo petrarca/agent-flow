@@ -23,12 +23,18 @@ if TYPE_CHECKING:
 def _build_pipeline_and_call(
     flow_def: FlowDef,
     registry,
+    *,
     run_dir: str,
     start_from: str,
     only: str,
+    stop_after: str,
     params: dict,
     run_config: dict[str, Any] | RunConfig | None = None,
 ):
+    # Everything after flow_def/registry is KEYWORD-ONLY: this helper carries a
+    # long run-knob signature, and keyword-only makes inserting/reordering a knob
+    # (as `stop_after` was) a loud error at the call site rather than a silent
+    # positional shift.
     """Shared plumbing for (a)run_flow: build the flow callable + assemble the
     call kwargs. Returns (pipeline, call_kwargs). Both entry points differ only in
     how they invoke the (async) pipeline callable.
@@ -92,6 +98,8 @@ def _build_pipeline_and_call(
         call["start_from"] = start_from
     if only:
         call["only"] = only
+    if stop_after:
+        call["stop_after"] = stop_after
     return pipeline, call
 
 
@@ -102,6 +110,7 @@ async def arun_flow(
     run_dir: str = "",
     start_from: str = "",
     only: str = "",
+    stop_after: str = "",
     run_config: dict[str, Any] | RunConfig | None = None,
     **params,
 ):
@@ -128,9 +137,15 @@ async def arun_flow(
             cfg = build_run_config(config_file=args.config, model=args.model)
             run_flow(flow, run_config=cfg, **params)
 
+    `start_from` / `stop_after` bound the walk to a segment (both inclusive: the
+    named nodes are the first and last run); `only` runs exactly one group. See
+    the recipes for partial runs.
+
     `params` are the DOMAIN run params (product_key=…, runtime=…).
     """
-    pipeline, call = _build_pipeline_and_call(flow_def, registry, run_dir, start_from, only, params, run_config)
+    pipeline, call = _build_pipeline_and_call(
+        flow_def, registry, run_dir=run_dir, start_from=start_from, only=only, stop_after=stop_after, params=params, run_config=run_config
+    )
     return await pipeline(**call)
 
 
@@ -141,6 +156,7 @@ def run_flow(
     run_dir: str = "",
     start_from: str = "",
     only: str = "",
+    stop_after: str = "",
     run_config: dict[str, Any] | RunConfig | None = None,
     **params,
 ):
@@ -149,7 +165,8 @@ def run_flow(
     A thin `anyio.run` wrapper over `arun_flow`, keeping the long-standing
     blocking signature for consumers not on an event loop (scripts, the CLI).
     `run_config` carries the run-side settings — a dict is treated as defaults, a
-    RunConfig is honoured verbatim; see arun_flow. `params` are the DOMAIN run
+    RunConfig is honoured verbatim; see arun_flow. `start_from`/`stop_after` bound
+    the walk to a segment; `only` runs one group. `params` are the DOMAIN run
     params.
     """
     return anyio.run(
@@ -159,6 +176,7 @@ def run_flow(
             run_dir=run_dir,
             start_from=start_from,
             only=only,
+            stop_after=stop_after,
             run_config=run_config,
             **params,
         )

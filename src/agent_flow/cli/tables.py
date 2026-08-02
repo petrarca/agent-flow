@@ -5,7 +5,9 @@ from __future__ import annotations
 from agent_flow.cli.console import get_console
 
 
-def print_results_table(results, *, title: str = "Pipeline results", agents: dict[str, str] | None = None, console=None) -> None:
+def print_results_table(
+    results, *, title: str = "Pipeline results", agents: dict[str, str] | None = None, console=None, elapsed_s: float | None = None
+) -> None:
     """Print an end-of-run node -> outcome table (agent label + per-node duration).
 
     `results` maps node name -> NodeOutcome (status + duration_s + runtime). A
@@ -14,6 +16,12 @@ def print_results_table(results, *, title: str = "Pipeline results", agents: dic
     the Agent column shows the RUNTIME-QUALIFIED label "<runtime>:<agent>" (e.g.
     "opencode:my-agent", "inproc:some-agent", "mock:other-agent"), the runtime
     taken from each NodeOutcome. Omit `agents` -> no Agent column.
+
+    `elapsed_s` is the run's WALL-CLOCK duration; when given it is rendered as a
+    separated Total row. Wall clock is deliberately NOT the sum of the per-node
+    durations: nodes in a parallel group overlap, so the sum overstates what you
+    actually waited (and a jump-back re-runs a node, counting it twice). The
+    per-node column stays the time each node took; the Total is the run.
     """
     from rich.table import Table
 
@@ -39,7 +47,24 @@ def print_results_table(results, *, title: str = "Pipeline results", agents: dic
         label = qualified_agent(runtime, agents.get(name, ""))
         row = [name] + ([label] if show_agent else []) + [f"[{style}]{status}[/{style}]", dur]
         table.add_row(*row)
+    if isinstance(elapsed_s, (int, float)):
+        # A separated summary row: the run's wall clock (see the docstring — not
+        # the sum of the node durations, which double-counts parallel work).
+        table.add_section()
+        total = [f"[bold]Total ({len(results)} nodes)[/bold]"] + ([""] if show_agent else []) + ["", f"[bold]{_human(elapsed_s)}[/bold]"]
+        table.add_row(*total)
     console.print(table)
+
+
+def _human(seconds: float) -> str:
+    """Compact wall-clock: `42.3s` under a minute, else `12m 03s` / `1h 04m 12s`."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    m, s = divmod(int(round(seconds)), 60)
+    if m < 60:
+        return f"{m}m {s:02d}s"
+    h, m = divmod(m, 60)
+    return f"{h}h {m:02d}m {s:02d}s"
 
 
 def print_preflight_results(results, *, title: str = "Pre-flight checks", console=None) -> None:

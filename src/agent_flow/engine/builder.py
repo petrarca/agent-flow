@@ -97,12 +97,14 @@ def build_flow(
 ):
     """Compile a Node graph into a runnable flow callable.
 
-    Returns a callable `f(run_dir, start_from="", only="", **params) -> dict`
-    that walks the DAG (`plan_groups`), fans out parallel groups concurrently,
-    and runs each node via `interpret` (gate directives + criticality + bounded
-    re-runs). `params` are threaded unchanged into every node's RunContext.
+    Returns a callable `f(run_dir, start_from="", only="", stop_after="", **params)
+    -> dict` that walks the DAG (`plan_groups`), fans out parallel groups
+    concurrently, and runs each node via `interpret` (gate directives +
+    criticality + bounded re-runs). `params` are threaded unchanged into every
+    node's RunContext. `start_from`/`stop_after` bound the walk to a segment
+    (inclusive both ends); `only` runs exactly one group.
 
-    The ENGINE owns all flow logic (plan/walk/jump-back/start_from/only/
+    The ENGINE owns all flow logic (plan/walk/jump-back/start_from/stop_after/only/
     run-context); the selected `backend` supplies only execution mechanics
     (parallel fan-out, concurrency limit, logger, bootstrap/teardown). Backends
     are resolved lazily HERE so the engine module imports without pulling any
@@ -230,7 +232,7 @@ def build_flow(
 
         return run_node
 
-    async def _pipeline(run_dir: str = "", start_from: str = "", only: str = "", **params: Any) -> dict:
+    async def _pipeline(run_dir: str = "", start_from: str = "", only: str = "", stop_after: str = "", **params: Any) -> dict:
         from agent_flow.run_context import init_run_context
         from agent_flow.utils import resolve_run_dir, resolve_template
 
@@ -262,7 +264,7 @@ def build_flow(
             pending_instructions: dict[str, str] = {}
             run_node = _make_run_node(wd, params, logger, pending_instructions)
             run_group = _make_group_runner(backend_impl, registry, run_node, logger)
-            start_index, single_group = _resolve_entry(start_from, only, by_name, group_index, node_group, logger)
+            start_index, stop_index, single_group = _resolve_entry(start_from, only, stop_after, by_name, group_index, node_group, logger)
             results = await _walk(
                 planned,
                 run_group=run_group,
@@ -271,6 +273,7 @@ def build_flow(
                 by_name=by_name,
                 logger=logger,
                 start_index=start_index,
+                stop_index=stop_index,
                 single_group=single_group,
                 pending_instructions=pending_instructions,
             )

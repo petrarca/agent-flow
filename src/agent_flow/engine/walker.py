@@ -10,18 +10,35 @@ from __future__ import annotations
 from agent_flow.flow_types import NodeOutcome
 
 
-def _resolve_entry(start_from: str, only: str, by_name, group_index, node_group, logger) -> tuple[int, bool]:
-    """Resolve the walk's forward entry from the two mutually exclusive knobs.
+def _resolve_entry(start_from: str, only: str, stop_after: str, by_name, group_index, node_group, logger) -> tuple[int, int, bool]:
+    """Resolve the walk's forward range from the entry/exit knobs.
 
-    Returns (start_index, single_group): `only` -> (that group, True) so the walk
-    runs exactly one group; `start_from` -> (that group, False) so it runs forward
-    to the end; neither -> (0, False). Setting both is an error (they conflict).
+    Returns (start_index, stop_index, single_group), where the walk runs groups
+    [start_index, stop_index):
+      - `only`       -> that one group (single_group=True); ignores stop_after.
+      - `start_from` -> from that group forward.
+      - `stop_after` -> UP TO AND INCLUDING that group (so the named node is the
+        last executed). Combine with `start_from` to run an arbitrary A..B segment.
+      - none         -> the whole flow.
+
+    `only` conflicts with both `start_from` and `stop_after` (it is already exactly
+    one group). A `stop_after` group BEFORE the `start_from` group is an error.
     """
-    if only and start_from:
-        raise ValueError("only and start_from are mutually exclusive (only runs a single group; start_from runs from a group to the end)")
+    n_groups = len(group_index)
+    if only and (start_from or stop_after):
+        raise ValueError("only is exclusive with start_from/stop_after (only runs a single group; the others bound a range)")
     if only:
-        return _resolve_only_index(only, by_name, group_index, node_group, logger), True
-    return _resolve_start_index(start_from, by_name, group_index, node_group, logger), False
+        return _resolve_only_index(only, by_name, group_index, node_group, logger), n_groups, True
+    start_index = _resolve_start_index(start_from, by_name, group_index, node_group, logger)
+    stop_index = n_groups
+    if stop_after:
+        stop_i = _name_to_group_index(stop_after, by_name, group_index, node_group, "stop_after")
+        if stop_i < start_index:
+            raise ValueError(f"stop_after={stop_after!r} (group {stop_i}) is before start_from (group {start_index}) — the range is empty")
+        stop_index = stop_i + 1  # inclusive: the named group is the last one run
+        members = sorted(n for n in by_name if group_index[node_group[n]] == stop_i)
+        logger.info(f"stop_after={stop_after}: last group is {members} (skipping everything after it)")
+    return start_index, stop_index, False
 
 
 def _name_to_group_index(target: str, by_name, group_index, node_group, kind: str) -> int:
@@ -97,6 +114,7 @@ async def _walk(
     by_name,
     logger,
     start_index: int = 0,
+    stop_index: int | None = None,
     single_group: bool = False,
     pending_instructions: dict[str, str] | None = None,
 ) -> dict[str, NodeOutcome]:
@@ -105,10 +123,15 @@ async def _walk(
     Returns per-node NodeOutcome (status + duration_s), so callers can render
     both. On a re-run (jump-back), a node's later outcome replaces the earlier.
 
+    The walk runs groups in the half-open range [start_index, stop_index).
+
     `start_index` is the FORWARD entry point (default 0 = the first group): the
-    walk begins at that group, skipping earlier ones. This is orthogonal to
-    jump-back — it sets where the walk STARTS; jump-back mutates position DURING
-    the run. Node->index translation is the caller's job (this stays mechanical).
+    walk begins at that group, skipping earlier ones. `stop_index` (default: all
+    groups) is the exclusive upper bound — the `stop_after` knob sets it so the
+    named group is the LAST one run. Both are orthogonal to jump-back: they bound
+    where the walk STARTS and ENDS; jump-back mutates position DURING the run
+    (and stays within the range — a jump target is behind the current position, so
+    always < stop_index).
 
     `single_group` (the `only` mode) runs EXACTLY the group at start_index and
     stops: no forward advance to later groups, and gate GoTo jump-backs are
@@ -123,8 +146,9 @@ async def _walk(
     # re-runs). Consumed (popped) as the forward walk reaches each group, so a
     # later unrelated pass runs the group in full again.
     restrict: dict[int, set[str]] = {}
+    stop = len(planned) if stop_index is None else stop_index
     i = start_index
-    while i < len(planned):
+    while i < stop:
         _key, group = planned[i]
         logger.debug(f"walk: group[{i}] {_key!r} -> nodes {[getattr(n, 'name', n) for n in group]}")
         outcomes = await run_group(group, restrict.pop(i, None))
