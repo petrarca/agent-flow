@@ -57,28 +57,55 @@ shown.
 ## Built-in gates
 
 A gate runs after a node's agent and returns a directive that steers the flow
-(`Continue` / `Restart` / `GoTo` / `Stop`). Four are pre-seeded into every
+(`Continue` / `Restart` / `GoTo` / `Stop`). Two are pre-seeded into every
 `FlowRegistry`, so you reference them by name with `gate_args`:
 
 | Gate | `gate_args` | What it does |
 |------|-------------|--------------|
 | `require_file` | `path` (required, templatable), `on_missing` (optional `Directive`) | The agent reported ok but didn't write its artifact -> `Restart` the node (bounded by `max_cycles`). `path` supports `{param}` templates (e.g. `"{run_dir}/report.md"`). A bare filename without a leading `/` or `{run_dir}` is treated as relative to `run_dir` — use `"{run_dir}/..."` to keep it consistent with the node's `inputs=` value. |
 | `stop_if` | `field`, `equals` (required); `reason_field` (default `"reason"`), `label` (optional) | A precondition failed -> `Stop` the whole run. Aborts when the result's `field` equals the sentinel `equals` (e.g. `field="ready", equals="no"`), else `Continue`. Reads the field from `ctx.obj` (typed) or the raw envelope, so it works with or without a `result_schema`. `label` prefixes the Stop reason to name the stage. The deterministic readiness/precondition check. |
-| `rerun_on_signal` | `target` (required) | The agent's control verdict set `rerun_required` -> `GoTo(target)`, a **fixed** earlier node (then the flow re-flows forward). The classic "verifier re-runs its analyst". Reads the verdict from the harvested envelope (`ctx.result`) — no file, no path. |
-| `rerun_on_named` | *(none)* | Same `rerun_required` signal, but routes to **whichever** node the verdict names (first valid backward target). For a coherence check that may bounce to any upstream stage. Reads the same `ctx.result` envelope. |
 
-Signatures: `require_file(ctx, *, path, on_missing=None)`,
-`stop_if(ctx, *, field, equals, reason_field="reason", label="")`,
-`rerun_on_signal(ctx, *, target)`,
-`rerun_on_named(ctx)`. The `require_file`/`rerun_*` gates auto-populate the
-directive's one-time `instruction`. A node with **no** gate behaves as
-`Continue()`. To write your own gate, see [Hook your own logic](#hook-your-own-logic-flowregistry)
-below; for the full directive/`GateContext` reference see the
-[gates design doc](../design/gates.md).
+Signatures: `require_file(ctx, *, path, on_missing=None)` and
+`stop_if(ctx, *, field, equals, reason_field="reason", label="")`. A node with
+**no** gate behaves as `Continue()`. To write your own gate, see
+[Hook your own logic](#hook-your-own-logic-flowregistry) below; for the full
+directive/`GateContext` reference see the [gates design doc](../design/gates.md).
 
-> The `rerun_*` gates only fire if the agent actually sets `rerun_required` in
-> its control sidecar — the agent's own `.md` must be told when to set it (the
-> injected control-file protocol makes the field available, but not the policy).
+> **Letting the agent ask for a re-run is not a gate.** Declare the targets on
+> the node instead — `rerun_targets=["tech-stack"]` — and the engine honors the
+> agent's `rerun_required`, names the legal targets in its preamble, and
+> validates them at build time. See [Let an agent re-run an earlier
+> step](#let-an-agent-re-run-an-earlier-step) below.
+
+## Let an agent re-run an earlier step
+
+Declare which steps the agent may ask to re-run. That declaration is the whole
+opt-in — no gate:
+
+```python
+NodeDef(name="verify", agent="tech-stack-verifier", depends_on=["tech-stack"],
+        rerun_targets=["tech-stack"])                       # one target
+
+NodeDef(name="coherence", agent="coherence-check", depends_on=["ai-leverage"],
+        rerun_targets=["tech-stack", "analysis", "architecture"])   # agent picks
+```
+
+The agent's preamble gains a block naming exactly those targets, so its `.md`
+never hardcodes step names. It then writes:
+
+```json
+{ "status": "verified", "rerun_required": true }
+{ "status": "verified", "rerun_required": { "target": "analysis", "instruction": "tech-stack changed, redo" } }
+```
+
+`true` is allowed only when **one** target was granted (nothing to choose);
+otherwise `target` is required. The `instruction` is handed to that step verbatim
+on its next run.
+
+A target may be a node or a **parallel group** — a group re-runs every member and
+broadcasts the instruction to each. Targets must run *before* the declaring node;
+an unknown or forward name fails at **build time**. Bounded by the target's
+`max_cycles`. Full detail: [rerun.md](../design/rerun.md).
 
 ## Hook your own logic (FlowRegistry)
 

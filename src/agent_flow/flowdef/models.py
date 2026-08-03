@@ -43,6 +43,12 @@ class NodeDef(BaseModel):
     gate: str | None = None
     gate_args: dict[str, Any] = Field(default_factory=dict)
 
+    # The re-run GRANT: node/parallel-group names this node's agent may ask to
+    # run again. Declaring it is the opt-in — it names the legal targets in the
+    # agent's preamble and authorizes the jump; no gate is involved. Validated at
+    # build time (known name, and backward of this node). See flow_types.Node.
+    rerun_targets: list[str] = Field(default_factory=list)
+
     # Result-schema by registered name (validated + injected by the agent run).
     result_schema: str | None = None
 

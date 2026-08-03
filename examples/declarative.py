@@ -38,7 +38,7 @@ class AssessParams(BaseSettings):
 # FlowRegistry. Two kinds are shown:
 #   1) a custom DECIDING gate (returns a Directive — steers the flow), and
 #   2) an OBSERVING hook (telemetry — never steers the flow).
-# Built-in gates (require_file / rerun_on_signal) are already seeded, so only the
+# Built-in gates (require_file / stop_if) are already seeded, so only the
 # custom ones need registering.
 
 REGISTRY = FlowRegistry()
@@ -77,9 +77,10 @@ def _log_cost(node, outcome) -> None:
 
 # The whole pipeline as flat DATA. Each node: which agent, its work-order inputs
 # ({product_key}/{run_dir} templated at run time), its DAG wiring, and a gate by
-# NAME (require_file / rerun_on_signal are built-ins, so no registration needed).
-# analysts gate on require_file (retry if the report wasn't written); verifiers
-# gate on rerun_on_signal (jump back to their analyst when they flag a re-run).
+# NAME (require_file is a built-in, so no registration needed).
+# Analysts gate on require_file (retry if the report wasn't written); verifiers
+# declare `rerun_targets` — the GRANT that lets their agent ask to re-run its
+# analyst, and that puts the legal target in the agent's own preamble.
 FLOW = FlowDef(
     name="assessment (declarative)",
     nodes=[
@@ -98,8 +99,7 @@ FLOW = FlowDef(
             inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
             depends_on=["tech-stack"],
             criticality="degrade",
-            gate="rerun_on_signal",
-            gate_args={"target": "tech-stack"},
+            rerun_targets=["tech-stack"],
         ),
         NodeDef(
             name="domain",
@@ -129,8 +129,7 @@ FLOW = FlowDef(
             inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/domain.md"},
             depends_on=["domain"],
             criticality="degrade",
-            gate="rerun_on_signal",
-            gate_args={"target": "domain"},
+            rerun_targets=["domain"],
         ),
         NodeDef(
             name="architecture-verify",
@@ -138,8 +137,7 @@ FLOW = FlowDef(
             inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/architecture.md"},
             depends_on=["architecture"],
             criticality="degrade",
-            gate="rerun_on_signal",
-            gate_args={"target": "architecture"},
+            rerun_targets=["architecture"],
         ),
         NodeDef(
             name="summary",

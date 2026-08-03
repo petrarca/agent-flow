@@ -107,9 +107,12 @@ async def test_executor_defaults_status_ok(tmp_path):
 
 @pytest.mark.anyio
 async def test_executor_preserves_rerun_required(tmp_path):
-    ex = MockExecutor(lambda inv, ctx: {"status": "verified", "rerun_required": ["a"]})
+    # Generic pass-through: the executor is unopinionated about the FIELD'S
+    # shape (that is protocol.parse_rerun's concern, exercised in test_rerun.py)
+    # — it must simply not reshape whatever the mock returned.
+    ex = MockExecutor(lambda inv, ctx: {"status": "verified", "rerun_required": {"target": "a"}})
     res = await ex.run(_inv(tmp_path))
-    assert res.control["rerun_required"] == ["a"]
+    assert res.control["rerun_required"] == {"target": "a"}
 
 
 @pytest.mark.anyio

@@ -55,7 +55,7 @@ instructions: |
 # map a node's portable duration NAME to seconds
 durations: {long: 900}
 # re-runs after a TRANSIENT agent failure (hung / crashed); per node, isolated
-max_retries: 1
+max_retries: 2
 
 # runtime-specific settings, an open bag
 options: {serve_url: "http://localhost:4096"}
@@ -190,13 +190,15 @@ FlowDef(name="p", nodes=[
             inputs={"REPORT": "{run_dir}/hello.md"},
             # a failed check shouldn't halt the run
             criticality="degrade",
-            gate="rerun_on_signal", gate_args={"target": "hello"}),
+            rerun_targets=["hello"]),   # the GRANT: no gate needed
 ])
 ```
 
-The agent's own `.md` must say when to set `rerun_required` — see
-[writing-agents.md](writing-agents.md#requesting-a-re-run). The re-run is bounded
-by `hello`'s `max_cycles`, so it cannot loop forever.
+`rerun_targets` grants the lever AND names `hello` in the verifier's preamble, so
+its `.md` only has to say *when* to ask — see
+[writing-agents.md](writing-agents.md#requesting-a-re-run). With a single granted
+target the agent just writes `"rerun_required": true`. The re-run is bounded by
+`hello`'s `max_cycles`, so it cannot loop forever.
 
 ## Stop the run when a precondition fails (`stop_if`)
 
@@ -229,19 +231,20 @@ ready" closure a pipeline used to write and register.
 An agent that goes silent is killed on the liveness deadline, and one whose
 process dies (OOM, a provider 429) fails the same way. Both are **transient** —
 nothing was wrong with the request — so the engine **re-runs the node**, bounded
-by `max_retries` (default 1):
+by `max_retries` (default 2 — a stall costs the full idle timeout before it is
+even detected, so giving up early is usually more expensive than one more try):
 
 ```yaml
 # run.yml
 idle_timeout_s: 600        # kill after 10min with no event/sidecar
-max_retries: 2             # then give the node up to 2 fresh attempts
+max_retries: 1             # tighter than the default: one fresh attempt only
 nodes:
   architecture-verify:
     max_retries: 3         # this one is flaky; allow more (overrides the run-wide value)
 ```
 
 ```python
-run_flow(flow, run_config={"max_retries": 2,
+run_flow(flow, run_config={"max_retries": 1,
                           "nodes": {"architecture-verify": {"max_retries": 3}}})
 ```
 
@@ -284,40 +287,43 @@ FlowDef(name="p", nodes=[
 `domain` and `coupling` both depend only on `tech-stack`, so they run
 concurrently. Cap total concurrency with `run_config={"llm_concurrency": 2}`.
 
-## A final check that re-runs whichever stage is at fault (`rerun_on_named`)
+## A final check that re-runs whichever stage is at fault
 
-`rerun_on_signal` bounces to a FIXED target (the verifier's own subject).
-`rerun_on_named` instead re-runs **whichever node the verdict names** — the idiom
-for a final coherence/consistency check that may find the root cause anywhere
-upstream. The check writes the root-cause NODE name(s) into `rerun_required` and
-nothing else; the engine re-flows forward from the earliest one named:
+Grant SEVERAL targets and the agent chooses — the idiom for a final
+coherence/consistency check that may find the root cause anywhere upstream:
 
 ```python
 FlowDef(name="p", nodes=[
     # … analysts (a parallel_group) → verifiers → synthesizer → extractor …
     NodeDef(name="consistency-check", agent="consistency-check",
             depends_on=["extractor"], criticality="degrade",
-            gate="rerun_on_named"),        # no gate_args — the target is the verdict
+            rerun_targets=["crypto", "analysis", "synthesizer"]),
 ])
 ```
 
-The agent names the STAGE to fix, e.g. its sidecar returns
-`{"status": "ok", "rerun_required": ["crypto"]}` when the `crypto` analyst's
-findings are inconsistent. Two properties make this precise:
+The preamble lists exactly those three (expanding `analysis` to its members), so
+the agent picks one:
+
+```json
+{ "status": "ok", "rerun_required": { "target": "crypto", "instruction": "the key-rotation finding contradicts the synthesis" } }
+```
+
+Three properties make this precise:
 
 - **Cascade forward, not sideways.** The flow resumes at `crypto` and re-runs it
   *plus everything downstream that depends on it* (its verifier, the synthesizer,
   the extractor, this check) — the transitive forward slice, so the fix
-  propagates. It does NOT re-run unrelated upstream stages.
+  propagates. It does NOT re-run unrelated upstream stages. So the agent names
+  only the ROOT CAUSE, never the cascade.
 - **Into a parallel group, only the named node re-runs.** If `crypto` is one of
   six sibling analysts in a `parallel_group`, the jump-back re-runs `crypto`
-  alone, not its five siblings. Bounded per target by `max_cycles`, so a
-  persistent inconsistency cannot loop forever.
+  alone, not its five siblings. Name the GROUP instead (`analysis`) to re-run the
+  whole wave — the instruction is then broadcast to every member.
+- **Bounded.** Per target by `max_cycles`, so a persistent inconsistency cannot
+  loop forever; and every granted name is validated at build time.
 
 Keep the check's job narrow: it decides *which node* is the root cause and names
-it — it does not fix content itself. The agent's `.md` must be told to populate
-`rerun_required` with node names (see
-[writing-agents.md](writing-agents.md#requesting-a-re-run)).
+it — it does not fix content itself.
 
 ## Pass a run-wide brief to every agent
 

@@ -53,6 +53,7 @@ src/agent_flow/
   _version.py            # __version__, its own leaf so no submodule imports the root
   protocol/              # the library <-> agent AGREEMENT, below core AND runners:
                          #   control.py (sidecar protocol) + schema/coerce (typed output)
+                         #   + rerun.py (the agent-requested re-run: RerunSpec/parse_rerun)
   runners/               # agent-runtime seam (AgentRunner Protocol) + get_runner registry;
                          #   the four executors incl. subprocess_exec.py + supervision.py
   core/                  # Tier-1: run_agent / arun_agent, context ingestion, env
@@ -142,7 +143,11 @@ verdict. The library injects the protocol into the prompt
 (`build_control_preamble`); agent `.md` files carry only domain instructions.
 
 - **Envelope (engine reads):** `status` (`ok`/`verified`/`error`), `agent`,
-  `reason`, and `rerun_required` (a flow-control signal a gate consumes).
+  `reason`.
+- **Flow control (engine reads, only where GRANTED):** `rerun_required` — an
+  agent's request to re-run an earlier step. Honored only on a node that
+  declared `rerun_targets` (the node's opt-in, not a gate); see
+  `docs/design/rerun.md`.
 - **Payload (only gates/consumers read):** `result` — free-form dict. The engine
   never looks inside.
 - **No `artifact` field** — what an agent produces is expressed in the files it
@@ -163,8 +168,13 @@ verdict. The library injects the protocol into the prompt
 
 A gate `(GateContext) -> Directive` decides flow control AFTER an agent runs. The
 engine never auto-fails on schema/artifact issues — a gate does. A verifier is
-NOT a library concept: it is just another node that `depends_on` its subject and
-returns `GoTo(subject)`.
+NOT a library concept: it is just another node that `depends_on` its subject.
+
+An agent-REQUESTED re-run (the verifier loop) is declarative, not a gate: the
+node grants it via `rerun_targets` and the engine honors the agent's
+`rerun_required` directly — see `docs/design/rerun.md`. A gate remains the
+escape hatch for flow control a declaration cannot express, and still wins: a
+non-`Continue` directive overrides the declaration.
 
 ### Typed output
 

@@ -27,7 +27,8 @@ Do NOT access repositories or check paths beyond the REPORT file.
 ## Requesting a re-run
 
 If the report is so incomplete that a placeholder is not enough (e.g. entire
-sections are missing), include `"rerun_required": ["architecture"]` in your control
-JSON instead of a bare `"verified"` status, so the architecture step is redone. This
-should be rare — only for a genuinely unusable report.
+sections are missing), set `"rerun_required": true` in your control JSON — per
+the completion protocol injected into your prompt — instead of a bare
+`"verified"` status. This should be rare — only for a genuinely unusable
+report.
 

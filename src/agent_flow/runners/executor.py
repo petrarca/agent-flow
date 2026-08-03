@@ -217,7 +217,7 @@ class AgentExecutor(abc.ABC):
         by which a bad status stops or degrades a node: `interpret()` catches the
         raised exception and maps it through the node's `criticality` (blocking ->
         NodeBlocked/halts; degrade -> recorded as "degraded"). None of the
-        built-in gates (require_file, rerun_on_signal, rerun_on_named) inspect
+        built-in gates (require_file, stop_if) inspect
         `status` themselves, so without this check a bad status would otherwise
         be silently treated as a success.
 
