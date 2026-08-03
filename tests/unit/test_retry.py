@@ -44,7 +44,7 @@ def test_transient_failure_is_retried_and_succeeds(tmp_path):
     calls: dict = {}
     out = _run([Node("a", run=_counting(calls, "a", 1), criticality="degrade")], tmp_path)
     assert out["a"].status == "ok"
-    assert calls["a"] == 2  # initial attempt + one retry
+    assert calls["a"] == 2  # failed once, succeeded on the first retry
 
 
 def test_transient_failure_is_bounded_then_degrades(tmp_path):
@@ -52,7 +52,7 @@ def test_transient_failure_is_bounded_then_degrades(tmp_path):
     calls: dict = {}
     out = _run([Node("a", run=_counting(calls, "a", 99), criticality="degrade")], tmp_path)
     assert out["a"].status == "degraded"
-    assert calls["a"] == 2  # 1 + the default single retry, then it gives up
+    assert calls["a"] == 3  # 1 + the two default retries, then it gives up
 
 
 def test_permanent_failure_is_never_retried(tmp_path):
@@ -116,7 +116,7 @@ def test_blocking_node_retries_then_stops_the_run(tmp_path):
     calls: dict = {}
     with pytest.raises(NodeBlocked):
         _run([Node("a", run=_counting(calls, "a", 99), criticality="blocking")], tmp_path)
-    assert calls["a"] == 2  # it still gets its retry before halting the run
+    assert calls["a"] == 3  # it still gets its retries before halting the run
 
 
 # --- isolation: the property that matters in a parallel group ----------------
@@ -154,7 +154,7 @@ def test_exhausted_retry_in_a_group_degrades_only_that_node(tmp_path):
     assert out["ok-node"].status == "ok"
     assert out["bad-node"].status == "degraded"
     assert calls["ok-node"] == 1
-    assert calls["bad-node"] == 2  # 1 + one retry, then degraded
+    assert calls["bad-node"] == 3  # 1 + two retries, then degraded
 
 
 # --- the two budgets are independent -----------------------------------------
@@ -185,3 +185,46 @@ def test_retries_do_not_consume_the_gate_cycle_budget(tmp_path):
     # 1 crashed attempt + 1 retry (reached the gate) + 1 gate restart = 3 runs
     assert calls["a"] == 3
     assert seen == [0, 1]  # the gate saw cycle 0 then cycle 1 — retries did not inflate it
+
+
+# --- the one-time instruction must survive a transient failure ----------------
+
+
+def test_retry_keeps_the_one_time_instruction(tmp_path):
+    """A hung/crashed attempt never HAPPENED, so its instruction is not spent.
+
+    The carrier is cleared before each attempt (the instruction is single-attempt
+    by design), but dropping it on a transient failure would make the retry redo
+    the ORIGINAL work instead of the corrected work a jump-back asked for — the
+    one case the instruction exists for.
+    """
+    seen: list[str] = []
+
+    def verify(ctx):
+        # First pass asks its subject to re-run, with guidance (the analyst has
+        # run once by now, so `seen` already holds its first, blank instruction).
+        if len(seen) == 1:
+            return {"status": "verified", "rerun_required": {"instruction": "recompute the coupling figure"}}
+        return {"status": "verified"}
+
+    attempts = {"n": 0}
+
+    async def analyst(ctx):
+        seen.append(ctx.one_time_instruction)
+        attempts["n"] += 1
+        # Hang on the FIRST re-run attempt (the one carrying the instruction).
+        if attempts["n"] == 2:
+            raise TransientAgentError("analyst went stale")
+        return {"status": "ok"}
+
+    nodes = [
+        Node("analyst", run=analyst, criticality="degrade", max_cycles=2),
+        Node("verify", run=verify, depends_on=("analyst",), rerun_targets=("analyst",), criticality="degrade"),
+    ]
+    _run(nodes, tmp_path)
+
+    # 1st run: no instruction. 2nd (jump-back): instruction, but the agent hung.
+    # 3rd (retry of that attempt): the instruction must STILL be there.
+    assert seen[0] == ""
+    assert seen[1] == "recompute the coupling figure"
+    assert seen[2] == "recompute the coupling figure"

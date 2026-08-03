@@ -14,8 +14,8 @@ from agent_flow.run_context import clear_run_context, init_run_context
 
 def test_builtin_gates_seeded():
     r = FlowRegistry()
-    assert {"require_file", "rerun_on_signal", "rerun_on_named"} <= set(r._gates)
-    assert all(r.has_gate(g) for g in ("require_file", "rerun_on_signal", "rerun_on_named"))
+    assert {"require_file", "stop_if"} <= set(r._gates)
+    assert all(r.has_gate(g) for g in ("require_file", "stop_if"))
 
 
 def test_no_seed_when_disabled():
@@ -25,7 +25,7 @@ def test_no_seed_when_disabled():
 
 def test_build_gate_from_ref_and_args():
     r = FlowRegistry()
-    gate = r.build_gate("rerun_on_signal", {"target": "analyst"})
+    gate = r.build_gate("require_file", {"path": "report.md"})
     assert callable(gate)
 
 
@@ -274,6 +274,6 @@ def test_node_scope_rejected_for_group_event():
 async def test_default_registry_when_none():
     # build_flow with no registry seeds a default (built-in gates); a node using
     # a built-in gate ref resolves without the caller supplying a registry.
-    node = Node(name="a", run=lambda ctx: {"ok": True}, gate_ref="rerun_on_signal", gate_args={"target": "a"})
+    node = Node(name="a", run=lambda ctx: {"ok": True}, gate_ref="stop_if", gate_args={"field": "ready", "equals": "no"})
     result = await build_flow([node], name="t")(run_dir="")
-    assert result["a"].status == "ok"  # no sidecar -> rerun_on_signal returns Continue
+    assert result["a"].status == "ok"  # field absent -> stop_if returns Continue

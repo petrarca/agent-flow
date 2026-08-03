@@ -1,9 +1,10 @@
 """Flow DAG TYPES — the vocabulary the engine, the backends and a node's
 `run` callable all speak.
 
-A pure LEAF module: it imports only `gates` (for the `Gate` type) and the
-standard library, and it imports nothing from the engine, the backends, the
-runners or `core`. That is the whole point of the module.
+A pure LEAF module: it imports only `gates` (for the `Gate` type), `protocol`
+(for `RerunSpec` — the re-run GRANT a node carries) and the standard library,
+and it imports nothing from the engine, the backends, the runners or `core`.
+That is the whole point of the module.
 
 The vocabulary sits below both the engine and the backends because both need it:
 the backend ABC and every backend take `Node`/`NodeOutcome` in their signatures,
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from agent_flow.gates import Gate
+from agent_flow.protocol import RerunSpec
 
 if TYPE_CHECKING:
     from upath import UPath
@@ -115,6 +117,13 @@ class RunContext:
     # --mock-agents for any node that omitted it. Typed loosely to keep this
     # module a leaf (registry sits above the flow vocabulary).
     registry: Any | None = None
+    # This node's RESOLVED re-run grant, or None when it declared none. The node
+    # declares NAMES (Node.rerun_targets); resolving them — validating each and
+    # expanding a parallel-GROUP name to the members it stands for — needs the
+    # DAG, which only the engine has. So the engine resolves once, hands the
+    # result down here, and the node's `run` forwards it to the invocation, where
+    # it becomes the re-run block of the agent's preamble.
+    rerun: RerunSpec | None = None
 
 
 # A node's work: perform the invocation, return whatever the gate will inspect
@@ -188,6 +197,22 @@ class Node:
     gate_ref: str | None = None
     gate_args: dict[str, Any] = field(default_factory=dict)
     export_ref: str | None = None
+    # The re-run GRANT: node and/or parallel-GROUP names this node's agent may
+    # ask to run again (via the control file's `rerun_required`). Declaring it is
+    # the whole opt-in — it grants the lever, names the legal targets in the
+    # agent's preamble, and authorizes the jump. Empty (the default) means the
+    # agent is told nothing about re-running and any request is ignored.
+    #
+    # No gate is involved: the targets are declared here, so honoring the request
+    # is a RULE the engine applies, not a decision to delegate. A gate remains the
+    # escape hatch for logic a declaration cannot express (it may return its own
+    # GoTo, and a non-Continue directive wins over this).
+    #
+    # Every entry is validated at BUILD time: it must name a known node or
+    # parallel group, and be BACKWARD of this node (a jump-back only ever resumes
+    # at something that already ran). A typo fails the build instead of being
+    # silently dropped at run time.
+    rerun_targets: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

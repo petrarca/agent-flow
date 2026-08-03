@@ -62,26 +62,25 @@ might read, or nothing.
 
 ## Requesting a re-run
 
-The injected protocol mentions `rerun_required`, but your agent only knows *when*
-to use it if you say so. This is how a verifier asks for an earlier step to be
-redone:
+You do **not** document `rerun_required` in your agent's `.md`, and you never
+write step names there. The pipeline grants the capability on the node
+(`rerun_targets=[...]`), and the library injects a block naming exactly the steps
+this agent may ask for — so a renamed step can never leave a stale name behind.
+
+Your `.md` only needs to say **when** to use it, in domain terms:
 
 ```markdown
 ## Requesting a re-run
 
 If the report is unusable (entire sections missing, not merely incomplete),
-include `"rerun_required": ["hello"]` in your control JSON instead of a bare
-`"verified"` status, so the `hello` step is redone. This should be rare.
+request a re-run of the step that produced it instead of reporting `verified`.
+Say briefly what it must fix. This should be rare.
 ```
 
-Use the node's name (`NodeDef(name=...)`). The pipeline side needs a matching
-gate: a verifier with one fixed subject pairs with
-`gate="rerun_on_signal", gate_args={"target": "hello"}`
-([verifier recipe](advanced-recipes.md#a-verifier-that-can-trigger-a-re-run)); a
-final coherence check that may flag ANY upstream stage names the root-cause
-node(s) in `rerun_required` and pairs with `gate="rerun_on_named"`
-([cascade recipe](advanced-recipes.md#a-final-check-that-re-runs-whichever-stage-is-at-fault-rerun_on_named)),
-which re-flows forward from the earliest named node.
+The agent then writes whatever the injected block told it — `true` when only one
+step was granted, or `{"target": "...", "instruction": "..."}` when it must
+choose. See [Let an agent re-run an earlier step](recipes.md#let-an-agent-re-run-an-earlier-step)
+for the pipeline side.
 
 ## Always use the paths you are given
 

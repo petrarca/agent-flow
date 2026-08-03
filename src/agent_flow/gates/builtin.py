@@ -12,8 +12,8 @@ from typing import Any
 
 from upath import UPath
 
-from agent_flow.gates.signals import produced, read_field, rerun_targets
-from agent_flow.gates.types import Continue, Directive, GateContext, GoTo, Restart, Stop
+from agent_flow.gates.signals import produced, read_field
+from agent_flow.gates.types import Continue, Directive, GateContext, Restart, Stop
 
 # Ready-made gates — the checks almost every pipeline writes, shipped so the
 # consumer doesn't hand-roll a closure. All are fully OPTIONAL and composable;
@@ -71,48 +71,6 @@ def stop_if(ctx: GateContext, *, field: str, equals: Any, reason_field: str = "r
     if read_field(ctx, field) == equals:
         detail = read_field(ctx, reason_field) or f"{field} == {equals!r}"
         return Stop(reason=f"{label}: {detail}" if label else str(detail))
-    return Continue()
-
-
-def rerun_on_signal(ctx: GateContext, *, target: str) -> Directive:
-    """Gate: re-run a FIXED `target` node when the verdict asks for a re-run.
-
-    Config:
-      target  which node to jump back to (required).
-
-    Reads `rerun_required` from the HARVESTED control envelope (`ctx.result`) —
-    no file, no path. By the time this gate runs the executor has already
-    harvested the verdict however it came back (subprocess sidecar, remote
-    structured output, remote file API), so the gate reads the dict it was
-    handed. If `rerun_required` is non-empty -> GoTo(target) (bounded by the
-    walker), else Continue. The common verifier case (always bounces to its one
-    fixed subject). For a variable destination use `rerun_on_named`.
-
-    Referenced as gate="rerun_on_signal", gate_args={"target": "..."}.
-    """
-    node_name = getattr(ctx.node, "name", None) or str(ctx.node)
-    if rerun_targets(ctx.result):
-        return GoTo(node=target, instruction=f"{node_name} signalled a re-run of {target}.")
-    return Continue()
-
-
-def rerun_on_named(ctx: GateContext) -> Directive:
-    """Gate: re-run WHICHEVER node the verdict's `rerun_required` names.
-
-    Reads `rerun_required` from the HARVESTED control envelope (`ctx.result`) —
-    no file, no path (see `rerun_on_signal`). Unlike `rerun_on_signal` (fixed
-    target), routes to the node named in the envelope — for a final coherence
-    check that may bounce to any upstream stage. `rerun_required` carries NODE
-    names; the FIRST valid backward target is used (the walker bounds/validates
-    the jump). Empty -> Continue.
-
-    Referenced as gate="rerun_on_named" (no args).
-    """
-    node_name = getattr(ctx.node, "name", None) or str(ctx.node)
-    named = rerun_targets(ctx.result)
-    if named:
-        target = named[0]
-        return GoTo(node=target, instruction=f"{node_name} signalled a re-run of {target}.")
     return Continue()
 
 

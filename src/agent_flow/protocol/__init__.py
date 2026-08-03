@@ -22,20 +22,26 @@ Module map:
   schema_pydantic.py  `PydanticSchema` — the pydantic implementation
   coerce.py           `coerce_schema` — the factory over both implementations
   control.py          `build_control_preamble` — the control-sidecar protocol
+  rerun.py            the re-run REQUEST: what a node grants (`RerunSpec`), what
+                      an agent may write, how it parses (`parse_rerun`)
 """
 
 from __future__ import annotations
 
 from agent_flow.protocol.coerce import coerce_schema
 from agent_flow.protocol.control import build_control_preamble
+from agent_flow.protocol.rerun import RerunRequest, RerunSpec, parse_rerun
 from agent_flow.protocol.schema import JsonSchema, ResultSchema, ValidationOutcome
 from agent_flow.protocol.schema_pydantic import PydanticSchema
 
 __all__ = [
     "JsonSchema",
     "PydanticSchema",
+    "RerunRequest",
+    "RerunSpec",
     "ResultSchema",
     "ValidationOutcome",
     "build_control_preamble",
     "coerce_schema",
+    "parse_rerun",
 ]

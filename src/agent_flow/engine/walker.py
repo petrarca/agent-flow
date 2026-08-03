@@ -156,14 +156,14 @@ async def _walk(
             results[n_name] = oc
         if single_group:
             break  # `only` mode: run one group, ignore jump-backs and forward advance
-        jump = _pick_jump_back(outcomes, node_group, group_index, i, jumps, by_name, logger)
+        jump = _pick_jump_back(outcomes, node_group, group_index, i, jumps, by_name, logger, planned)
         if jump is not None:
-            target_i, targets = jump
+            target_i, targets, origin = jump
             for t in targets:
                 jumps[t] = jumps.get(t, 0) + 1
                 # Deliver each jumping node's one-time instruction to its target's re-run.
                 if pending_instructions is not None:
-                    instr = _instruction_for_target(outcomes, t)
+                    instr = _instruction_for_target(outcomes, t, origin)
                     if instr:
                         pending_instructions[t] = instr
             # Restrict the target group to EXACTLY the flagged node(s) on re-entry
@@ -177,20 +177,40 @@ async def _walk(
     return results
 
 
-def _instruction_for_target(outcomes: dict[str, NodeOutcome], target: str) -> str:
-    """The one-time instruction from the outcome whose GoTo chose `target` (or "")."""
+def _instruction_for_target(outcomes: dict[str, NodeOutcome], target: str, chose: dict[str, str]) -> str:
+    """The one-time instruction destined for `target` (or "").
+
+    `chose` maps each resolved target node to the name the jumping outcome
+    actually wrote — the same string for a plain node, but the GROUP name when
+    the jump was expanded. Without it a group jump would deliver nothing: the
+    outcome says `goto="analysis"` while the targets are its members.
+
+    A group instruction reaches EVERY member that re-runs. That is the intended
+    reading: choosing the group (over one of its members) is itself the claim
+    that the reason applies to the whole wave.
+    """
+    wanted = chose.get(target, target)
     for oc in outcomes.values():
-        if oc.goto == target and oc.instruction:
+        if oc.goto == wanted and oc.instruction:
             return oc.instruction
     return ""
 
 
-def _pick_jump_back(outcomes, node_group, group_index, current_i, jumps, by_name, logger) -> tuple[int, set[str]] | None:
-    """Pick the backward jump-back as (target_group_index, {target node names}).
+def _pick_jump_back(
+    outcomes, node_group, group_index, current_i, jumps, by_name, logger, planned=None
+) -> tuple[int, set[str], dict[str, str]] | None:
+    """Pick the backward jump-back as (target_group_index, {node names}, origin).
 
     Only backward jumps (to an earlier group) are honored, bounded per target by
     the target node's max_cycles. Forward/unknown/exhausted targets are ignored
-    with a log so a gate mistake fails visibly rather than looping.
+    with a log so a mistake fails visibly rather than looping.
+
+    A target may name a parallel GROUP instead of a node — the way to say "re-run
+    that whole wave", which a single GoTo could not otherwise express (it carries
+    one name). A group EXPANDS to its members here, and each member is then bound
+    by its OWN max_cycles: an exhausted member is skipped while its eligible
+    siblings still re-run, exactly as a per-node target behaves. A group whose
+    members are all exhausted yields no jump.
 
     When outcomes name valid backward targets in DIFFERENT groups (e.g. a
     consistency-check flags nodes across stages), the EARLIEST group wins — the
@@ -198,27 +218,41 @@ def _pick_jump_back(outcomes, node_group, group_index, current_i, jumps, by_name
     "re-run the earliest affected stage, cascade forward". ALL valid targets that
     land in that earliest group are returned together, so several verifiers in one
     fan-out each re-run their own analyst (a subset of the group), not just one.
-    Returns None when no valid backward target exists.
+
+    `origin` maps each resolved node back to the name the outcome WROTE (itself,
+    or the group it came from), so the instruction can be delivered to a group's
+    members. Returns None when no valid backward target exists.
     """
+    members = {key: [getattr(n, "name", str(n)) for n in group] for key, group in (planned or [])}
     by_group: dict[int, set[str]] = {}
+    origin: dict[str, str] = {}
     for oc in outcomes.values():
         target = oc.goto
         if target is None:
             continue
-        if target not in by_name:
-            logger.warning(f"GoTo target {target!r} is not a known node — ignoring")
+        # A group name stands for its members; a node stands for itself.
+        if target in members and target not in by_name:
+            resolved, target_i = members[target], group_index[target]
+        elif target in by_name:
+            resolved, target_i = [target], group_index[node_group[target]]
+        else:
+            logger.warning(f"GoTo target {target!r} is not a known node or parallel group — ignoring")
             continue
-        target_i = group_index[node_group[target]]
         if target_i >= current_i:
             logger.warning(f"GoTo {target!r} is not a backward jump — ignoring")
             continue
-        if jumps.get(target, 0) >= by_name[target].max_cycles:
+        eligible = {n for n in resolved if jumps.get(n, 0) < by_name[n].max_cycles}
+        if not eligible:
             logger.warning(f"GoTo {target!r} exhausted (max_cycles) — proceeding")
             continue
-        by_group.setdefault(target_i, set()).add(target)
+        if skipped := sorted(set(resolved) - eligible):
+            logger.warning(f"GoTo {target!r}: {skipped} exhausted (max_cycles) — re-running the rest")
+        by_group.setdefault(target_i, set()).update(eligible)
+        for n in eligible:
+            origin[n] = target
     if not by_group:
         return None
     earliest = min(by_group)  # earliest affected group; re-flow handles later ones
     targets = by_group[earliest]
     logger.info(f"jump-back to {sorted(targets)} (re-running only those node(s), then re-flowing forward)")
-    return earliest, targets
+    return earliest, targets, origin

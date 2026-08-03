@@ -17,6 +17,7 @@ from agent_flow.engine.dispatch import maybe_await
 from agent_flow.errors import TransientAgentError
 from agent_flow.flow_types import Node, NodeBlocked, NodeOutcome, RunContext
 from agent_flow.gates import Continue, GateContext, GoTo, Restart, Stop
+from agent_flow.protocol import RerunSpec, parse_rerun
 
 if TYPE_CHECKING:
     from upath import UPath
@@ -52,6 +53,7 @@ async def interpret(
     registry: Any = None,
     one_time_instruction: str = "",
     max_retries: int = DEFAULT_MAX_RETRIES,
+    rerun: RerunSpec | None = None,
 ) -> NodeOutcome:
     """Run one node to completion, interpreting its gate's directives.
 
@@ -66,6 +68,15 @@ async def interpret(
     GoTo is a RESUME, not necessarily a re-run). It is folded into that attempt's
     prompt and then cleared; a self-loop Restart/self-GoTo sets a fresh one from
     its own directive for the next in-place attempt.
+
+    `rerun` is the node's resolved re-run GRANT (from its `rerun_targets`), or
+    None when it declared none. It travels to the agent (via RunContext, so the
+    preamble can name the legal targets) AND is what makes the agent's
+    `rerun_required` mean anything here: with a grant, a request becomes a GoTo;
+    without one it is ignored. No gate is involved — the consumer already
+    expressed intent by declaring the targets. A gate still WINS when it returns
+    a non-Continue directive, so it remains the escape hatch for logic a
+    declaration cannot express.
 
     `on_error` maps a raised exception to a status per criticality (and may
     itself raise NodeBlocked). `registry` (a FlowRegistry) resolves the node's
@@ -125,6 +136,7 @@ async def interpret(
                         options=dict(options or {}),
                         one_time_instruction=attempt_instruction,
                         registry=registry,
+                        rerun=rerun,
                     )
                 )
             )
@@ -136,6 +148,13 @@ async def interpret(
             # parallel sibling keeps its outcome and is never re-run.
             if retries < max_retries:
                 retries += 1
+                # Hand the instruction back to the next attempt. The carrier was
+                # cleared before this one ran (it is single-attempt by design),
+                # but a transient failure means the attempt never HAPPENED — the
+                # agent hung or crashed. Dropping it here would silently re-run
+                # the ORIGINAL work instead of the corrected work a jump-back
+                # asked for, which is the one case the instruction exists for.
+                pending_instruction = attempt_instruction
                 log(f"node {node.name}: transient failure ({type(exc).__name__}) — retry {retries}/{max_retries}: {str(exc).splitlines()[0]}")
                 continue
             # Exhausted: hand it to criticality (degrade -> continue, blocking -> stop).
@@ -161,6 +180,8 @@ async def interpret(
             directive = await maybe_await(gate(gctx))
         else:
             directive = Continue()
+
+        directive = _with_rerun_request(directive, result, rerun, node.name, log)
 
         if isinstance(directive, Stop):
             log(f"node {node.name}: gate -> Stop ({directive.reason})")
@@ -192,6 +213,37 @@ async def interpret(
         outcome = NodeOutcome(status="ok", runtime=runtime)
         await _fire_hook(registry, "after_node", node, log, node, outcome)
         return outcome
+
+
+def _with_rerun_request(directive: Any, result: Any, rerun: RerunSpec | None, node_name: str, log: Callable[[str], None]) -> Any:
+    """Fold the AGENT's own re-run request into the directive, where granted.
+
+    Honored only when the node declared `rerun_targets` (that declaration IS the
+    consumer's opt-in, so no gate is needed to bless it). The request becomes a
+    GoTo so it travels the exact same path a gate's GoTo does — a self-target
+    folds into the in-place restart, a cross-node one goes to the walker — rather
+    than becoming a second, parallel jump mechanism with its own bounds.
+
+    A gate that returned anything but Continue has already decided, and keeps
+    that decision: the declaration is the DEFAULT, the gate the OVERRIDE.
+
+    The grant is an ALLOWLIST and is enforced here: a target the node did not
+    declare is refused, even when it names a perfectly valid backward node. The
+    walker's own checks (known / backward / not exhausted) are about what the DAG
+    can do; only this one is about what this agent was PERMITTED to ask for, and
+    an LLM naming something plausible-but-ungranted must not be able to steer the
+    flow. Refusal is logged, never silent, and never fatal.
+    """
+    if not isinstance(directive, Continue):
+        return directive
+    request = parse_rerun(result if isinstance(result, dict) else None, rerun)
+    if request is None:
+        return directive
+    if rerun is not None and request.target not in rerun.names:
+        log(f"node {node_name}: agent requested re-run of {request.target!r}, which it was not granted (allowed: {list(rerun.names)}) — ignoring")
+        return directive
+    log(f"node {node_name}: agent requested re-run of {request.target} ({request.instruction})")
+    return GoTo(node=request.target, instruction=request.instruction)
 
 
 def _resolve_max_retries(node_name: str, node_overrides: dict[str, dict[str, Any]] | None, run_wide: int) -> int:

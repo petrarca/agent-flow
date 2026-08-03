@@ -90,7 +90,7 @@ def verifier(inv: AgentInvocation, ctx: MockAgentContext) -> dict:
             seen = False
         if not seen:
             ctx.write_file(marker, "1")
-            return {"status": "verified", "rerun_required": ["analyst"]}
+            return {"status": "verified", "rerun_required": True}
     return {"status": "verified", "result": {"issues_found": 0}}
 
 
@@ -265,11 +265,11 @@ expensive to discover:
 
 - **The whole DAG runs green** and produces every expected artifact.
 - **`require_file` retries** when a node reports ok but writes nothing.
-- **A verifier's `rerun_on_signal`** jumps back to its target and settles within
-  `max_cycles`.
-- **A final check's `rerun_on_named`** re-runs only the node(s) it names — and, for
-  a node inside a **parallel group**, that it re-runs *only that node*, not its
-  siblings (count the calls per agent to prove it).
+- **A granted re-run** (`rerun_targets`) jumps back to its target and settles
+  within `max_cycles`.
+- **A multi-target grant** re-runs only the node the agent names — and, for a node
+  inside a **parallel group**, that it re-runs *only that node*, not its siblings
+  (count the calls per agent to prove it). Naming the GROUP re-runs every member.
 - **Exports publish**: a value a readiness node exports is available to a later
   node's work order (assert the run reaches the end, or read the exporting node's
   sidecar under `run_dir`).

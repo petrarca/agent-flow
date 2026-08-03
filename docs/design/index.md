@@ -53,7 +53,7 @@ Three concerns, kept strictly separate:
 | Whether the side effects are acceptable, and what to do next | the consumer, via gates |
 
 The library reads exactly one thing back from an agent, the control sidecar, and
-interprets only its `status` and `rerun_required`. Everything else the agent
+interprets only its `status` (and `rerun_required`, where granted). Everything else the agent
 emits is opaque. See [control-file](control-file.md).
 
 ## Design principles
@@ -115,7 +115,7 @@ flow = FlowDef(name="tech", nodes=[
     # a verifier is just another node that can jump the flow back
     NodeDef(name="tech-stack-verify", agent="tech-stack-verifier",
             depends_on=["tech-stack"], criticality="degrade",
-            gate="rerun_on_signal", gate_args={"target": "tech-stack"}),
+            rerun_targets=["tech-stack"]),
 ])
 
 # without a run_dir, output goes to a temp dir logged at start
@@ -133,7 +133,8 @@ sync or async. See [engine.md](engine.md).
 | Concept | Doc | What it covers |
 |---|---|---|
 | Supervision core | [supervision.md](supervision.md) | `run_agent`: liveness (not wall-clock), kill, sidecar verdict; the `AgentRunner` seam; why `--format json` |
-| Control file | [control-file.md](control-file.md) | The sidecar contract: envelope (`status`/`agent`/`reason`/`rerun_required`) + opaque `result{}`; protocol injection |
+| Control file | [control-file.md](control-file.md) | The sidecar contract: envelope (`status`/`agent`/`reason`) + opaque `result{}`; protocol injection |
+| Re-run | [rerun.md](rerun.md) | The agent's one flow lever: `rerun_required`, granted per node via `rerun_targets` |
 | Engine | [engine.md](engine.md) | `Node`, `plan_groups`, `build_flow`; DAG + parallel groups; bounded re-runs; cross-node jump-back |
 | FlowDef | [flowdef.md](flowdef.md) | the declarative surface: `FlowDef`/`NodeDef` (serializable data), the `FlowRegistry` (gates/exports/runs/schemas by name; `(ctx, **config)` gates), `compile_flow`/`run_flow` |
 | Gates | [gates.md](gates.md) | `Directive` (Continue/Restart/GoTo/Stop), `GateContext`, ready-made gates — the consumer's flow-control hook |

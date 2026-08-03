@@ -27,9 +27,11 @@ Public API (the authoritative list is `__all__` below):
         # flow-control gates — the consumer's optional hook
         Gate, GateContext, Directive,
         Continue, Restart, GoTo, Stop,
-        require_file, rerun_on_signal, rerun_on_named,
+        require_file, stop_if,
         # file-based signals (gate building blocks)
-        produced, rerun_targets,
+        produced, read_field,
+        # agent-requested re-run (declared per node via rerun_targets)
+        RerunSpec, RerunRequest, parse_rerun,
         # typed agent output (opt-in)
         ResultSchema, JsonSchema, PydanticSchema, ValidationOutcome, coerce_schema,
         # the injected control-file protocol
@@ -90,9 +92,6 @@ if TYPE_CHECKING:  # the static view: type checkers and IDEs see the real names
         produced,
         read_field,
         require_file,
-        rerun_on_named,
-        rerun_on_signal,
-        rerun_targets,
         stop_if,
     )
     from agent_flow.logging_setup import LIBRARY_LOGGER, setup_logging
@@ -105,7 +104,17 @@ if TYPE_CHECKING:  # the static view: type checkers and IDEs see the real names
         render_work_order_xml,
     )
     from agent_flow.preflight import Check, check, fatal_failures
-    from agent_flow.protocol import JsonSchema, PydanticSchema, ResultSchema, ValidationOutcome, build_control_preamble, coerce_schema
+    from agent_flow.protocol import (
+        JsonSchema,
+        PydanticSchema,
+        RerunRequest,
+        RerunSpec,
+        ResultSchema,
+        ValidationOutcome,
+        build_control_preamble,
+        coerce_schema,
+        parse_rerun,
+    )
     from agent_flow.registry import FlowRegistry
     from agent_flow.run_config import NodeRunConfig, RunConfig, build_run_config, parse_params, runtime_param, runtime_param_fields
     from agent_flow.run_context import RunContextService, clear_run_context, get_run_context, init_run_context
@@ -173,6 +182,8 @@ _EXPORTS: dict[str, str] = {
     "PermanentAgentError": "agent_flow.errors",
     "PromptParts": "agent_flow.runners",
     "PydanticSchema": "agent_flow.protocol",
+    "RerunRequest": "agent_flow.protocol",
+    "RerunSpec": "agent_flow.protocol",
     "Restart": "agent_flow.gates",
     "ResultSchema": "agent_flow.protocol",
     "RunConfig": "agent_flow.run_config",
@@ -207,6 +218,7 @@ _EXPORTS: dict[str, str] = {
     "interpret": "agent_flow.engine",
     "load_env": "agent_flow.core",
     "parse_params": "agent_flow.run_config",
+    "parse_rerun": "agent_flow.protocol",
     "plan_groups": "agent_flow.engine",
     "print_preflight_results": "agent_flow.cli",
     "print_results_table": "agent_flow.cli",
@@ -218,9 +230,6 @@ _EXPORTS: dict[str, str] = {
     "render_work_order_lines": "agent_flow.node_builder",
     "render_work_order_xml": "agent_flow.node_builder",
     "require_file": "agent_flow.gates",
-    "rerun_on_named": "agent_flow.gates",
-    "rerun_on_signal": "agent_flow.gates",
-    "rerun_targets": "agent_flow.gates",
     "resolve_run_dir": "agent_flow.utils",
     "run_agent": "agent_flow.core",
     "run_cli": "agent_flow.cli",
@@ -296,6 +305,10 @@ __all__ = [
     "clear_run_context",
     # control-file protocol (injected into agent prompts)
     "build_control_preamble",
+    # agent-requested re-run (granted per node via rerun_targets)
+    "RerunSpec",
+    "RerunRequest",
+    "parse_rerun",
     # CLI: the reusable runner + rendering helpers
     "event_printer",
     "get_console",
@@ -360,12 +373,9 @@ __all__ = [
     # ready-made gates (optional conveniences)
     "require_file",
     "stop_if",
-    "rerun_on_signal",
-    "rerun_on_named",
     # signals
     "produced",
     "read_field",
-    "rerun_targets",
     # pre-flight checks
     "Check",
     "check",
