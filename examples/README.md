@@ -15,7 +15,7 @@ The subprocess examples build the same shape:
 
 The Tier-3 pipeline built imperatively: `agent_node(...)` per node, wired with
 `depends_on` / `parallel_group`, gates referenced by name (`require_file`,
-`rerun_on_signal`). Runs via the reusable `run_cli`.
+`rerun_targets`). Runs via the reusable `run_cli`.
 
 ```bash
 task example:imperative:mock PRODUCT=acme      # mock agents, no tokens

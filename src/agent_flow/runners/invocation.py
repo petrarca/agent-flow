@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from agent_flow.const import DEFAULT_IDLE_TIMEOUT_S as DEFAULT_IDLE_TIMEOUT_S
+from agent_flow.protocol import RerunSpec
 from agent_flow.runners.events import Event
 from agent_flow.runners.prompt import PromptParts
 
@@ -102,6 +103,12 @@ class AgentInvocation:
     # run-wide blocks still have to be prepended — see compose_prompt.
     parts: PromptParts | None = None
     params: dict[str, Any] = field(default_factory=dict)  # the run's domain params (incl. upstream `exports`)
+    # The node's re-run GRANT (protocol.RerunSpec), when it declared
+    # `rerun_targets`. Carried here because the preamble that TELLS the agent
+    # about the lever is built at the executor seam, which has only this
+    # invocation — the DAG that knows the legal targets lives two tiers up, so
+    # the grant travels down as data. None = not granted (the common case).
+    rerun: RerunSpec | None = None
 
 
 def compose_prompt(inv: AgentInvocation) -> str:

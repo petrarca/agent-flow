@@ -5,7 +5,7 @@ import pytest
 
 from agent_flow.engine import _walk, plan_groups
 from agent_flow.flow_types import Node, NodeOutcome
-from agent_flow.gates import Continue, GateContext, GoTo, Restart, require_file, rerun_on_signal
+from agent_flow.gates import Continue, GateContext, Restart, require_file
 from agent_flow.node_builder import agent_node, build_work_order, control_path
 
 
@@ -152,21 +152,6 @@ def test_require_file_run_dir_template_matches_bare_path(tmp_path):
     prefixed = require_file(GateContext(result={}, node=node, run_dir=tmp_path, cycles=0), path="{run_dir}/hello.md")
     assert isinstance(bare, Continue)
     assert isinstance(prefixed, Continue)
-
-
-def test_rerun_on_signal_goto_when_flagged(tmp_path):
-    # The verdict is read from ctx.result (the harvested envelope), not a file.
-    node = Node("verify", run=lambda c: None)
-    result = {"status": "verified", "rerun_required": ["analyst"]}
-    d = rerun_on_signal(GateContext(result=result, node=node, run_dir=tmp_path, cycles=0), target="analyst")
-    assert isinstance(d, GoTo)
-    assert d.node == "analyst"
-
-
-def test_rerun_on_signal_continue_when_clean(tmp_path):
-    node = Node("verify", run=lambda c: None)
-    d = rerun_on_signal(GateContext(result={"status": "verified"}, node=node, run_dir=tmp_path, cycles=0), target="analyst")
-    assert isinstance(d, Continue)
 
 
 # --- cross-node jump-back (the walker) --------------------------------------

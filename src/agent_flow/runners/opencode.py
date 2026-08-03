@@ -21,7 +21,7 @@ import shlex
 import shutil
 from pathlib import Path
 
-from agent_flow.protocol import build_control_preamble
+from agent_flow.protocol import RerunSpec, build_control_preamble
 from agent_flow.runners.events import Event
 from agent_flow.runners.invocation import AgentInvocation, AgentRunnerInfo
 from agent_flow.runners.spec import MODE_PROCESS, TRANSPORT_SUBPROCESS, Check, LaunchSpec, RunnerSpec
@@ -81,7 +81,7 @@ class OpenCodeRunner:
         found = find_marker_dir(".opencode")
         return str(found) if found else None
 
-    def build_verdict_preamble(self, agent: str, control_file: str, result_schema: dict | None = None) -> str:
+    def build_verdict_preamble(self, agent: str, control_file: str, result_schema: dict | None = None, rerun: RerunSpec | None = None) -> str:
         """The completion-protocol instruction block: write the control sidecar.
 
         opencode agents report their verdict by writing a JSON control file with
@@ -91,7 +91,7 @@ class OpenCodeRunner:
         AND remote opencode runners share this preamble; they differ only in how
         the executor reads the file back (off disk vs over the file API).
         """
-        return build_control_preamble(agent, control_file, result_schema)
+        return build_control_preamble(agent, control_file, result_schema, rerun)
 
     def build_command(self, inv: AgentInvocation) -> LaunchSpec:
         # opencode identity lives in the agent .md; we pass --agent + work order.

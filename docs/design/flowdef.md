@@ -119,7 +119,7 @@ result_schema / run_ref / export_ref / impl_ref exists in the registry.
 
 A FlowDef holds only names. A `FlowRegistry` holds the implementations they
 resolve to, so the definition stays data and the code lives in one place. The
-built-in gates (`require_file`, `rerun_on_signal`, `rerun_on_named`) are seeded
+built-in gates (`require_file`, `stop_if`) are seeded
 into every registry, so the common cases need no registration.
 
 ### Gates — `(ctx, **config) -> Directive`

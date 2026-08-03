@@ -69,6 +69,7 @@ def agent_node(
     exports: Callable[[dict], Any] | dict[str, str] | None = None,
     export_ref: str | None = None,
     impl: Callable[..., Any] | None = None,
+    rerun_targets: tuple[str, ...] = (),
 ) -> Node:
     """Build a `Node` that runs ONE runtime agent as a supervised subprocess.
 
@@ -92,6 +93,12 @@ def agent_node(
         depends_on / parallel_group / criticality / max_cycles: DAG wiring +
             flow-control knobs (see engine.Node).
         gate: optional consumer gate (see gates). Absent means always Continue.
+        rerun_targets: the re-run GRANT — node/parallel-group names this agent may
+            ask to run again via the control file's `rerun_required`. Declaring it
+            is the entire opt-in: the agent's preamble gains a block naming these
+            targets (so it never hardcodes step names), and the engine honors a
+            request for one of them. Empty (default) = the agent is told nothing
+            about re-running and any request is ignored. Validated at build time.
         result_schema: optional ResultSchema | JSON-schema dict | pydantic
             BaseModel subclass for the agent's `result` payload (injected +
             validated, never fails the run).
@@ -233,6 +240,9 @@ def agent_node(
             # channels, so compose_prompt must not prepend the run-wide blocks
             # again — carrying the parts is what tells it so.
             parts=parts,
+            # This node's re-run grant, already resolved (and group-expanded) by
+            # the engine — the executor turns it into the preamble's re-run block.
+            rerun=ctx.rerun,
         )
         # Executor selection (the engine is blind to all of this):
         #   1. --mock-agents mode ON + this node has a mock_agent -> MockExecutor
@@ -298,4 +308,5 @@ def agent_node(
         agent=agent,
         exports=exports,
         export_ref=export_ref,
+        rerun_targets=rerun_targets,
     )

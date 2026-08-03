@@ -24,6 +24,8 @@ from agent_flow.engine.interpreter import _make_node_emitter, interpret
 from agent_flow.engine.planner import plan_groups
 from agent_flow.engine.walker import _resolve_entry, _walk
 from agent_flow.flow_types import Node, NodeBlocked, NodeOutcome
+from agent_flow.protocol import RerunSpec
+from agent_flow.protocol.rerun import RerunTarget
 from agent_flow.utils import resolve_duration
 
 if TYPE_CHECKING:
@@ -67,6 +69,52 @@ def _check_durations(nodes: list[Node], durations: dict[str, int], node_override
         name = override.get("duration") or node.duration
         if name:
             resolve_duration(node.name, name, durations)
+
+
+def _resolve_rerun_grants(nodes: list[Node], planned, group_index: dict[str, int], node_group: dict[str, str]) -> dict[str, RerunSpec]:
+    """Validate every node's `rerun_targets` and resolve them to a RerunSpec.
+
+    Done HERE because it needs the whole graph, and done at BUILD time for the
+    same reason cycles and durations are: a re-run target that cannot be honored
+    must fail before the run starts, not be discovered mid-flight — or, worse,
+    silently dropped at the jump (the walker ignores an unknown target), leaving
+    an agent asking for a re-run that never happens.
+
+    A target must be either a known NODE or a known parallel GROUP, and must lie
+    BEFORE the declaring node — a jump-back only ever resumes at something that
+    already ran. A group name resolves to the members it stands for, so the
+    agent's preamble can say what the name covers.
+
+    Returns {node name: spec} for nodes that declared a grant; others are absent.
+    """
+    members: dict[str, list[str]] = {}
+    for key, group in planned:
+        members[key] = [getattr(n, "name", str(n)) for n in group]
+    specs: dict[str, RerunSpec] = {}
+    for node in nodes:
+        if not node.rerun_targets:
+            continue
+        here = group_index[node_group[node.name]]
+        resolved: list[RerunTarget] = []
+        for target in node.rerun_targets:
+            # A NODE name wins: a solo node is its own group key, so testing
+            # group membership first would report it as a group standing for
+            # itself. Only a name that is NOT a node is a real parallel group.
+            is_node = target in {n.name for n in nodes}
+            is_group = not is_node and target in group_index
+            if not is_node and not is_group:
+                known = sorted({n.name for n in nodes} | set(group_index))
+                raise ValueError(f"node {node.name!r}: rerun_targets names {target!r}, which is not a known node or parallel group (known: {known})")
+            target_i = group_index[node_group[target]] if is_node else group_index[target]
+            if target_i >= here:
+                raise ValueError(
+                    f"node {node.name!r}: rerun_targets names {target!r}, which does not run BEFORE it — a re-run can only resume at an earlier step"
+                )
+            # A group stands for its members; a plain node stands for itself.
+            group_members = tuple(members[target]) if is_group else ()
+            resolved.append(RerunTarget(name=target, members=group_members))
+        specs[node.name] = RerunSpec(targets=tuple(resolved))
+    return specs
 
 
 def _check_node_overrides(nodes: list[Node], node_overrides: dict[str, dict[str, Any]]) -> None:
@@ -176,6 +224,9 @@ def build_flow(
     by_name = {n.name: n for n in nodes}
     group_index = {key: i for i, (key, _) in enumerate(planned)}  # group key -> plan position
     node_group = {n.name: (n.parallel_group or n.name) for n in nodes}
+    # Re-run grants: validated + group-expanded ONCE here (the DAG is only known
+    # at this point), then handed to each node's run via RunContext.
+    rerun_specs = _resolve_rerun_grants(nodes, planned, group_index, node_group)
     _emit = _make_node_emitter(on_node_event)
 
     def _make_run_node(wd: Path | UPath, params: dict, logger, pending: dict[str, str]) -> Callable[[str], Awaitable[NodeOutcome]]:
@@ -236,6 +287,7 @@ def build_flow(
                 registry=registry,
                 one_time_instruction=attempt_instruction,
                 max_retries=max_retries,
+                rerun=rerun_specs.get(node_name),
             )
             # Stamp the node's wall-clock duration (timed here, where it runs).
             outcome = replace(outcome, duration_s=time.monotonic() - started)

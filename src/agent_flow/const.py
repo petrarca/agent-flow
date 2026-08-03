@@ -37,10 +37,15 @@ DEFAULT_DURATIONS: dict[str, int] = {"short": 60, "normal": DEFAULT_IDLE_TIMEOUT
 
 # Retries after a TRANSIENT agent failure — the agent hung (stale-killed on the
 # liveness deadline above) or its process crashed. Applied PER NODE, so a retried
-# node's parallel siblings are unaffected. One retry by default: a hung agent
-# usually succeeds on a fresh attempt, and a second failure is evidence of a real
-# problem rather than a blip — at which point the node's `criticality` decides
-# whether the run continues (degrade) or stops (blocking). Tune per run via
-# AGENT_FLOW_MAX_RETRIES / the run config, or per node via `nodes.<n>.max_retries`.
+# node's parallel siblings are unaffected. TWO retries by default, because the
+# failure this guards against is a stall, and a stall costs the FULL idle timeout
+# (10 minutes for a `long` node) before it is even detected: by the time one
+# retry is spent, a long node has burned ~20 minutes and the run is far enough in
+# that losing the node — and everything downstream that reads its output — is the
+# expensive outcome, not the extra attempt. Three consecutive stalls is evidence
+# of a real problem rather than a blip, at which point the node's `criticality`
+# decides whether the run continues (degrade) or stops (blocking). Tune per run
+# via AGENT_FLOW_MAX_RETRIES / the run config, or per node via
+# `nodes.<n>.max_retries`.
 # A failure the agent DIAGNOSED itself is never retried, whatever this says.
-DEFAULT_MAX_RETRIES = 1
+DEFAULT_MAX_RETRIES = 2

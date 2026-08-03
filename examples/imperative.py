@@ -12,7 +12,8 @@ A realistic shape with a parallel fan-out and analyst/verifier re-run loops:
 Every node runs one (simulated) agent; the agent .md files live in the shared
 examples/.opencode/agent/ dir, so this runs with BOTH --runtime mock and opencode.
 Analysts carry a `require_file` gate ("reported ok but wrote nothing -> retry");
-verifiers carry a `rerun_on_signal` gate that jumps the flow back to their analyst.
+verifiers declare `rerun_targets` — the grant that lets their agent ask to re-run
+its analyst (and that names the target in the agent's own preamble).
 
 The same pipeline is authored declaratively in examples/declarative.py.
 
@@ -72,8 +73,7 @@ def _verifier(name: str, agent: str, report: str, subject: str) -> Node:
         inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/" + report},
         depends_on=(subject,),
         criticality="degrade",
-        gate_ref="rerun_on_signal",
-        gate_args={"target": subject},
+        rerun_targets=(subject,),
             )
 
 

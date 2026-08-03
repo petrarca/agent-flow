@@ -85,7 +85,7 @@ split between what the flow declares and what the run configures.
 
 There is deliberately no notion of "analyst"/"verifier" in the library. A
 verifier is just another `agent_node` that `depends_on` its subject and
-carries a `gate_ref="rerun_on_signal"` [gate](gates.md) (with
+carries a `rerun_targets` [grant](rerun.md) (with
 `gate_args={"target": ...}`); the engine's bounded cross-node
 [jump-back](engine.md) drives the re-run. Any node can route flow to any upstream
 node — the library imposes no adjacency.
@@ -97,7 +97,7 @@ nodes = [
                gate_ref="require_file", gate_args={"path": "{run_dir}/tech-stack.md"}),
     agent_node("tech-stack-verify", "tech-stack-verifier",
                depends_on=("tech-stack",), criticality="degrade",
-               gate_ref="rerun_on_signal", gate_args={"target": "tech-stack"}),
+               rerun_targets=("tech-stack",)),
 ]
 ```
 

@@ -78,17 +78,15 @@ NodeDef(name="tech-stack", agent="tech-stack-analyst",
 NodeDef(name="readiness", agent="readiness-check", result_schema="ReadinessResult",
         gate="stop_if", gate_args={"field": "ready", "equals": "no", "label": "tech-assessment"})
 
-# "did this (verifier) node signal a re-run of an earlier node?" -> GoTo(target).
-NodeDef(name="verify", agent="tech-stack-verifier", depends_on=["tech-stack"],
-        gate="rerun_on_signal", gate_args={"target": "tech-stack"})
-
-# same signal, but route to WHICHEVER node the verdict names -> GoTo(named).
-NodeDef(name="coherence", agent="coherence-check", gate="rerun_on_named")
 ```
 
-Their signatures are `require_file(ctx, *, path, on_missing=None)`,
-`stop_if(ctx, *, field, equals, reason_field="reason", label="")`,
-`rerun_on_signal(ctx, *, target)`, and `rerun_on_named(ctx)`.
+Their signatures are `require_file(ctx, *, path, on_missing=None)` and
+`stop_if(ctx, *, field, equals, reason_field="reason", label="")`.
+
+> An agent asking for an earlier step to re-run is **not** a gate concern: the
+> node declares `rerun_targets` and the engine honors the request directly. See
+> [rerun.md](rerun.md). A gate is still the override — a non-`Continue`
+> directive wins over the declaration.
 
 `stop_if` is the deterministic "precondition failed, abort" gate: it stops the run
 when a result field equals a sentinel value (`ready == "no"`), otherwise it
@@ -108,24 +106,9 @@ working directory. `run_dir` is the artifact directory for the run (passed as
 `run_dir=` to `run_flow`/`build_flow`; defaults to a temp dir). Use the explicit
 `"{run_dir}/report.md"` form to make the intent obvious and keep `path=` visually
 consistent with the node's `inputs={"REPORT": "{run_dir}/report.md"}` value.
-`require_file` is a genuine FILESYSTEM check of the agent's WORK PRODUCT (the
-artifact it was told to write) — distinct from the re-run gates below, which read
-the VERDICT.
-
-`rerun_on_signal` and `rerun_on_named` read `rerun_required` from the **harvested
-control envelope** (`ctx.result`) — NOT from a file. By the time a gate runs, the
-executor has already harvested the verdict however it came back (subprocess
-sidecar, or a remote runner's own mechanism), so the gate reads the dict it was
-handed and never re-reads a file or reconstructs a path. `rerun_on_signal`
-returns `GoTo(target)` for a FIXED target when the field is set; `rerun_on_named`
-routes to the node it NAMES (first valid backward target). All three
-auto-populate the directive's `instruction`. They are ordinary gates you may
-use, wrap, compose, or ignore.
-
-**A real agent must be TOLD `rerun_required` exists to use it.** The injected
-[control-file protocol](control-file.md) mentions the field, but a specific
-agent only knows *when* to set it if its own `.md` says so explicitly — see
-`examples/.opencode/agent/*-verifier.md` for the pattern.
+`require_file` is a genuine FILESYSTEM check of the agent's WORK PRODUCT — the
+artifact it was told to write. Both shipped gates are ordinary gates you may use,
+wrap, compose, or ignore.
 
 ## Why gates, not engine logic
 
@@ -139,10 +122,8 @@ built-in pairing (see [engine](engine.md) jump-back).
 ## Where it lives
 
 `src/agent_flow/gates/` — `types.py` (`Directive`, `Continue`/`Restart`/`GoTo`/
-`Stop`, `GateContext`, `Gate`) and `builtin.py` (`require_file`, `stop_if`,
-`rerun_on_signal`, `rerun_on_named`). The `produced` / `read_field` /
-`rerun_targets` helpers the gates read live in `agent_flow.gates.signals`:
-`produced` is a filesystem check, `rerun_targets` extracts the re-run node names
-from the envelope, and `read_field` reads a result field the same way a gate
+`Stop`, `GateContext`, `Gate`) and `builtin.py` (`require_file`, `stop_if`). The
+`produced` / `read_field` helpers live in `agent_flow.gates.signals`: `produced`
+is a filesystem check, and `read_field` reads a result field the same way a gate
 should — `ctx.obj` (typed) first, then the raw envelope, then its `result`
 payload — so a consumer's own gate need not care whether the result was typed.

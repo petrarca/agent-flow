@@ -67,11 +67,13 @@ def verifier(inv: AgentInvocation, ctx: MockAgentContext) -> dict:
     """Read the REPORT, append a verification note if absent; return 'verified'.
 
     Re-run signal: set the `MOCK_RERUN_ONCE=<agent-name>` ENV VAR and the first
-    call to the verifier whose subject agent matches emits `rerun_required`
+    call to the verifier whose subject agent matches emits `rerun_required: true`
     (one-time; a marker file prevents a second signal), exercising the bounded
-    jump-back loop token-free. Env, not `-p`: a mock reads work-order INPUTS
-    (`ctx.input`) and its file tools — never the run PARAMS a `-p` flag sets — so
-    a test-only knob rides the env, keeping it out of the real work order.
+    jump-back loop token-free. `true` is enough — each verifier's node grants
+    exactly one target (`rerun_targets=["<subject>"]`), so there is nothing to
+    name. Env, not `-p`: a mock reads work-order INPUTS (`ctx.input`) and its
+    file tools — never the run PARAMS a `-p` flag sets — so a test-only knob
+    rides the env, keeping it out of the real work order.
     """
     import os
 
@@ -81,9 +83,10 @@ def verifier(inv: AgentInvocation, ctx: MockAgentContext) -> dict:
     except FileNotFoundError:
         text = ""
 
-    # One-time re-run signal: emit rerun_required on the FIRST call when the
+    # One-time re-run signal: emit rerun_required=true on the FIRST call when the
     # MOCK_RERUN_ONCE env var matches this agent's subject. A marker file prevents
-    # the signal firing again (bounded loop).
+    # the signal firing again (bounded loop). `true`, not the subject name — the
+    # node granted exactly one target, so there is nothing to choose.
     rerun_target = os.environ.get("MOCK_RERUN_ONCE", "")
     # The verifier's subject is its agent name with "-verifier" stripped, or
     # the RERUN_TARGET input when wired explicitly.
@@ -96,7 +99,7 @@ def verifier(inv: AgentInvocation, ctx: MockAgentContext) -> dict:
 
     if rerun_target and rerun_target == subject and not marker_exists:
         ctx.write_file(marker, "1")
-        return {"status": "verified", "rerun_required": [subject], "result": {"issues_found": 1}}
+        return {"status": "verified", "rerun_required": True, "result": {"issues_found": 1}}
 
     if "## Verification" not in text:
         ctx.write_file(report, text + "\n## Verification\n- Status: verified\n- Issues found: 0\n")

@@ -254,6 +254,7 @@ def _compile_agent_node(nd: NodeDef, registry, schema) -> Node:
         export_ref=nd.export_ref,
         duration=nd.duration,
         impl=impl,
+        rerun_targets=tuple(nd.rerun_targets),
     )
 
 
@@ -272,4 +273,5 @@ def _compile_custom_node(nd: NodeDef, registry, schema) -> Node:
         result_schema=schema,
         exports=nd.exports,
         export_ref=nd.export_ref,
+        rerun_targets=tuple(nd.rerun_targets),
     )

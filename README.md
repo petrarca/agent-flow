@@ -52,7 +52,7 @@ supervises each one as an external process.
   flow (not a pure DAG — see jump-back below).
 - **Gates** — a post-node decision returning `Continue` / `Stop` / `Restart` /
   `GoTo`. A gate is `(ctx, **config) -> Directive`, referenced by name with its
-  config as data; built-ins `require_file`, `rerun_on_signal`, `rerun_on_named`
+  config as data; built-ins `require_file`, `stop_if`
   are seeded, or register your own on a `FlowRegistry` (plus observing lifecycle
   hooks: `before_node`/`after_node`/`on_error`/`before_group`/`after_group`).
 - **Re-runs as jump-back** — a re-run rewinds to the named node and re-flows
@@ -162,8 +162,7 @@ flow = FlowDef(
             inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
             depends_on=["tech-stack"],
             criticality="degrade",
-            gate="rerun_on_signal",
-            gate_args={"target": "tech-stack"},
+            rerun_targets=["tech-stack"],   # the agent may ask to re-run tech-stack
         ),
     ],
 )

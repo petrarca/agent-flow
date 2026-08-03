@@ -1,13 +1,14 @@
 """Unit tests for gates.signals + the shipped gates that read them.
 
-produced() (file check), rerun_targets()/read_field() (envelope), and the gates
-rerun_on_signal / rerun_on_named / stop_if.
+produced() (file check), read_field() (envelope), and the stop_if gate.
+
+The agent's own re-run request is NOT a gate concern — see test_rerun.py.
 """
 
 from pathlib import Path
 
-from agent_flow.gates import Continue, GateContext, GoTo, Stop, rerun_on_named, rerun_on_signal, stop_if
-from agent_flow.gates.signals import produced, read_field, rerun_targets
+from agent_flow.gates import Continue, GateContext, Stop, stop_if
+from agent_flow.gates.signals import produced, read_field
 
 
 class _N:
@@ -17,63 +18,10 @@ class _N:
         self.name = name
 
 
-def _ctx(node_name, rerun=None, *, result=None, obj=None):
+def _ctx(node_name, *, result=None, obj=None):
     """GateContext whose result is the HARVESTED control envelope (no file)."""
-    if result is None:
-        control: dict = {"status": "verified", "agent": "x"}
-        if rerun is not None:
-            control["rerun_required"] = rerun
-    else:
-        control = result
+    control = {"status": "verified", "agent": "x"} if result is None else result
     return GateContext(result=control, node=_N(node_name), run_dir=Path("/tmp/run"), cycles=0, obj=obj, params={})
-
-
-def test_rerun_on_signal_fixed_target_when_signalled():
-    d = rerun_on_signal(_ctx("verify", ["analyst"]), target="analyst")
-    assert isinstance(d, GoTo) and d.node == "analyst"
-
-
-def test_rerun_on_signal_continue_when_no_signal():
-    assert isinstance(rerun_on_signal(_ctx("verify"), target="analyst"), Continue)
-
-
-def test_rerun_on_named_routes_to_named_node():
-    # A coherence check names WHICH node to re-run; the gate GoTo's exactly that.
-    d = rerun_on_named(_ctx("consistency", ["extractor"]))
-    assert isinstance(d, GoTo) and d.node == "extractor"
-
-
-def test_rerun_on_named_first_of_multiple():
-    d = rerun_on_named(_ctx("consistency", ["summary", "analyst"]))
-    assert isinstance(d, GoTo) and d.node == "summary"
-
-
-def test_rerun_on_named_continue_when_no_signal():
-    assert isinstance(rerun_on_named(_ctx("consistency")), Continue)
-
-
-# --- rerun_targets: pure envelope extraction, no I/O ---------------------------
-
-
-def test_rerun_targets_none_or_non_dict():
-    assert rerun_targets(None) == []
-    assert rerun_targets("not a dict") == []
-
-
-def test_rerun_targets_no_field():
-    assert rerun_targets({"status": "verified", "agent": "domain-verifier"}) == []
-
-
-def test_rerun_targets_list():
-    assert rerun_targets({"status": "verified", "rerun_required": ["domain-analyst"]}) == ["domain-analyst"]
-
-
-def test_rerun_targets_string_coerced_to_list():
-    assert rerun_targets({"rerun_required": "coupling-analyst"}) == ["coupling-analyst"]
-
-
-def test_rerun_targets_empty_string_ignored():
-    assert rerun_targets({"rerun_required": "  "}) == []
 
 
 # --- produced: genuine filesystem check of the agent's work product -----------

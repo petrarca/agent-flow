@@ -46,12 +46,14 @@ class RunnerBase(Protocol):
     THE VERDICT PROTOCOL. How the agent is TOLD to report its outcome is
     runtime-specific and belongs to the runner:
 
-      - `build_verdict_preamble(agent, control_file, result_schema) -> str`
+      - `build_verdict_preamble(agent, control_file, result_schema, rerun) -> str`
         (OPTIONAL): the completion-protocol instruction block prepended to the
         prompt. A sidecar-style runner returns the "write CONTROL_FILE" block; a
         structured-output runner returns a "return your final structured output"
         block. Pure/stateless — no I/O. When a runner does NOT implement it, the
         executor falls back to the shared `build_control_preamble` (sidecar).
+        `rerun` is the node's re-run GRANT (protocol.RerunSpec) or None; a runner
+        that supports the lever must describe it in the block it returns.
 
     HARVESTING the verdict is deliberately NOT a runner method — it is a
     POST-COMPLETION step that needs STATE the executor holds (the sidecar path,

@@ -23,7 +23,7 @@ parsing any vendor-specific event schema. The same envelope is produced under th
   "status": "ok",
   "agent": "tech-stack-analyst",
   "reason": "",
-  "rerun_required": ["tech-stack-analyst"],
+  "rerun_required": { "target": "tech-stack", "instruction": "recompute the language split" },
   "result": { "summary": "…", "languages": ["Python", "TypeScript"] }
 }
 ```
@@ -35,9 +35,14 @@ parsing any vendor-specific event schema. The same envelope is produced under th
 | `status` | the verdict: `ok` / `verified` / `error` (required). |
 | `agent` | the agent's own name. |
 | `reason` | short explanation, for `error`. |
-| `rerun_required` | optional list of agents — a flow-control signal a [gate](gates.md) may consume (e.g. a verifier asking an analyst to re-run). |
 
-**Payload — only gates/consumers read this:**
+**Flow control — read only where the node granted it:**
+
+| Field | Meaning |
+|---|---|
+| `rerun_required` | the agent asking that an earlier step run again. Present in the preamble, and honored, only when the node declares `rerun_targets` — see [rerun.md](rerun.md). |
+
+**Payload — only the application reads this:**
 
 | Field | Meaning |
 |---|---|
@@ -59,9 +64,9 @@ agent. This keeps the library free of any knowledge of what an agent produces.
 - Sidecar absent → error (`no control sidecar written`). The engine does not
   fall back to inspecting artifacts.
 
-`rerun_required` is the only envelope field beyond the verdict that the library
-surfaces, and even then only a gate acts on it. Everything domain-specific lives
-in `result` and is opaque.
+`rerun_required` is the only field beyond the verdict the library acts on, and
+only for a node that granted the lever. Everything domain-specific lives in
+`result` and is opaque.
 
 ## Protocol injection — the contract lives in ONE place
 
@@ -78,13 +83,14 @@ So an agent `.md` carries only its DOMAIN instructions; the "how to signal
 completion" part is inherited. Change the contract in one function and every
 agent follows. See the composition order in [input-plane.md](input-plane.md).
 
-**`rerun_required` is mentioned in the injected preamble** (as an optional
-field, with guidance that it should be rare and only used when the agent's own
-instructions say when/why), because a real agent has no other way to discover
-that field exists — it cannot see [`gates.rerun_on_signal`](gates.md). Mentioning
-it in the shared preamble is necessary but not sufficient: an agent still only
-knows to set it if its own `.md` says so for its specific task (naming which
-step to re-run). See `examples/.opencode/agent/*-verifier.md`.
+**`rerun_required` appears in the preamble only when GRANTED.** A node that
+declares `rerun_targets` gets a re-run block naming its legal targets and
+constraining them with a generated schema; a node that does not carries no
+re-run text at all. That is deliberate: most agents never re-run anything, and
+telling them all about a field their flow will ignore is noise that invites
+spurious use. Because the block names the targets, an agent never hardcodes step
+names in its own `.md` — and a renamed node cannot leave a stale name behind.
+See [rerun.md](rerun.md).
 
 ## Two writers, one contract
 

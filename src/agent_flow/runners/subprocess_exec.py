@@ -188,9 +188,9 @@ class SubprocessExecutor(AgentExecutor):
         schema_dict = schema.to_json_schema() if schema is not None else None
         build_preamble = getattr(self.runner, "build_verdict_preamble", None)
         if callable(build_preamble):
-            preamble = build_preamble(inv.agent, str(control_file), schema_dict)
+            preamble = build_preamble(inv.agent, str(control_file), schema_dict, inv.rerun)
         else:
-            preamble = build_control_preamble(inv.agent, str(control_file), schema_dict)
+            preamble = build_control_preamble(inv.agent, str(control_file), schema_dict, inv.rerun)
         return preamble + "\n\n" + compose_prompt(inv)
 
     def _finalize(
