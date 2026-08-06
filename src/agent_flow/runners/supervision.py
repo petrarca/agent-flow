@@ -74,6 +74,16 @@ _FINISH_GRACE_S = 30
 #    so this only ever elapses for a process that is truly stuck.
 _KILL_GRACE_S = 5
 
+# How often to report that we are still waiting on a SILENT agent. Without this
+# a stalled long-duration node looks identical to a hung ORCHESTRATOR for up to
+# ten minutes: no output at all, nothing to tell the operator whether anything is
+# still alive or which agent is holding the run up. Each beat names the agent and
+# how long it has been quiet, so the silence is visible as it accumulates rather
+# than only in hindsight from the kill line. Emitted at INFO (the level an
+# operator watches), and only while the agent is actually quiet — an agent
+# emitting events needs no beat, since its events already are the heartbeat.
+_HEARTBEAT_S = 30
+
 
 # Liveness supervision.
 #   IDLE = max silence (no runner event) before the agent is deemed STALE.
@@ -260,6 +270,7 @@ async def _supervise(
     control_file: Path | None,
     on_event: Callable[[Event], None] | None = None,
     capture_stderr: bool = False,
+    agent: str = "",
 ) -> _Supervision:
     """Supervise a running agent by LIVENESS only — kill solely when idle.
 
@@ -269,7 +280,10 @@ async def _supervise(
       - stops early ("sidecar") the moment the control sidecar appears on disk
         — the agent's work is done even if the process lingers,
       - stops ("completed") when the stdout reader hits EOF (process finished),
-      - kills only on STALE: no event AND no sidecar for idle_timeout_s.
+      - kills only on STALE: no event AND no sidecar for idle_timeout_s,
+      - reports every `_HEARTBEAT_S` while the agent is SILENT, naming it and the
+        budget left, so a long quiet stretch is visible as it happens instead of
+        looking like a hung orchestrator.
 
     Runner-agnostic: the only runner-specific step is `runner.parse_event`.
     On cancellation (Ctrl-C / a cancelled parent task group) the process group is
@@ -295,6 +309,7 @@ async def _supervise(
                 on_event=on_event,
                 stdout_rx=stdout_rx,
                 stderr_rx=stderr_rx,
+                agent=agent,
             )
             tg.cancel_scope.cancel()  # tear down any still-running reader
         return sup
@@ -315,6 +330,7 @@ async def _supervise_loop(
     on_event: Callable[[Event], None] | None,
     stdout_rx: MemoryObjectReceiveStream[str | None],
     stderr_rx: MemoryObjectReceiveStream[str | None] | None,
+    agent: str = "",
 ) -> _Supervision:
     """The liveness loop (see _supervise). Extracted so _supervise stays a thin
     spawn/interrupt wrapper (and both stay under the complexity limit).
@@ -334,7 +350,11 @@ async def _supervise_loop(
     as completion is what used to SIGTERM every agent mid-turn.
     """
     st: dict = {"tokens": 0, "cost": 0.0, "events": 0, "saw_terminal": False, "errors": [], "tail": deque(maxlen=_TAIL_LINES)}
-    idle_deadline = anyio.current_time() + idle_timeout_s
+    started = anyio.current_time()
+    idle_deadline = started + idle_timeout_s
+    # Heartbeat bookkeeping: when the agent last spoke, and when to next report
+    # that it has not. Both move together on every real event.
+    quiet_since, next_beat = started, started + _HEARTBEAT_S
     sidecar_present = _sidecar_probe(control_file)
     # Set when the sidecar first appears: from then on the agent is FINISHING
     # (verdict written, turn not yet closed) and this bounds how long we let it.
@@ -378,7 +398,10 @@ async def _supervise_loop(
             line = await stdout_rx.receive()
             got_line = True
         if not got_line:
-            continue  # timed out with no line — re-check stop conditions
+            # Timed out with no line — re-check stop conditions, and tell the
+            # operator we are still here and what we are waiting for.
+            next_beat = _beat(agent, quiet_since, active_deadline, next_beat, finishing=finish_deadline is not None)
+            continue
 
         if line is None:  # reader EOF — process finished
             logger.debug(f"supervise: stdout EOF (events={st['events']}) -> reaping")
@@ -390,7 +413,11 @@ async def _supervise_loop(
         # heartbeat -> reset the idle deadline. A terminal event once the sidecar
         # is on disk stops promptly (else the top-of-loop check catches it next).
         if _consume_line(line, st, runner, on_event):
-            idle_deadline = anyio.current_time() + idle_timeout_s
+            now = anyio.current_time()
+            idle_deadline = now + idle_timeout_s
+            # The agent spoke: its event IS the heartbeat, so restart both the
+            # silence clock and the next beat.
+            quiet_since, next_beat = now, now + _HEARTBEAT_S
         if st["saw_terminal"] and sidecar_present():
             # The agent said it is done (its terminal event) AND wrote its verdict:
             # the cleanest completion signal there is — give it the grace window to
@@ -399,6 +426,28 @@ async def _supervise_loop(
             await _stop_process(proc)
             _drain_stderr(stderr_rx, runner, st["errors"])
             return _finish(st, "sidecar")
+
+
+def _beat(agent: str, quiet_since: float, deadline: float, next_beat: float, *, finishing: bool) -> float:
+    """Report that a SILENT agent is still being waited on; return the next due time.
+
+    A no-op until `next_beat` is reached, so the caller can invoke it on every
+    idle poll (once per second) and get a line only every `_HEARTBEAT_S`.
+
+    Names the agent because a parallel group has several in flight and the
+    operator needs to know WHICH one is holding the run up, and reports both the
+    silence so far and the budget left — the two numbers that say whether to keep
+    waiting or go look at the agent. `finishing` distinguishes the two silences:
+    waiting for an agent to WORK, versus waiting for one that has already written
+    its verdict to close its turn.
+    """
+    now = anyio.current_time()
+    if now < next_beat:
+        return next_beat
+    what = "closing its turn" if finishing else "working"
+    who = f"agent {agent!r}" if agent else "agent"
+    logger.info(f"still waiting on {who} ({what}): silent for {now - quiet_since:.0f}s, {max(deadline - now, 0):.0f}s left")
+    return now + _HEARTBEAT_S
 
 
 async def _stop_process(proc: Process) -> None:

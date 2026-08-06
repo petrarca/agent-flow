@@ -36,6 +36,20 @@ not a working directory in the OS sense.
   killed only when it has emitted no event *and* written no sidecar for the
   whole idle window. There is no absolute wall-clock cap — an agent that
   keeps making progress runs as long as it needs.
+- **A silent agent is reported, not just eventually killed.** Every
+  `_HEARTBEAT_S` (30s) of silence, supervision logs which agent it is waiting
+  on, how long that agent has been quiet, and how much of the budget is left:
+
+  ```
+  still waiting on agent 'security-verifier' (working): silent for 120s, 480s left
+  ```
+
+  Without it a quiet `long` node (600s budget) is indistinguishable from a hung
+  orchestrator for ten minutes, and in a parallel group there is nothing to say
+  *which* agent is holding the run up. An agent that is emitting produces no
+  beat — its events already are the heartbeat, so a healthy run stays quiet.
+  The beat also distinguishes the two silences: waiting for an agent to *work*,
+  versus waiting for one that has written its verdict to *close its turn*.
 - **Completion** is the agent's terminal `step-finish` (`reason == "stop"`) with
   its sidecar on disk, or the stream reaching EOF. The sidecar *alone* is not
   completion: it appears the moment the agent's `write` tool runs, seconds before

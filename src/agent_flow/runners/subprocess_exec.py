@@ -145,6 +145,7 @@ class SubprocessExecutor(AgentExecutor):
                 control_file=control_file,
                 on_event=inv.on_event,
                 capture_stderr=spec.capture_stderr,
+                agent=agent,
             )
             returncode = proc.returncode
         duration = anyio.current_time() - start
