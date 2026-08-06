@@ -44,8 +44,8 @@ not a working directory in the OS sense.
   still waiting on agent 'security-verifier' (working): silent for 120s, 480s left
   ```
 
-  Without it a quiet `long` node (600s budget) is indistinguishable from a hung
-  orchestrator for ten minutes, and in a parallel group there is nothing to say
+  Without it a quiet `long` node (300s budget) is indistinguishable from a hung
+  orchestrator for minutes on end, and in a parallel group there is nothing to say
   *which* agent is holding the run up. An agent that is emitting produces no
   beat — its events already are the heartbeat, so a healthy run stays quiet.
   The beat also distinguishes the two silences: waiting for an agent to *work*,

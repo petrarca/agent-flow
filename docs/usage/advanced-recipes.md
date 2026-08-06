@@ -236,7 +236,7 @@ even detected, so giving up early is usually more expensive than one more try):
 
 ```yaml
 # run.yml
-idle_timeout_s: 600        # kill after 10min with no event/sidecar
+idle_timeout_s: 900        # override the vocabulary: 15min with no event/sidecar
 max_retries: 1             # tighter than the default: one fresh attempt only
 nodes:
   architecture-verify:

@@ -33,7 +33,15 @@ DEFAULT_IDLE_TIMEOUT_S = 120
 # merges OVER this map (see utils.duration_table), so a consumer can retune a
 # shipped name and add its own. An unknown name is a hard error, never a silent
 # fallback. "normal" IS the run-wide default, reached by name instead of number.
-DEFAULT_DURATIONS: dict[str, int] = {"short": 60, "normal": DEFAULT_IDLE_TIMEOUT_S, "long": 600}
+# `long` is 300s on MEASURED silence, not a guess. With the heartbeat reporting
+# every quiet 30s, a full pipeline run showed the longest LEGITIMATE gap between
+# events — an agent thinking before a large write — at ~90-120s, so 300s is ~2.5x
+# the observed worst case. The failure it guards against does not need more: a
+# stalled agent's last line is always a `step_finish` whose next model call never
+# returns, so it is hung for good and every second past detection is waste. 600s
+# doubled that waste for no measured benefit. An agent that genuinely needs more
+# should say so — `durations: {long: 900}` in the run config, or its own name.
+DEFAULT_DURATIONS: dict[str, int] = {"short": 60, "normal": DEFAULT_IDLE_TIMEOUT_S, "long": 300}
 
 # Retries after a TRANSIENT agent failure — the agent hung (stale-killed on the
 # liveness deadline above) or its process crashed. Applied PER NODE, so a retried
