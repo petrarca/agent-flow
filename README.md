@@ -1,17 +1,24 @@
-# Agent flow
+# agent-flow — deterministic orchestration of coding agents
 
-Deterministic orchestration of **coding agents** — agentic CLI tools like
-**OpenCode** (primary target), Claude Code or Codex, which run as their own
-process with their own agent loop, tools and model access. Not in-process agent
-frameworks like PydanticAI or LangGraph, where you build the agent inside your
-own program.
+**agent-flow is a Python library for deterministic orchestration of coding-agent
+pipelines.** It runs agentic CLI tools — **OpenCode** (primary target), **Claude
+Code**, **Codex** — as **supervised subprocesses** in a **DAG**: parallel
+fan-out, gates, bounded re-runs, typed output, and a JSON control sidecar as the
+only success verdict.
+
+It orchestrates coding agents that run as their own process with their own agent
+loop, tools and model access — *not* in-process agent frameworks like PydanticAI
+or LangGraph, where you build the agent inside your own program.
 
 `agent-flow` replaces the fragile "LLM orchestrator agent" pattern — where a
 model is asked to sequence the stages and inevitably hangs, loops, or "loses the
 thread" — with a **deterministic engine** that runs those agents as a graph and
 supervises each one as an external process.
 
-## Why agent-flow
+> Unrelated to other projects named "agent flow" / "AgentFlow". The PyPI
+> distribution is **`petrarca-agent-flow`**; the import package is `agent_flow`.
+
+## Why agent-flow exists
 
 1. **Deterministic orchestration.** The control flow is plain Python the engine
    executes — a dependency graph with parallel fan-out and bounded backward
@@ -39,7 +46,152 @@ supervises each one as an external process.
    re-runs — to agents running as **external processes**. (In-process nodes work
    too, in the same graph.)
 
-## Feature shortlist
+## Installation
+
+Installed from PyPI as `petrarca-agent-flow` (the import name is `agent_flow`):
+
+```bash
+# typical interactive use
+pip install "petrarca-agent-flow[cli]"
+
+# + the Prefect backend
+pip install "petrarca-agent-flow[cli,prefect]"
+```
+
+Requires Python 3.14+. For real runs, `opencode` must be on `PATH` and configured
+with model access.
+
+**Lean core, optional extras.** The default install is small — enough to declare
+a pipeline and run it on the default in-process backend, with typed
+params/results and config (anyio, loguru, pydantic, pydantic-settings, pyyaml,
+jsonschema, python-dotenv, universal-pathlib). The heavy pieces are opt-in extras
+that match the runtime seams.
+
+| Install | Adds | Use when |
+|---|---|---|
+| `petrarca-agent-flow` | core only | programmatic `build_flow` on the in-process backend |
+| `petrarca-agent-flow[cli]` | typer, rich | the `run_cli` command + live display |
+| `petrarca-agent-flow[prefect]` | prefect | `--backend prefect` (run UI / scale) |
+| `petrarca-agent-flow[all]` | cli + prefect | a full interactive install |
+| `petrarca-agent-flow[dev]` | all + toolchain | development (implies `[all]`) |
+
+Using a feature without its extra raises a clear message telling you which extra
+to install (e.g. `run_cli` without `[cli]`, or `--backend prefect` without
+`[prefect]`).
+
+For a source checkout you also need [`uv`](https://docs.astral.sh/uv/) and
+[`task`](https://taskfile.dev/); `task install` does an editable dev install
+(implies `[all]`).
+
+## Usage — a two-node coding-agent pipeline
+
+An analyst writes a report; a verifier checks it and can bounce the flow back to
+re-run the analyst. The pipeline is pure DATA — no callables, serializable,
+validated before it runs — and gates are referenced by name.
+
+```python
+from agent_flow import FlowDef, NodeDef, run_flow
+
+flow = FlowDef(
+    name="tech",
+    nodes=[
+        NodeDef(
+            name="tech-stack",
+            agent="tech-stack-analyst",
+            inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
+            gate="require_file",
+            gate_args={"path": "{run_dir}/tech-stack.md"},
+        ),
+        NodeDef(
+            name="tech-stack-verify",
+            agent="tech-stack-verifier",
+            inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
+            depends_on=["tech-stack"],
+            criticality="degrade",
+            rerun_targets=["tech-stack"],   # the agent may ask to re-run tech-stack
+        ),
+    ],
+)
+
+run_flow(flow, product_key="acme", runtime="opencode")
+# …or, on an event loop:  await arun_flow(flow, product_key="acme", runtime="opencode")
+```
+
+Hand the same `flow` to `run_cli(flow)` for a `run` / `flow nodes` / `version`
+CLI. Add `params_schema=` to declare and validate the params it needs; put
+non-portable settings (`agent_dir`, backend, timeouts) in `run_config=` /
+`--config`, never on the `FlowDef`. Walk through it properly in
+[getting started](docs/usage/getting-started.md).
+
+> Run real OpenCode runs from a normal shell **outside** an OpenCode session (a
+> nested OpenCode raises `UnknownError`).
+
+### Hooking your own logic
+
+Write a function, register it on a `FlowRegistry`, reference it from a node BY
+NAME — the node stays pure data, your code lives in the registry:
+
+```python
+from agent_flow import FlowDef, NodeDef, FlowRegistry, run_flow
+from agent_flow.gates import Continue, Stop
+
+registry = FlowRegistry()
+
+@registry.gate("stack_usable")
+def stack_usable(ctx):
+    if (ctx.result or {}).get("status") == "error":
+        return Stop(reason="tech-stack could not be determined")
+    return Continue()
+
+@registry.on("after_node")
+def log_outcome(node, outcome):
+    print(f"{node.name}: {outcome.status} ({outcome.duration_s:.1f}s)")
+
+flow = FlowDef(name="tech", nodes=[
+    NodeDef(name="tech-stack", agent="tech-stack-analyst", gate="stack_usable"),
+])
+
+run_flow(flow, registry=registry, product_key="acme", runtime="opencode")
+```
+
+Same pattern for a result→params export (`@registry.export`) and a custom run
+(`@registry.run`) for a node that runs your own code instead of an agent. See
+[gates](docs/design/gates.md) and
+[recipes](docs/usage/recipes.md).
+
+### Mocking agents for tests & dev
+
+Register a deterministic, no-token stand-in by agent name and run with
+`--mock-agents` — any node whose agent has one is routed through it instead of a
+real runtime. It is a MODE, not a runtime: a node without a mock still runs for
+real (partial mocking). Every example ships a mock mode, so you can run the whole
+pipeline without tokens. See
+[`docs/design/mock-agent.md`](docs/design/mock-agent.md).
+
+### Where it runs
+
+`build_flow` dispatches execution to a swappable backend: the default
+`InProcessBackend` (no Prefect) or the opt-in `PrefectBackend`
+(`--backend prefect`) for a run UI and scale. The engine owns all flow logic and
+stays backend-free, so the backend can change without touching your pipeline. See
+[`docs/design/backend.md`](docs/design/backend.md).
+
+## Levels of abstraction
+
+Three ways in, each usable on its own — most consumers only need the first.
+
+- **Declare the graph.** A `FlowDef` (data), or `agent_node` + `build_flow`. One
+  node per agent; the library builds the prompt, sidecar path and flow.
+  `examples/declarative.py`, `examples/imperative.py`.
+- **Write your own flow.** Call `run_agent` as the leaf of a hand-written flow.
+  `examples/custom_flow.py`.
+- **Run one supervised agent.** `run_agent`: spawn, liveness-supervise, kill,
+  read the sidecar verdict. Backend-free.
+
+Diagram and details:
+[`docs/usage/index.md`](docs/usage/index.md#layering-high-level--low-level).
+
+## Features
 
 - **Declarative FlowDef surface** — author a pipeline as DATA: a `FlowDef` of
   `NodeDef`s (pydantic, serializable to JSON/YAML, validated before it runs).
@@ -120,165 +272,27 @@ supervises each one as an external process.
   backend="prefect")`) for the run UI, scheduling, and scale. The core
   primitives + flow logic stay Prefect-free (import-isolation-guarded).
 - **Three levels of abstraction** — from one supervised agent up to a declared
-  graph (below).
+  graph (above).
 
-## Levels of abstraction
+## Documentation
 
-Three ways in, each usable on its own — most consumers only need the first.
+- **Using the library** (task-oriented) — install, write your first pipeline,
+  write agents that work with agent-flow, and recipes for common tasks:
+  [`docs/usage/index.md`](docs/usage/index.md). Start there for the runnable
+  examples (`declarative.py` / `imperative.py`, `custom_flow.py` — each with a
+  token-free `--mock-agents` mode) and the `run_cli` flags/params.
+- **Design** (the architecture and why) — problem, principles, the layering,
+  and one focused document per concept (supervision, control-file, engine,
+  gates, node_builder, input-plane, result-schema, backend, cli-events):
+  [`docs/design/index.md`](docs/design/index.md).
 
-- **Declare the graph.** A `FlowDef` (data), or `agent_node` + `build_flow`. One
-  node per agent; the library builds the prompt, sidecar path and flow.
-  `examples/declarative.py`, `examples/imperative.py`.
-- **Write your own flow.** Call `run_agent` as the leaf of a hand-written flow.
-  `examples/custom_flow.py`.
-- **Run one supervised agent.** `run_agent`: spawn, liveness-supervise, kill,
-  read the sidecar verdict. Backend-free.
-
-Diagram and details:
-[`docs/usage/index.md`](docs/usage/index.md#layering-high-level--low-level).
-
-## Example — a two-node flow
-
-An analyst writes a report; a verifier checks it and can bounce the flow back to
-re-run the analyst. The pipeline is pure DATA — no callables, serializable,
-validated before it runs — and gates are referenced by name.
-
-```python
-from agent_flow import FlowDef, NodeDef, run_flow
-
-flow = FlowDef(
-    name="tech",
-    nodes=[
-        NodeDef(
-            name="tech-stack",
-            agent="tech-stack-analyst",
-            inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
-            gate="require_file",
-            gate_args={"path": "{run_dir}/tech-stack.md"},
-        ),
-        NodeDef(
-            name="tech-stack-verify",
-            agent="tech-stack-verifier",
-            inputs={"PRODUCT_KEY": "{product_key}", "REPORT": "{run_dir}/tech-stack.md"},
-            depends_on=["tech-stack"],
-            criticality="degrade",
-            rerun_targets=["tech-stack"],   # the agent may ask to re-run tech-stack
-        ),
-    ],
-)
-
-run_flow(flow, product_key="acme", runtime="opencode")
-# …or, on an event loop:  await arun_flow(flow, product_key="acme", runtime="opencode")
-```
-
-Hand the same `flow` to `run_cli(flow)` for a `run` / `flow nodes` / `version`
-CLI. Add `params_schema=` to declare and validate the params it needs; put
-non-portable settings (`agent_dir`, backend, timeouts) in `run_config=` /
-`--config`, never on the `FlowDef`. Walk through it properly in
-[getting started](docs/usage/getting-started.md).
-
-### Hooking your own logic
-
-Write a function, register it on a `FlowRegistry`, reference it from a node BY
-NAME — the node stays pure data, your code lives in the registry:
-
-```python
-from agent_flow import FlowDef, NodeDef, FlowRegistry, run_flow
-from agent_flow.gates import Continue, Stop
-
-registry = FlowRegistry()
-
-@registry.gate("stack_usable")
-def stack_usable(ctx):
-    if (ctx.result or {}).get("status") == "error":
-        return Stop(reason="tech-stack could not be determined")
-    return Continue()
-
-@registry.on("after_node")
-def log_outcome(node, outcome):
-    print(f"{node.name}: {outcome.status} ({outcome.duration_s:.1f}s)")
-
-flow = FlowDef(name="tech", nodes=[
-    NodeDef(name="tech-stack", agent="tech-stack-analyst", gate="stack_usable"),
-])
-
-run_flow(flow, registry=registry, product_key="acme", runtime="opencode")
-```
-
-Same pattern for a result→params export (`@registry.export`) and a custom run
-(`@registry.run`) for a node that runs your own code instead of an agent. See
-[gates](docs/design/gates.md) and
-[recipes](docs/usage/recipes.md).
-
-### Mocking agents for tests & dev
-
-Register a deterministic, no-token stand-in by agent name and run with
-`--mock-agents` — any node whose agent has one is routed through it instead of a
-real runtime. It is a MODE, not a runtime: a node without a mock still runs for
-real (partial mocking). Every example ships a mock mode, so you can run the whole
-pipeline without tokens. See
-[`docs/design/mock-agent.md`](docs/design/mock-agent.md).
-
-### Where it runs
-
-`build_flow` dispatches execution to a swappable backend: the default
-`InProcessBackend` (no Prefect) or the opt-in `PrefectBackend`
-(`--backend prefect`) for a run UI and scale. The engine owns all flow logic and
-stays backend-free, so the backend can change without touching your pipeline. See
-[`docs/design/backend.md`](docs/design/backend.md).
-
-## Install & run
-
-Requires Python 3.14+, [`uv`](https://docs.astral.sh/uv/), and
-[`task`](https://taskfile.dev/). For real runs, `opencode` must be on `PATH` and
-configured with model access.
-
-**Lean core, optional extras.** The default install is small — enough to declare
-a pipeline and run it on the default in-process backend, with typed
-params/results and config (anyio, loguru, pydantic, pydantic-settings, pyyaml,
-jsonschema, python-dotenv, universal-pathlib). The heavy pieces are opt-in extras
-that match the runtime seams.
-
-Installed from PyPI as `petrarca-agent-flow` (the import name is `agent_flow`):
-
-| Install | Adds | Use when |
-|---|---|---|
-| `petrarca-agent-flow` | core only | programmatic `build_flow` on the in-process backend |
-| `petrarca-agent-flow[cli]` | typer, rich | the `run_cli` command + live display |
-| `petrarca-agent-flow[prefect]` | prefect | `--backend prefect` (run UI / scale) |
-| `petrarca-agent-flow[all]` | cli + prefect | a full interactive install |
-| `petrarca-agent-flow[dev]` | all + toolchain | development (implies `[all]`) |
-
-```bash
-# typical interactive use
-pip install "petrarca-agent-flow[cli]"
-
-# + the Prefect backend
-pip install "petrarca-agent-flow[cli,prefect]"
-
-# editable dev install (implies [all])
-task install
-```
-
-Using a feature without its extra raises a clear message telling you which
-extra to install (e.g. `run_cli` without `[cli]`, or `--backend prefect`
-without `[prefect]`).
-
-Then walk through your first pipeline, the runnable examples (`declarative.py` /
-`imperative.py`, `custom_flow.py` — each with a token-free
-`--mock-agents` mode), the `run_cli` flags/params, and writing agents that
-cooperate with agent-flow: **[`docs/usage/index.md`](docs/usage/index.md)**.
-
-> Run real OpenCode runs from a normal shell **outside** an OpenCode session (a
-> nested OpenCode raises `UnknownError`).
-
-## Develop
+## Development
 
 `task fct` is the local loop (format + lint + unit tests). The full task list
 (`verify`, `test:all`, `test:opencode`, `build`, git hooks) and the coding
 standards live in **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
 
-## Layout
+### Repository layout
 
 ```
 src/agent_flow/     the library
@@ -293,20 +307,10 @@ src/agent_flow/     the library
                     the run-time plumbing that ties the seams together
   flowdef/          the declarative FlowDef/NodeDef surface + compile_flow
 examples/           declarative.py, imperative.py, custom_flow.py, inprocess.py
-docs/design/   the design (start at index.md)
+docs/design/        the design (start at index.md)
 ```
 
 Layer order: `utils < runners < core < engine/gates/node_builder < backends < cli`.
-
-## Documentation
-
-- **Using the library** (task-oriented) — install, write your first pipeline,
-  write agents that work with agent-flow, and recipes for common tasks:
-  [`docs/usage/index.md`](docs/usage/index.md).
-- **Design** (the architecture and why) — problem, principles, the layering,
-  and one focused document per concept (supervision, control-file, engine,
-  gates, node_builder, input-plane, result-schema, backend, cli-events):
-  [`docs/design/index.md`](docs/design/index.md).
 
 ## Contributing & License
 
